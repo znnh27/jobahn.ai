@@ -31,7 +31,7 @@
 - [x] Supabase schema（profiles / user_settings / original_resumes / experience_entries / profile_data / resume_rules / applications）
 - [x] Storage bucket（原始履歷上傳，限制 docx/pdf/doc、單檔 3MB）
 - [x] 登入／註冊／登出（Supabase Auth）
-- [ ] 設定頁：綁定 Anthropic API Key
+- [x] 設定頁：綁定 Anthropic API Key（Supabase Vault 加密存放，含金鑰有效性驗證）
 - [ ] 首次設定流程：履歷上傳＋解析
 - [ ] 核心迴圈：職缺輸入＋履歷生成畫布＋JD比對／ATS評分
 - [ ] 求職信步驟
