@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# job-tool
 
-## Getting Started
+找工作 AI 助手，Phase 3 正式產品。技術選型與架構決策見 `../data/` 底下的設定檔（`workflow.json`、`resume_rules.json`）以及專案根目錄的建置計畫。
 
-First, run the development server:
+## 開發前要準備的東西
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. 一個 [Supabase](https://supabase.com) 專案
+2. 一個 [Vercel](https://vercel.com) 帳號（部署用）
+3. 一個 [Firecrawl](https://firecrawl.dev) API Key（抓職缺頁面用）
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**不需要**申請系統共用的 Anthropic API Key，這個專案是純 BYOK 模式，每個使用者自己在 `/settings` 頁綁定自己的 Key。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 本機設定步驟
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. 建立 Supabase 專案後，到 SQL Editor 依序執行：
+   - `supabase/migrations/0001_init.sql`
+   - `supabase/migrations/0002_storage.sql`
+2. 複製 `.env.local.example` 成 `.env.local`，填入 Supabase 專案的 URL／anon key／service role key，以及 Firecrawl API Key
+3. 安裝依賴並啟動開發伺服器：
 
-## Learn More
+   ```bash
+   npm install
+   npm run dev
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+4. 開啟 http://localhost:3000，會被導去 `/login`，可以先到 `/signup` 註冊測試帳號
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 目前進度
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [x] Next.js 專案骨架（TypeScript + Tailwind + App Router）
+- [x] Supabase schema（profiles / user_settings / original_resumes / experience_entries / profile_data / resume_rules / applications）
+- [x] Storage bucket（原始履歷上傳，限制 docx/pdf/doc、單檔 3MB）
+- [x] 登入／註冊／登出（Supabase Auth）
+- [ ] 設定頁：綁定 Anthropic API Key
+- [ ] 首次設定流程：履歷上傳＋解析
+- [ ] 核心迴圈：職缺輸入＋履歷生成畫布＋JD比對／ATS評分
+- [ ] 求職信步驟
+- [ ] 首頁：應徵紀錄表格
