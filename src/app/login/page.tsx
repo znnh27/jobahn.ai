@@ -9,7 +9,7 @@ export default async function LoginPage(props: PageProps<"/login">) {
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
           <h1 className="text-2xl font-semibold text-neutral-900">登入</h1>
-          <p className="mt-1 text-sm text-neutral-500">job-tool 找工作助手</p>
+          <p className="mt-1 text-sm text-neutral-500">Zobzii 找工作助手</p>
         </div>
 
         {error && (

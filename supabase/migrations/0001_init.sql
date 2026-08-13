@@ -1,4 +1,4 @@
--- job-tool Phase 3 初始 schema
+-- Zobzii Phase 3 初始 schema
 -- 在 Supabase 專案建立後，到 SQL Editor 貼上整份檔案執行一次即可
 
 -- 需要 Vault 擴充功能來加密存放使用者自己的 Anthropic API Key
@@ -74,7 +74,7 @@ create policy "original_resumes_all_own" on public.original_resumes
 
 -- =========================================================
 -- experience_entries：經歷資料庫，每個使用者自己的一份
--- 對應 job-tool/data/experience_db.json 的「公司/組織 -> 描述變體」結構
+-- 對應 Zobzii/data/experience_db.json 的「公司/組織 -> 描述變體」結構
 -- =========================================================
 create table if not exists public.experience_entries (
   id uuid primary key default gen_random_uuid(),
@@ -99,7 +99,7 @@ create policy "experience_entries_all_own" on public.experience_entries
 
 -- =========================================================
 -- profile_data：聯絡資訊、學歷、技能清單、Professional Summary 變體
--- 對應 job-tool/data/profile.json，每人一列
+-- 對應 Zobzii/data/profile.json，每人一列
 -- =========================================================
 create table if not exists public.profile_data (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -115,7 +115,7 @@ create policy "profile_data_all_own" on public.profile_data
 -- =========================================================
 -- resume_rules：寫作規則設定檔，使用者可在介面上編輯
 -- user_id 為 null 代表系統預設值（新使用者複製這份當起點）
--- 對應 job-tool/data/resume_rules.json
+-- 對應 Zobzii/data/resume_rules.json
 -- =========================================================
 create table if not exists public.resume_rules (
   user_id uuid primary key references auth.users(id) on delete cascade,
