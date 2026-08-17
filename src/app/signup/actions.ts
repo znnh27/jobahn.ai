@@ -22,5 +22,5 @@ export async function signup(formData: FormData) {
     redirect(`/signup?error=${encodeURIComponent(error.message)}`);
   }
 
-  redirect("/login?message=請至信箱完成驗證後登入");
+  redirect(`/login?message=${encodeURIComponent("請至信箱完成驗證後登入")}`);
 }

@@ -17,5 +17,5 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  redirect("/login?error=驗證連結無效或已過期");
+  redirect(`/login?error=${encodeURIComponent("驗證連結無效或已過期")}`);
 }

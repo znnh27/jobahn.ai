@@ -2,7 +2,7 @@ import Link from "next/link";
 import { login } from "./actions";
 
 export default async function LoginPage(props: PageProps<"/login">) {
-  const { error } = await props.searchParams;
+  const { error, message } = await props.searchParams;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-neutral-50 px-4">
@@ -15,6 +15,11 @@ export default async function LoginPage(props: PageProps<"/login">) {
         {error && (
           <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
+          </div>
+        )}
+        {message && (
+          <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">
+            {message}
           </div>
         )}
 
