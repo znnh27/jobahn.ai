@@ -56,5 +56,5 @@ group by provider;
 - [x] `askClaude()` 共用函式：雙模式（本機 Claude Code CLI／正式環境 API），所有 AI 功能都透過這個函式呼叫，每次呼叫會寫入 `ai_usage_log`
 - [x] 首次設定流程：履歷上傳＋解析（`/onboarding`，已用真實履歷檔實測跑通，資料正確寫入 `experience_entries`／`profile_data`，版本衝突也有正確標記出來不亂猜）
 - [x] 核心迴圈：職缺輸入（`/applications/new`）＋履歷生成畫布（`/applications/[id]`）＋JD比對／ATS評分＋重新檢查評分＋定案（含回寫經歷資料庫），已用真實 JD（OnRampLab Junior PM）實測跑通整條路徑
-- [ ] 求職信步驟
+- [x] 求職信步驟：語言選擇＋生成（`Dear Hiring Manager,` 開頭、禁 em-dash、AI 工具只能提事實不描述細節）＋畫布編輯＋重新比對職缺符合度（清單項目文字保持不變，只更新 covered／source）＋定案（寫入 `cover_letter_snapshot`）＋複製求職信按鈕，已用真實 JD（OnRampLab Junior PM）實測跑通整條路徑
 - [x] 首頁：應徵紀錄表格（簡易版，含新增應徵按鈕）

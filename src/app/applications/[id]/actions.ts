@@ -7,6 +7,10 @@ import {
   rescoreResumeForApplication,
   type GeneratedResume,
 } from "@/lib/resumes/generateResume";
+import {
+  generateCoverLetterForApplication,
+  recheckJdMatchWithCoverLetter,
+} from "@/lib/resumes/generateCoverLetter";
 
 type ResumeMap = Record<string, GeneratedResume["resume"]>;
 type ChecklistMap = Record<string, GeneratedResume["jd_match_checklist"]>;
@@ -207,6 +211,122 @@ export async function finalizeResumeAction(
     .eq("user_id", user.id);
 
   if (updateError) return { error: updateError.message };
+
+  revalidatePath(`/applications/${applicationId}`);
+  revalidatePath("/");
+  return { success: true };
+}
+
+type CoverLetterGenerateResult = {
+  error?: string;
+  success?: boolean;
+  data?: { cover_letter_draft: Record<string, string> };
+};
+
+export async function generateCoverLetterAction(
+  applicationId: string,
+  languages: string[],
+): Promise<CoverLetterGenerateResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const { error: langError } = await supabase
+    .from("applications")
+    .update({ cover_letter_language: languages })
+    .eq("id", applicationId)
+    .eq("user_id", user.id);
+  if (langError) return { error: langError.message };
+
+  try {
+    await generateCoverLetterForApplication(supabase, user.id, applicationId);
+    const { data } = await supabase
+      .from("applications")
+      .select("cover_letter_draft")
+      .eq("id", applicationId)
+      .eq("user_id", user.id)
+      .single();
+    revalidatePath(`/applications/${applicationId}`);
+    return { success: true, data: { cover_letter_draft: data?.cover_letter_draft ?? {} } };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "生成求職信失敗" };
+  }
+}
+
+type RecheckResult = {
+  error?: string;
+  success?: boolean;
+  data?: { jd_match_checklist: ChecklistMap };
+};
+
+export async function recheckWithCoverLetterAction(
+  applicationId: string,
+  editedCoverLetterDraft: Record<string, string>,
+): Promise<RecheckResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    const checklist = await recheckJdMatchWithCoverLetter(
+      supabase,
+      user.id,
+      applicationId,
+      editedCoverLetterDraft,
+    );
+    revalidatePath(`/applications/${applicationId}`);
+    return { success: true, data: { jd_match_checklist: checklist } };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "重新比對失敗" };
+  }
+}
+
+export async function saveCoverLetterDraftAction(
+  applicationId: string,
+  editedCoverLetterDraft: Record<string, string>,
+): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const { error } = await supabase
+    .from("applications")
+    .update({ cover_letter_draft: editedCoverLetterDraft })
+    .eq("id", applicationId)
+    .eq("user_id", user.id);
+
+  if (error) return { error: error.message };
+  return { success: true };
+}
+
+export async function finalizeCoverLetterAction(
+  applicationId: string,
+  editedCoverLetterDraft: Record<string, string>,
+): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const { error } = await supabase
+    .from("applications")
+    .update({
+      cover_letter_draft: editedCoverLetterDraft,
+      cover_letter_snapshot: JSON.stringify(editedCoverLetterDraft),
+      status: "completed",
+      completed_at: new Date().toISOString(),
+    })
+    .eq("id", applicationId)
+    .eq("user_id", user.id);
+
+  if (error) return { error: error.message };
 
   revalidatePath(`/applications/${applicationId}`);
   revalidatePath("/");

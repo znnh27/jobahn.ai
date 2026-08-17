@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Canvas } from "./canvas";
+import { CoverLetter } from "./cover-letter";
 
 export default async function ApplicationDetailPage(
   props: PageProps<"/applications/[id]">,
@@ -53,6 +54,17 @@ export default async function ApplicationDetailPage(
           initialGaps={application.ats_gaps ?? {}}
           initialFinalized={application.status !== "draft"}
         />
+
+        {application.status !== "draft" && (
+          <CoverLetter
+            applicationId={application.id}
+            resumeLanguages={application.resume_language ?? []}
+            initialCoverLetterLanguages={application.cover_letter_language ?? []}
+            initialDraft={application.cover_letter_draft}
+            initialChecklist={application.jd_match_checklist ?? {}}
+            initialCompleted={application.status === "completed"}
+          />
+        )}
       </div>
     </div>
   );
