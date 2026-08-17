@@ -9,7 +9,7 @@ export default async function SignupPage(props: PageProps<"/signup">) {
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
           <h1 className="text-2xl font-semibold text-neutral-900">註冊</h1>
-          <p className="mt-1 text-sm text-neutral-500">Zobzii 找工作助手</p>
+          <p className="mt-1 text-sm text-neutral-500">jobahn 找工作助手</p>
         </div>
 
         {error && (

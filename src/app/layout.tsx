@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Zobzii",
+  title: "jobahn",
   description: "AI 找工作助手：職缺比對、履歷生成、求職信一站完成",
 };
 

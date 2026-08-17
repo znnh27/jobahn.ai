@@ -1,4 +1,4 @@
-# Zobzii
+# jobahn
 
 找工作 AI 助手，Phase 3 正式產品。技術選型與架構決策見 `../data/` 底下的設定檔（`workflow.json`、`resume_rules.json`）以及專案根目錄的建置計畫。
 

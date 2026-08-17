@@ -24,7 +24,7 @@ export default async function HomePage() {
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-neutral-900">Zobzii</h1>
+            <h1 className="text-xl font-semibold text-neutral-900">jobahn</h1>
             <p className="text-sm text-neutral-500">{user.email}</p>
           </div>
           <div className="flex items-center gap-2">
