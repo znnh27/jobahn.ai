@@ -47,14 +47,14 @@ export default async function HomePage() {
 
         <div className="mt-8 rounded-md border border-dashed border-neutral-300 bg-white p-6 text-sm text-neutral-500">
           {settings?.anthropic_key_last4 ? (
-            <p>已綁定 Anthropic API Key（末 4 碼：{settings.anthropic_key_last4}）</p>
+            <p>目前使用你自己綁定的 Anthropic API Key（末 4 碼：{settings.anthropic_key_last4}）</p>
           ) : (
             <p>
-              尚未綁定 Anthropic API Key，
+              目前使用共用額度，不需要額外設定。想改用自己的 Key 可以去
               <Link href="/settings" className="font-medium text-neutral-900 underline">
-                去設定頁綁定
+                設定頁
               </Link>
-              後才能使用生成功能
+              綁定。
             </p>
           )}
           <p className="mt-2">

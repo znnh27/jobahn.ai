@@ -15,10 +15,11 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
 
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-6">
-      <h2 className="text-base font-semibold text-neutral-900">Anthropic API Key</h2>
+      <h2 className="text-base font-semibold text-neutral-900">Anthropic API Key（選填）</h2>
       <p className="mt-1 text-sm text-neutral-500">
-        這個工具採 BYOK 模式：所有履歷生成、JD 比對、ATS 評分都會用你自己的 Claude
-        API Key，費用算在你自己的 Anthropic 帳號，不會用到其他人的額度。
+        預設所有生成功能都會用共用的額度，不需要你另外做任何設定就能直接用。
+        如果你想改用自己的 Claude API Key（例如想自己掌控費用），可以在下面綁定，
+        綁定後你的生成會改用你自己的額度計費。
       </p>
 
       {last4 ? (
@@ -29,13 +30,13 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
               type="submit"
               className="text-sm font-medium text-red-600 hover:underline"
             >
-              移除
+              移除，改回共用額度
             </button>
           </form>
         </div>
       ) : (
-        <div className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          尚未綁定，綁定前無法使用任何生成功能
+        <div className="mt-4 rounded-md bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
+          目前使用共用額度，不需要綁定也能正常使用
         </div>
       )}
 
