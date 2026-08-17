@@ -53,7 +53,7 @@ group by provider;
 - [x] 登入／註冊／登出（Supabase Auth）
 - [x] 設定頁：選填綁定自己的 Anthropic API Key（Supabase Vault 加密存放，含金鑰有效性驗證），不綁定則使用共用額度
 - [x] `ai_usage_log` 資料表：記錄每次 AI 呼叫用量，給自己查看用，不擋任何操作
-- [ ] `askClaude()` 共用函式：雙模式（本機 Claude Code CLI／正式環境 API），所有 AI 功能都透過這個函式呼叫，且每次呼叫要寫入 `ai_usage_log`
+- [x] `askClaude()` 共用函式：雙模式（本機 Claude Code CLI／正式環境 API），所有 AI 功能都透過這個函式呼叫，每次呼叫會寫入 `ai_usage_log`
 - [ ] 首次設定流程：履歷上傳＋解析
 - [ ] 核心迴圈：職缺輸入＋履歷生成畫布＋JD比對／ATS評分
 - [ ] 求職信步驟
