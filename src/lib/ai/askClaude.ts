@@ -26,6 +26,12 @@ export interface AskClaudeParams {
   systemPrompt: string;
   userPrompt: string;
   maxTokens?: number;
+  /**
+   * 只有 api 模式支援（SDK 直接透傳給 Messages API）。像評分/比對這種需要每次判斷盡量一致的
+   * 任務建議設 0，降低同一份內容重複評分卻跑出不同結果的機率。local-cli 模式（headless CLI）
+   * 沒有對應參數可以控制，這個欄位在該模式下會被忽略。
+   */
+  temperature?: number;
   /** 使用者自己的已登入 Supabase client，api 模式會用它查詢使用者是否綁定了自己的 Key */
   supabase?: SupabaseClient;
 }
@@ -131,6 +137,7 @@ async function callApi(params: AskClaudeParams): Promise<AskClaudeResult> {
     max_tokens: maxTokens,
     system: params.systemPrompt,
     messages: [{ role: "user", content: params.userPrompt }],
+    ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
   });
 
   const textBlock = response.content.find((b) => b.type === "text");

@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
-import type { GeneratedResume } from "./generateResume";
+import { COVERAGE_RULES, type GeneratedResume } from "./generateResume";
 
 const COVER_LETTER_RULES = `寫作規則：
 1. 英文用 "Dear Hiring Manager," 開頭，中文用「招聘主管您好，」開頭。
@@ -91,6 +91,8 @@ const RECHECK_SYSTEM_PROMPT = `你是求職信與履歷符合度檢查助手。�
 
 你的任務：針對清單裡的每一項，重新檢查「履歷或求職信」現在有沒有涵蓋到，item 文字要保持跟先前清單完全一樣，不要新增、刪除、改寫項目。source 欄位要標明是被履歷涵蓋（"resume"）還是求職信涵蓋（"cover_letter"），都沒涵蓋就是 null。
 
+${COVERAGE_RULES}
+
 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。輸出格式：
 { "jd_match_checklist": [{ "item": string, "covered": boolean, "source": "resume"|"cover_letter"|null }] }`;
 
@@ -142,6 +144,7 @@ export async function recheckJdMatchWithCoverLetter(
       systemPrompt: RECHECK_SYSTEM_PROMPT,
       userPrompt,
       maxTokens: 3000,
+      temperature: 0,
       supabase,
     });
 

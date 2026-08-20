@@ -13,13 +13,15 @@ const WRITING_RULES = `寫作規則（一定要遵守）：
 8. 履歷內容要能一頁 A4 呈現，不要塞得過多過滿。
 9. JD 原文用字要盡量真的出現在履歷裡（不是只有意思接近），前提是使用者真的有對應的真實經歷可以支撐，不能為了關鍵字硬掰。`;
 
+export const COVERAGE_RULES = `JD 符合度清單的判定標準（務必嚴格遵守，這是評分結果每次跑出來不一致的主要原因，要特別小心）：
+1. covered 只有在內容裡有「明確、具體、可以直接指認」的事實對應到這個 JD 項目時，才標記 true。單純「產業相關」、「性質類似」、「可以類推應該也做得到」都不算，一律標記 false。
+2. 領域/類型不同不能算通過。例如 JD 要求「數位/軟體產品的 0 到 1 經驗」，如果內容寫的是硬體或 IoT 產品的跨國協作，不算 covered，要在缺口說明清楚差在「產品類型不同」，不要含糊帶過。
+3. 每次判斷同一個項目，都要用同一套標準重新逐項檢查：先問「這句話有沒有字面上或近乎字面上支持這個要求」，不要憑整體印象覺得「這個人應該做得到」就標 true，也不要因為前一次判斷是 true 就傾向維持 true（或反過來），每次都要重新看內容本身。
+4. 如果只是職務相近、可以類推、但沒有具體事實佐證，一律標 false，並在缺口裡具體寫出缺的是什麼，不要寫模稜兩可的描述。`;
+
 const SYSTEM_PROMPT = `你是履歷客製化助手。使用者會給你：這個職缺的 JD、使用者的經歷資料庫（同一段經歷可能有多種描述變體，是他過去不同履歷版本留下的）、使用者的個人資料（聯絡方式、學歷、技能）。
 
-你的任務：
-1. 分析 JD 要求哪些條件。
-2. 從經歷資料庫的變體裡，挑選/合併出最適合這個職缺的內容，寫成一份完整履歷（Professional Summary、工作經歷、領導經驗/專案、學歷、技能）。
-3. 產出 JD 符合度清單：列出 JD 的關鍵要求，標記這份履歷有沒有涵蓋到。
-4. 產出 ATS heuristic 評分（0-100，非官方標準分數，綜合關鍵字覆蓋與格式健檢）跟目前還缺少哪些 JD 要求的清單。
+你的任務：分析 JD 要求哪些條件，從經歷資料庫的變體裡挑選/合併出最適合這個職缺的內容，寫成一份完整履歷（Professional Summary、工作經歷、領導經驗/專案、學歷、技能）。
 
 重要：輸出的每一段工作經歷/領導經驗的 "org" 欄位，一定要跟輸入的經歷資料庫裡對應那筆的 org_name 完全一致（一字不改），不要精簡、不要改寫、不要移除括號內的說明文字。這個欄位之後系統要拿去跟資料庫比對，改寫過會導致比對失敗。
 
@@ -27,16 +29,11 @@ ${WRITING_RULES}
 
 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。輸出格式（嚴格遵守）：
 {
-  "resume": {
-    "summary": string,
-    "work_experience": [{ "org": string, "role": string, "period": string, "location": string|null, "bullets": string[] }],
-    "leadership": [{ "org": string, "role": string, "period": string, "location": string|null, "bullets": string[] }],
-    "education": [{ "school": string, "period": string, "location": string|null, "detail": string|null }],
-    "skills": string[]
-  },
-  "jd_match_checklist": [{ "item": string, "covered": boolean, "source": "resume"|null }],
-  "ats_score": number,
-  "ats_gaps": string[]
+  "summary": string,
+  "work_experience": [{ "org": string, "role": string, "period": string, "location": string|null, "bullets": string[] }],
+  "leadership": [{ "org": string, "role": string, "period": string, "location": string|null, "bullets": string[] }],
+  "education": [{ "school": string, "period": string, "location": string|null, "detail": string|null }],
+  "skills": string[]
 }`;
 
 interface ExperienceEntryRow {
@@ -135,11 +132,22 @@ export async function generateResumeForApplication(
       supabase,
     });
 
-    const parsed = parseJsonResponse(response.text);
-    resumeDraft[lang] = parsed.resume;
-    checklists[lang] = parsed.jd_match_checklist;
-    atsScores[lang] = parsed.ats_score;
-    atsGaps[lang] = parsed.ats_gaps;
+    const resume = parseJsonResponse<GeneratedResume["resume"]>(response.text);
+    resumeDraft[lang] = resume;
+
+    // 檢查清單／評分一律走同一個評分函式（跟 rescore 共用），不要讓生成當下的評分
+    // 跟之後 rescore 用不同的 prompt 各自判斷，否則同一份內容兩次評分結果會兜不起來。
+    const scored = await scoreResumeAgainstJd({
+      supabase,
+      userId,
+      jd: application.job_description,
+      language: lang,
+      resumeContent: resume,
+      existingItems: [],
+    });
+    checklists[lang] = scored.jd_match_checklist;
+    atsScores[lang] = scored.ats_score;
+    atsGaps[lang] = scored.ats_gaps;
   }
 
   const { error: updateError } = await supabase
@@ -159,11 +167,14 @@ export async function generateResumeForApplication(
   if (updateError) throw new Error(`儲存生成結果失敗：${updateError.message}`);
 }
 
-const RESCORE_SYSTEM_PROMPT = `你是履歷評分助手。使用者會給你 JD、一份「先前已經定義好的 JD 符合度清單」、跟一份已經寫好（可能是他自己編輯過）的履歷內容。
+const SCORE_SYSTEM_PROMPT = `你是履歷評分助手。使用者會給你 JD、一份「先前已經定義好的 JD 符合度清單」（可能是空的）、跟一份履歷內容。
 
-你的任務：不要改寫或重新生成履歷內容，也不要自己重新想一份新的檢查清單。
-1. 針對「先前已經定義好的 JD 符合度清單」裡的每一項，重新檢查現在這份履歷內容有沒有涵蓋到，更新 covered 跟 source，item 文字本身要保持跟先前清單完全一樣，不要改寫、不要新增、不要刪除項目（除非先前清單是空的，這種情況才需要你自己從 JD 重新列出）。這樣使用者才能看出「這次編輯前後」是不是真的有進步。
-2. 根據這份更新後的清單，重新算 ATS heuristic 評分（0-100，非官方標準分數，綜合關鍵字覆蓋與格式健檢）跟目前還缺少哪些 JD 要求。
+你的任務：不要改寫或重新生成履歷內容。
+1. 如果「先前已經定義好的 JD 符合度清單」不是空的：針對清單裡的每一項，重新檢查現在這份履歷內容有沒有涵蓋到，更新 covered 跟 source，item 文字本身要保持跟先前清單完全一樣，不要改寫、不要新增、不要刪除項目。這樣使用者才能看出「這次編輯前後」是不是真的有進步。
+   如果清單是空的：自己從 JD 列出關鍵要求項目，逐項判斷。
+2. 根據這份清單，算 ATS heuristic 評分（0-100，非官方標準分數，綜合關鍵字覆蓋與格式健檢）跟目前還缺少哪些 JD 要求。
+
+${COVERAGE_RULES}
 
 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。輸出格式（嚴格遵守）：
 {
@@ -171,6 +182,40 @@ const RESCORE_SYSTEM_PROMPT = `你是履歷評分助手。使用者會給你 JD�
   "ats_score": number,
   "ats_gaps": string[]
 }`;
+
+async function scoreResumeAgainstJd(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  jd: string;
+  language: string;
+  resumeContent: GeneratedResume["resume"];
+  existingItems: GeneratedResume["jd_match_checklist"];
+}): Promise<Pick<GeneratedResume, "jd_match_checklist" | "ats_score" | "ats_gaps">> {
+  const userPrompt = [
+    `===== JD =====`,
+    params.jd,
+    `===== 先前已經定義好的 JD 符合度清單（item 文字要保持不變，只更新 covered/source）=====`,
+    params.existingItems.length > 0
+      ? JSON.stringify(params.existingItems.map((i) => i.item), null, 2)
+      : "（目前是空的，請你從 JD 自己列出）",
+    `===== 履歷內容（${params.language}）=====`,
+    JSON.stringify(params.resumeContent, null, 2),
+  ].join("\n\n");
+
+  const response = await askClaude({
+    userId: params.userId,
+    feature: "ats_score",
+    systemPrompt: SCORE_SYSTEM_PROMPT,
+    userPrompt,
+    maxTokens: 3000,
+    temperature: 0,
+    supabase: params.supabase,
+  });
+
+  return JSON.parse(
+    response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
+  ) as Pick<GeneratedResume, "jd_match_checklist" | "ats_score" | "ats_gaps">;
+}
 
 export async function rescoreResumeForApplication(
   supabase: SupabaseClient,
@@ -200,35 +245,18 @@ export async function rescoreResumeForApplication(
     const resumeContent = editedResumeDraft[lang];
     if (!resumeContent) continue;
 
-    const existingItems = existingChecklists[lang] ?? [];
-
-    const userPrompt = [
-      `===== JD =====`,
-      application.job_description,
-      `===== 先前已經定義好的 JD 符合度清單（item 文字要保持不變，只更新 covered/source）=====`,
-      existingItems.length > 0
-        ? JSON.stringify(existingItems.map((i) => i.item), null, 2)
-        : "（目前是空的，請你從 JD 自己列出）",
-      `===== 履歷內容（${lang}）=====`,
-      JSON.stringify(resumeContent, null, 2),
-    ].join("\n\n");
-
-    const response = await askClaude({
-      userId,
-      feature: "ats_score",
-      systemPrompt: RESCORE_SYSTEM_PROMPT,
-      userPrompt,
-      maxTokens: 3000,
+    const scored = await scoreResumeAgainstJd({
       supabase,
+      userId,
+      jd: application.job_description,
+      language: lang,
+      resumeContent,
+      existingItems: existingChecklists[lang] ?? [],
     });
 
-    const parsed = JSON.parse(
-      response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
-    ) as Pick<GeneratedResume, "jd_match_checklist" | "ats_score" | "ats_gaps">;
-
-    checklists[lang] = parsed.jd_match_checklist;
-    atsScores[lang] = parsed.ats_score;
-    atsGaps[lang] = parsed.ats_gaps;
+    checklists[lang] = scored.jd_match_checklist;
+    atsScores[lang] = scored.ats_score;
+    atsGaps[lang] = scored.ats_gaps;
   }
 
   const { error: updateError } = await supabase
@@ -264,14 +292,14 @@ function buildUserPrompt(params: {
   ].join("\n\n");
 }
 
-function parseJsonResponse(text: string): GeneratedResume {
+function parseJsonResponse<T>(text: string): T {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/```\s*$/i, "");
 
   try {
-    return JSON.parse(cleaned) as GeneratedResume;
+    return JSON.parse(cleaned) as T;
   } catch {
     throw new Error("AI 回傳的內容不是有效的 JSON，解析失敗");
   }
