@@ -66,6 +66,7 @@ const SECTIONS = [
   ["typography", "標題與內文"],
   ["buttons", "按鈕"],
   ["forms", "表單元件"],
+  ["upload", "檔案上傳元件"],
   ["cards", "卡片"],
   ["alerts", "提示訊息與徽章"],
   ["links", "連結"],
@@ -273,6 +274,79 @@ export default function DesignSystemPage() {
               </label>
             </div>
           </div>
+        </section>
+
+        {/* 檔案上傳元件 */}
+        <section id="upload" className="ds-section">
+          <h2 className="ds-section-title">檔案上傳元件</h2>
+          <p className="ds-section-desc">首次設定上傳履歷用的拖拉上傳元件（onboarding/upload-form.tsx）。</p>
+          <div className="card ds-card-demo mt-4">
+            <div className="file-drop-zone">
+              <div className="file-drop-zone-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M7 18a4.5 4.5 0 0 1-.5-8.97A5 5 0 0 1 16.5 8H17a4 4 0 0 1 0 8h-1" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M12 11v8M9 15l3-3 3 3" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <span className="file-drop-zone-text">拖曳檔案到這裡，或點擊選擇</span>
+              <span className="file-drop-zone-hint">可一次選多個檔案，docx / doc / pdf，單檔 3MB 以內</span>
+            </div>
+            <div className="file-item-list">
+              <div className="file-item">
+                <div className="file-item-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M14 3v4h4M9 12h6M9 16h6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div className="file-item-body">
+                  <div className="file-item-name">resume_v3.docx</div>
+                  <div className="file-item-status">上傳中…</div>
+                  <div className="file-item-progress-track">
+                    <div className="file-item-progress-fill" />
+                  </div>
+                </div>
+              </div>
+              <div className="file-item">
+                <div className="file-item-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M14 3v4h4M9 12h6M9 16h6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div className="file-item-body">
+                  <div className="file-item-name">resume_v2.pdf</div>
+                  <div className="file-item-status">已上傳 · 96 KB</div>
+                </div>
+                <span className="file-item-check">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <button type="button" className="file-item-remove">
+                  刪除
+                </button>
+              </div>
+              <div className="file-item file-item--error">
+                <div className="file-item-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M14 3v4h4M9 12h6M9 16h6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div className="file-item-body">
+                  <div className="file-item-name">photo.png</div>
+                  <div className="file-item-status file-item-status--error">不是支援的檔案類型</div>
+                </div>
+                <button type="button" className="file-item-remove">
+                  刪除
+                </button>
+              </div>
+            </div>
+          </div>
+          <span className="ds-code mt-1">
+            file-drop-zone / file-item / file-item--error / file-item-progress-fill / file-item-check
+          </span>
         </section>
 
         {/* 卡片 */}

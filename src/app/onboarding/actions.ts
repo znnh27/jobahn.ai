@@ -13,9 +13,16 @@ const ALLOWED_TYPES = new Set([
 const MAX_FILE_SIZE_BYTES = 3 * 1024 * 1024; // 3MB
 const MAX_TOTAL_FILES = 30;
 
-type UploadResult = { error?: string; success?: boolean; uploaded?: number };
+type UploadedResumeRow = {
+  id: string;
+  file_name: string;
+  file_size_bytes: number;
+  uploaded_at: string;
+};
 
-export async function uploadResumes(formData: FormData): Promise<UploadResult> {
+type UploadOneResult = { error?: string; success?: boolean; resume?: UploadedResumeRow };
+
+export async function uploadOneResumeAction(formData: FormData): Promise<UploadOneResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -25,10 +32,16 @@ export async function uploadResumes(formData: FormData): Promise<UploadResult> {
     return { error: "請先登入" };
   }
 
-  const files = formData.getAll("files").filter((f): f is File => f instanceof File);
+  const file = formData.get("file");
+  if (!(file instanceof File)) {
+    return { error: "沒有收到檔案" };
+  }
 
-  if (files.length === 0) {
-    return { error: "請選擇至少一份履歷檔案" };
+  if (!ALLOWED_TYPES.has(file.type)) {
+    return { error: `「${file.name}」不是支援的檔案類型，只接受 docx/doc/pdf` };
+  }
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    return { error: `「${file.name}」超過 3MB 上限` };
   }
 
   const { count: existingCount } = await supabase
@@ -36,49 +49,37 @@ export async function uploadResumes(formData: FormData): Promise<UploadResult> {
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id);
 
-  if ((existingCount ?? 0) + files.length > MAX_TOTAL_FILES) {
-    return {
-      error: `最多只能上傳 ${MAX_TOTAL_FILES} 份履歷（目前已有 ${existingCount ?? 0} 份），這次選太多了`,
-    };
+  if ((existingCount ?? 0) + 1 > MAX_TOTAL_FILES) {
+    return { error: `最多只能上傳 ${MAX_TOTAL_FILES} 份履歷（目前已有 ${existingCount ?? 0} 份）` };
   }
 
-  for (const file of files) {
-    if (!ALLOWED_TYPES.has(file.type)) {
-      return { error: `「${file.name}」不是支援的檔案類型，只接受 docx/doc/pdf` };
-    }
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      return { error: `「${file.name}」超過 3MB 上限` };
-    }
+  const storagePath = `${user.id}/${Date.now()}-${file.name}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("original-resumes")
+    .upload(storagePath, file, { contentType: file.type });
+
+  if (uploadError) {
+    return { error: `「${file.name}」上傳失敗：${uploadError.message}` };
   }
 
-  let uploaded = 0;
-  for (const file of files) {
-    const storagePath = `${user.id}/${Date.now()}-${file.name}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("original-resumes")
-      .upload(storagePath, file, { contentType: file.type });
-
-    if (uploadError) {
-      return { error: `「${file.name}」上傳失敗：${uploadError.message}` };
-    }
-
-    const { error: insertError } = await supabase.from("original_resumes").insert({
+  const { data: resume, error: insertError } = await supabase
+    .from("original_resumes")
+    .insert({
       user_id: user.id,
       file_name: file.name,
       storage_path: storagePath,
       file_size_bytes: file.size,
-    });
+    })
+    .select("id, file_name, file_size_bytes, uploaded_at")
+    .single();
 
-    if (insertError) {
-      return { error: `「${file.name}」寫入紀錄失敗：${insertError.message}` };
-    }
-
-    uploaded += 1;
+  if (insertError || !resume) {
+    return { error: `「${file.name}」寫入紀錄失敗：${insertError?.message ?? "unknown"}` };
   }
 
   revalidatePath("/onboarding");
-  return { success: true, uploaded };
+  return { success: true, resume };
 }
 
 export async function listUploadedResumes() {
