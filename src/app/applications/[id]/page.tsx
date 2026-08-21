@@ -3,6 +3,7 @@ import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Canvas } from "./canvas";
 import { CoverLetter } from "./cover-letter";
+import type { ResumeContact } from "@/lib/documents/resumeDocContent";
 
 export default async function ApplicationDetailPage(
   props: PageProps<"/applications/[id]">,
@@ -28,9 +29,24 @@ export default async function ApplicationDetailPage(
     notFound();
   }
 
+  const { data: profile } = await supabase
+    .from("profile_data")
+    .select("data")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const contact = (profile?.data as { contact?: ResumeContact })?.contact ?? {
+    name_zh: null,
+    name_en: null,
+    email: null,
+    phone: null,
+    linkedin: null,
+    portfolio: null,
+  };
+
   return (
     <div className="min-h-screen bg-neutral-50 px-6 py-10">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="mx-auto max-w-[1180px] space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold text-neutral-900">
@@ -53,6 +69,7 @@ export default async function ApplicationDetailPage(
           initialAtsScore={application.ats_score}
           initialGaps={application.ats_gaps ?? {}}
           initialFinalized={application.status !== "draft"}
+          contact={contact}
         />
 
         {application.status !== "draft" && (

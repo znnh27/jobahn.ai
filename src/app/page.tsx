@@ -21,7 +21,7 @@ export default async function HomePage() {
 
   const { data: applications } = await supabase
     .from("applications")
-    .select("id, company_name, job_title, status, ats_score, created_at")
+    .select("id, company_name, job_title, status, ats_score, resume_language, created_at")
     .order("created_at", { ascending: false });
 
   return (
@@ -89,6 +89,7 @@ export default async function HomePage() {
                   <th className="px-4 py-2 font-medium">職缺</th>
                   <th className="px-4 py-2 font-medium">狀態</th>
                   <th className="px-4 py-2 font-medium">ATS</th>
+                  <th className="px-4 py-2 font-medium">下載履歷</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
@@ -102,6 +103,32 @@ export default async function HomePage() {
                     <td className="px-4 py-2 text-neutral-600">{app.job_title || "—"}</td>
                     <td className="px-4 py-2 text-neutral-600">{app.status}</td>
                     <td className="px-4 py-2 text-neutral-600">{app.ats_score ?? "—"}</td>
+                    <td className="px-4 py-2 text-neutral-600">
+                      {app.status === "draft" ? (
+                        "—"
+                      ) : (
+                        <div className="flex flex-wrap gap-x-3 gap-y-1">
+                          {(app.resume_language ?? []).map((lang: string) => (
+                            <span key={lang} className="whitespace-nowrap">
+                              {lang}：
+                              <a
+                                href={`/applications/${app.id}/resume-download?lang=${lang}&format=docx`}
+                                className="text-neutral-900 hover:underline"
+                              >
+                                Word
+                              </a>
+                              {" / "}
+                              <a
+                                href={`/applications/${app.id}/resume-download?lang=${lang}&format=pdf`}
+                                className="text-neutral-900 hover:underline"
+                              >
+                                PDF
+                              </a>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

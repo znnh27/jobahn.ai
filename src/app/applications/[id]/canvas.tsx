@@ -2,7 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { generateAction, rescoreAction, saveDraftAction, finalizeResumeAction } from "./actions";
+import { ResumePageCanvas } from "./ResumePageCanvas";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
+import type { ResumeContact } from "@/lib/documents/resumeDocContent";
 
 type ResumeMap = Record<string, GeneratedResume["resume"]>;
 type ChecklistMap = Record<string, GeneratedResume["jd_match_checklist"]>;
@@ -16,6 +18,7 @@ interface CanvasProps {
   initialAtsScore: number | null;
   initialGaps: GapsMap;
   initialFinalized: boolean;
+  contact: ResumeContact;
 }
 
 const LANG_LABEL: Record<string, string> = { en: "英文", zh: "中文" };
@@ -28,6 +31,7 @@ export function Canvas({
   initialAtsScore,
   initialGaps,
   initialFinalized,
+  contact,
 }: CanvasProps) {
   const [draft, setDraft] = useState<ResumeMap | null>(initialDraft);
   const [checklist, setChecklist] = useState<ChecklistMap>(initialChecklist);
@@ -118,8 +122,8 @@ export function Canvas({
   if (!resume) return null;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-      <div className="space-y-4 rounded-lg border border-neutral-200 bg-white p-6">
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[794px_1fr]">
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex gap-2">
             {languages.map((lang) => (
@@ -137,51 +141,34 @@ export function Canvas({
             ))}
           </div>
           {finalized && (
-            <span className="rounded-md bg-green-50 px-2 py-1 text-xs text-green-700">已定案</span>
+            <span className="rounded-md bg-green-50 px-2 py-1 text-xs text-green-700">
+              已定案，畫布唯讀
+            </span>
           )}
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-neutral-700">Professional Summary</label>
-          <textarea
-            value={resume.summary}
-            onChange={(e) =>
-              updateResume(activeLang, (r) => ({ ...r, summary: e.target.value }))
-            }
-            rows={3}
-            className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
-          />
-        </div>
-
-        <ResumeSection
-          title="工作經歷"
-          items={resume.work_experience}
-          onChange={(items) =>
-            updateResume(activeLang, (r) => ({ ...r, work_experience: items }))
+        <ResumePageCanvas
+          resume={resume}
+          language={activeLang}
+          contact={contact}
+          editable={!finalized}
+          onChangeSummary={(text) => updateResume(activeLang, (r) => ({ ...r, summary: text }))}
+          onChangeSkills={(text) =>
+            updateResume(activeLang, (r) => ({
+              ...r,
+              skills: text.split(",").map((s) => s.trim()).filter(Boolean),
+            }))
+          }
+          onChangeBullets={(section, index, bullets) =>
+            updateResume(activeLang, (r) => {
+              const items = [...r[section]];
+              items[index] = { ...items[index], bullets };
+              return { ...r, [section]: items };
+            })
           }
         />
 
-        <ResumeSection
-          title="領導經驗 / 專案"
-          items={resume.leadership}
-          onChange={(items) => updateResume(activeLang, (r) => ({ ...r, leadership: items }))}
-        />
-
-        <div>
-          <label className="block text-sm font-medium text-neutral-700">技能（逗號分隔）</label>
-          <input
-            value={resume.skills.join(", ")}
-            onChange={(e) =>
-              updateResume(activeLang, (r) => ({
-                ...r,
-                skills: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
-              }))
-            }
-            className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
-          />
-        </div>
-
-        <div className="flex flex-wrap gap-2 border-t border-neutral-100 pt-4">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-neutral-200 bg-white p-3">
           <button
             onClick={handleSave}
             disabled={isPending}
@@ -203,6 +190,22 @@ export function Canvas({
           >
             定案
           </button>
+          {finalized && (
+            <>
+              <a
+                href={`/applications/${applicationId}/resume-download?lang=${activeLang}&format=docx`}
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+              >
+                下載 Word
+              </a>
+              <a
+                href={`/applications/${applicationId}/resume-download?lang=${activeLang}&format=pdf`}
+                className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+              >
+                下載 PDF
+              </a>
+            </>
+          )}
           {message && <span className="self-center text-sm text-neutral-500">{message}</span>}
         </div>
       </div>
@@ -242,42 +245,6 @@ export function Canvas({
             ))}
           </ul>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function ResumeSection({
-  title,
-  items,
-  onChange,
-}: {
-  title: string;
-  items: GeneratedResume["resume"]["work_experience"];
-  onChange: (items: GeneratedResume["resume"]["work_experience"]) => void;
-}) {
-  return (
-    <div>
-      <h3 className="text-sm font-medium text-neutral-700">{title}</h3>
-      <div className="mt-2 space-y-3">
-        {items.map((item, i) => (
-          <div key={i} className="rounded-md border border-neutral-200 p-3">
-            <p className="text-sm font-medium text-neutral-800">
-              {item.org} · {item.role} · {item.period}
-            </p>
-            <textarea
-              value={item.bullets.join("\n")}
-              onChange={(e) => {
-                const next = [...items];
-                next[i] = { ...item, bullets: e.target.value.split("\n") };
-                onChange(next);
-              }}
-              rows={Math.max(2, item.bullets.length)}
-              className="mt-2 block w-full rounded-md border border-neutral-300 px-2 py-1.5 text-sm"
-              placeholder="每行一條 bullet"
-            />
-          </div>
-        ))}
       </div>
     </div>
   );

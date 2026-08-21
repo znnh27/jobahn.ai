@@ -24,3 +24,52 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Calibri 有版權不能直接放上網頁，Carlito 是專門做來跟 Calibri 字寬相容的開源替代字型
+   （LibreOffice 官方拿來相容 Calibri 用），履歷畫布跟下載的 Word 檔案換行位置才會幾乎一致。 */
+@font-face {
+  font-family: "Carlito";
+  src: url("/fonts/carlito/Carlito-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Carlito";
+  src: url("/fonts/carlito/Carlito-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Carlito";
+  src: url("/fonts/carlito/Carlito-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Carlito";
+  src: url("/fonts/carlito/Carlito-BoldItalic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NotoSansTCWeb";
+  src: url("/fonts/noto-sans-tc-web/NotoSansTC-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "NotoSansTCWeb";
+  src: url("/fonts/noto-sans-tc-web/NotoSansTC-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+.resume-page {
+  font-family: "Carlito", "NotoSansTCWeb", sans-serif;
+}
