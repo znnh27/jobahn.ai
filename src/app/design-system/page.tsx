@@ -1,0 +1,444 @@
+import Link from "next/link";
+
+const NEUTRAL_SWATCHES = [
+  ["50", "#fafafa"],
+  ["100", "#f5f5f5"],
+  ["200", "#e5e5e5"],
+  ["300", "#d4d4d4"],
+  ["400", "#a3a3a3"],
+  ["500", "#737373"],
+  ["600", "#525252"],
+  ["700", "#404040"],
+  ["800", "#262626"],
+  ["900", "#171717"],
+] as const;
+
+const SEMANTIC_SWATCHES = [
+  ["--color-danger-bg", "#fef2f2"],
+  ["--color-danger-text", "#b91c1c"],
+  ["--color-danger-text-strong", "#dc2626"],
+  ["--color-success-bg", "#f0fdf4"],
+  ["--color-success-text", "#15803d"],
+  ["--color-warning-bg", "#fffbeb"],
+  ["--color-warning-text", "#92400e"],
+  ["--color-info-bg", "#eff6ff"],
+  ["--color-info-text", "#1d4ed8"],
+] as const;
+
+const BAND_SWATCHES = [
+  ["--color-band-excellent", "#22c55e", "優秀 85–100"],
+  ["--color-band-good", "#3b82f6", "良好 70–84"],
+  ["--color-band-borderline", "#f59e0b", "及格邊緣 50–69"],
+  ["--color-band-weak", "#ef4444", "落差大 0–49"],
+] as const;
+
+const SPACING = [
+  ["--space-1", "0.25rem"],
+  ["--space-2", "0.5rem"],
+  ["--space-3", "0.75rem"],
+  ["--space-4", "1rem"],
+  ["--space-5", "1.25rem"],
+  ["--space-6", "1.5rem"],
+  ["--space-8", "2rem"],
+  ["--space-10", "2.5rem"],
+] as const;
+
+const RADIUS = [
+  ["--radius-sm", "0.25rem"],
+  ["--radius-md", "0.375rem"],
+  ["--radius-lg", "0.5rem"],
+] as const;
+
+const FONT_SIZES = [
+  ["--font-xs", "0.75rem"],
+  ["--font-sm", "0.875rem"],
+  ["--font-base", "1rem"],
+  ["--font-lg", "1.125rem"],
+  ["--font-xl", "1.25rem"],
+  ["--font-2xl", "1.5rem"],
+] as const;
+
+const SECTIONS = [
+  ["colors", "顏色"],
+  ["spacing", "間距"],
+  ["radius", "圓角"],
+  ["fonts", "字級"],
+  ["typography", "標題與內文"],
+  ["buttons", "按鈕"],
+  ["forms", "表單元件"],
+  ["cards", "卡片"],
+  ["alerts", "提示訊息與徽章"],
+  ["links", "連結"],
+  ["table", "表格"],
+  ["ats", "ATS 評分量表"],
+  ["checklist", "JD 符合度清單"],
+] as const;
+
+export default function DesignSystemPage() {
+  return (
+    <div className="page">
+      <div className="page-container page-container--home">
+        <div className="page-header">
+          <div>
+            <h1 className="heading-page">設計系統</h1>
+            <p className="text-muted mt-1">
+              全站樣式都在 <span className="ds-code">src/app/design-system.css</span>
+              ，這頁只是拿來快速對照樣式長什麼樣子跟叫什麼名字，本身不是產品畫面。
+            </p>
+          </div>
+          <Link href="/" className="link-muted">
+            回首頁
+          </Link>
+        </div>
+
+        <div className="card">
+          <h2 className="heading-card">目錄</h2>
+          <div className="ds-table-of-contents mt-3">
+            {SECTIONS.map(([id, label]) => (
+              <a key={id} href={`#${id}`} className="ds-code">
+                {label}
+              </a>
+            ))}
+          </div>
+        </div>
+
+        {/* 顏色 */}
+        <section id="colors" className="ds-section">
+          <h2 className="ds-section-title">顏色</h2>
+          <p className="ds-section-desc">灰階由淺到深，語意顏色（錯誤/成功/警告/資訊），ATS 分數等級顏色。</p>
+
+          <h3 className="heading-card mt-4">灰階（--color-neutral-*）</h3>
+          <div className="ds-swatch-grid">
+            {NEUTRAL_SWATCHES.map(([name, hex]) => (
+              <div key={name} className="ds-item">
+                <div className="ds-swatch-color" style={{ background: hex }} />
+                <span className="ds-swatch-name">neutral-{name}</span>
+                <span className="ds-swatch-value">{hex}</span>
+              </div>
+            ))}
+          </div>
+
+          <h3 className="heading-card mt-4">語意顏色</h3>
+          <div className="ds-swatch-grid">
+            {SEMANTIC_SWATCHES.map(([name, hex]) => (
+              <div key={name} className="ds-item">
+                <div className="ds-swatch-color" style={{ background: hex }} />
+                <span className="ds-swatch-name">{name}</span>
+                <span className="ds-swatch-value">{hex}</span>
+              </div>
+            ))}
+          </div>
+
+          <h3 className="heading-card mt-4">ATS 分數等級顏色</h3>
+          <div className="ds-swatch-grid">
+            {BAND_SWATCHES.map(([name, hex, desc]) => (
+              <div key={name} className="ds-item">
+                <div className="ds-swatch-color" style={{ background: hex }} />
+                <span className="ds-swatch-name">{name}</span>
+                <span className="ds-swatch-value">{desc}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 間距 */}
+        <section id="spacing" className="ds-section">
+          <h2 className="ds-section-title">間距</h2>
+          <p className="ds-section-desc">padding、margin、gap 都用這一套刻度，單位是 rem。</p>
+          <div className="ds-col">
+            {SPACING.map(([name, value]) => (
+              <div key={name} className="ds-spacing-demo">
+                <div className="ds-spacing-bar" style={{ width: value }} />
+                <span className="ds-code">{name}</span>
+                <span className="text-muted-xs">{value}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 圓角 */}
+        <section id="radius" className="ds-section">
+          <h2 className="ds-section-title">圓角</h2>
+          <div className="ds-row">
+            {RADIUS.map(([name, value]) => (
+              <div key={name} className="ds-item">
+                <div className="ds-radius-box" style={{ borderRadius: value }} />
+                <span className="ds-code">{name}</span>
+                <span className="text-muted-xs">{value}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 字級 */}
+        <section id="fonts" className="ds-section">
+          <h2 className="ds-section-title">字級</h2>
+          <div className="ds-col">
+            {FONT_SIZES.map(([name, value]) => (
+              <div key={name} className="ds-spacing-demo">
+                <span className="ds-font-sample" style={{ fontSize: value }}>
+                  Aa 中文字級範例
+                </span>
+                <span className="ds-code">{name}</span>
+                <span className="text-muted-xs">{value}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 標題與內文 */}
+        <section id="typography" className="ds-section">
+          <h2 className="ds-section-title">標題與內文</h2>
+          <div className="ds-col">
+            <div className="ds-spacing-demo">
+              <h3 className="heading-page">頁面標題文字</h3>
+              <span className="ds-code">heading-page</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <h3 className="heading-auth">登入／註冊標題</h3>
+              <span className="ds-code">heading-auth</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <h3 className="heading-card--lg">卡片大標題</h3>
+              <span className="ds-code">heading-card--lg</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <h3 className="heading-card">卡片標題文字</h3>
+              <span className="ds-code">heading-card</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <p className="text-body">一般內文文字（text-body）</p>
+              <span className="ds-code">text-body</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <p className="text-muted">次要說明文字（text-muted）</p>
+              <span className="ds-code">text-muted</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <p className="text-muted-xs">更小的輔助文字（text-muted-xs）</p>
+              <span className="ds-code">text-muted-xs</span>
+            </div>
+          </div>
+        </section>
+
+        {/* 按鈕 */}
+        <section id="buttons" className="ds-section">
+          <h2 className="ds-section-title">按鈕</h2>
+          <div className="ds-row">
+            <div className="ds-item">
+              <button className="btn btn-primary">主要按鈕</button>
+              <span className="ds-code">btn btn-primary</span>
+            </div>
+            <div className="ds-item">
+              <button className="btn btn-secondary">次要按鈕</button>
+              <span className="ds-code">btn btn-secondary</span>
+            </div>
+            <div className="ds-item">
+              <button className="btn btn-primary" disabled>
+                停用狀態
+              </button>
+              <span className="ds-code">disabled</span>
+            </div>
+            <div className="ds-item">
+              <button className="btn-link">文字連結按鈕</button>
+              <span className="ds-code">btn-link</span>
+            </div>
+            <div className="ds-item">
+              <button className="btn-toggle">未選取分頁</button>
+              <span className="ds-code">btn-toggle</span>
+            </div>
+            <div className="ds-item">
+              <button className="btn-toggle--active">已選取分頁</button>
+              <span className="ds-code">btn-toggle--active</span>
+            </div>
+          </div>
+        </section>
+
+        {/* 表單元件 */}
+        <section id="forms" className="ds-section">
+          <h2 className="ds-section-title">表單元件</h2>
+          <div className="ds-col ds-forms-demo">
+            <div className="field">
+              <label className="label">標籤文字（label）</label>
+              <input className="input" placeholder="input" />
+            </div>
+            <div className="field">
+              <label className="label">多行文字框（textarea）</label>
+              <textarea className="textarea" rows={3} placeholder="textarea" />
+            </div>
+            <div className="checkbox-row">
+              <label className="checkbox-label">
+                <input type="checkbox" />
+                核取方塊（checkbox-label）
+              </label>
+            </div>
+          </div>
+        </section>
+
+        {/* 卡片 */}
+        <section id="cards" className="ds-section">
+          <h2 className="ds-section-title">卡片</h2>
+          <div className="ds-row ds-row--top">
+            <div>
+              <div className="card">一般卡片內容</div>
+              <span className="ds-code mt-1">card</span>
+            </div>
+            <div>
+              <div className="card card--sm">較窄內距的卡片</div>
+              <span className="ds-code mt-1">card card--sm</span>
+            </div>
+            <div>
+              <div className="card card--dashed">虛線邊框卡片</div>
+              <span className="ds-code mt-1">card card--dashed</span>
+            </div>
+            <div>
+              <div className="card-toolbar">
+                <button className="btn btn-secondary">按鈕</button>
+                <button className="btn btn-secondary">按鈕</button>
+              </div>
+              <span className="ds-code mt-1">card-toolbar</span>
+            </div>
+          </div>
+        </section>
+
+        {/* 提示訊息與徽章 */}
+        <section id="alerts" className="ds-section">
+          <h2 className="ds-section-title">提示訊息與徽章</h2>
+          <div className="ds-col">
+            <div className="ds-spacing-demo">
+              <div className="alert alert-error">錯誤提示文字</div>
+              <span className="ds-code">alert alert-error</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <div className="alert alert-success">成功提示文字</div>
+              <span className="ds-code">alert alert-success</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <div className="alert alert-warning">警告提示文字</div>
+              <span className="ds-code">alert alert-warning</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <span className="text-error">單純紅字（不加底色）</span>
+              <span className="ds-code">text-error</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <span className="text-success">單純綠字（不加底色）</span>
+              <span className="ds-code">text-success</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <span className="badge badge-success">徽章文字</span>
+              <span className="ds-code">badge badge-success</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <span className="finalized-tag">已定案，畫布唯讀</span>
+              <span className="ds-code">finalized-tag</span>
+            </div>
+          </div>
+        </section>
+
+        {/* 連結 */}
+        <section id="links" className="ds-section">
+          <h2 className="ds-section-title">連結</h2>
+          <div className="ds-col">
+            <div className="ds-spacing-demo">
+              <a href="#" className="link">
+                粗體底線連結
+              </a>
+              <span className="ds-code">link</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <a href="#" className="link-muted">
+                灰色小字連結
+              </a>
+              <span className="ds-code">link-muted</span>
+            </div>
+            <div className="ds-spacing-demo">
+              <a href="#" className="link-table">
+                表格內連結
+              </a>
+              <span className="ds-code">link-table</span>
+            </div>
+          </div>
+        </section>
+
+        {/* 表格 */}
+        <section id="table" className="ds-section">
+          <h2 className="ds-section-title">表格</h2>
+          <div className="table-wrap mt-4">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>公司</th>
+                  <th>狀態</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>範例公司</td>
+                  <td>draft</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <span className="ds-code mt-1">table-wrap / data-table</span>
+        </section>
+
+        {/* ATS 評分量表 */}
+        <section id="ats" className="ds-section">
+          <h2 className="ds-section-title">ATS 評分量表</h2>
+          <div className="card card--sm ds-card-demo--sm mt-4">
+            <p className="ats-score-value">
+              76<span className="ats-score-max"> / 100</span>
+              <span className="ats-band-tag ats-band-good">良好</span>
+            </p>
+            <div className="ats-scale">
+              <div className="ats-scale-bar">
+                <div className="ats-scale-bar-segment ats-scale-bar-segment--weak" />
+                <div className="ats-scale-bar-segment ats-scale-bar-segment--borderline" />
+                <div className="ats-scale-bar-segment ats-scale-bar-segment--good" />
+                <div className="ats-scale-bar-segment ats-scale-bar-segment--excellent" />
+              </div>
+              <ul className="ats-scale-legend">
+                <li className="ats-scale-legend-item">
+                  <span className="ats-scale-dot ats-band-excellent" />
+                  <span>85–100 分・優秀</span>
+                </li>
+                <li className="ats-scale-legend-item ats-scale-legend-item--current ats-band-good">
+                  <span className="ats-scale-dot ats-band-good" />
+                  <span>70–84 分・良好（目前分數在這一級）</span>
+                </li>
+                <li className="ats-scale-legend-item">
+                  <span className="ats-scale-dot ats-band-borderline" />
+                  <span>50–69 分・及格邊緣</span>
+                </li>
+                <li className="ats-scale-legend-item">
+                  <span className="ats-scale-dot ats-band-weak" />
+                  <span>0–49 分・落差大</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        {/* JD 符合度清單 */}
+        <section id="checklist" className="ds-section">
+          <h2 className="ds-section-title">JD 符合度清單</h2>
+          <div className="card card--sm ds-card-demo mt-4">
+            <ul className="checklist">
+              <li className="checklist-item">
+                <span>✅</span>
+                <span className="checklist-item-text">
+                  已符合的項目<span className="checklist-item-source">（resume）</span>
+                </span>
+              </li>
+              <li className="checklist-item">
+                <span>⚠️</span>
+                <span className="checklist-item-text">尚未符合的項目</span>
+              </li>
+            </ul>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}

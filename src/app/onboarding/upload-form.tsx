@@ -47,9 +47,12 @@ export function UploadForm({ resumes }: { resumes: ResumeRow[] }) {
         {state.error && <p className="text-error mt-3">{state.error}</p>}
         {state.success && <p className="text-success mt-3">已上傳 {state.uploaded} 份</p>}
 
-        <button type="submit" disabled={isPending} className="btn btn-primary mt-4">
+        <div className="btn-wrapper">
+           <button type="submit" disabled={isPending} className="btn btn-primary mt-4">
           {isPending ? "上傳中…" : "上傳"}
-        </button>
+          </button>
+        </div>
+       
       </form>
 
       {resumes.length > 0 && (
