@@ -104,18 +104,16 @@ export function CoverLetter({
   }
 
   return (
-    <div className="mt-8 space-y-4 rounded-lg border border-neutral-200 bg-white p-6">
-      <div>
-        <h2 className="text-lg font-semibold text-neutral-900">履歷修改完成了，接下來幫你寫求職信</h2>
-      </div>
+    <div className="card stack mt-8">
+      <h2 className="heading-card--lg">履歷修改完成了，接下來幫你寫求職信</h2>
 
       {!draft && (
-        <div className="space-y-3">
+        <div className="stack">
           <fieldset>
-            <legend className="text-sm font-medium text-neutral-700">要生成哪個語言版本</legend>
-            <div className="mt-2 flex gap-4">
+            <legend className="label">要生成哪個語言版本</legend>
+            <div className="checkbox-row">
               {["en", "zh"].map((lang) => (
-                <label key={lang} className="flex items-center gap-2 text-sm text-neutral-700">
+                <label key={lang} className="checkbox-label">
                   <input
                     type="checkbox"
                     checked={selectedLangs.includes(lang)}
@@ -129,7 +127,7 @@ export function CoverLetter({
           <button
             onClick={handleGenerate}
             disabled={isPending || selectedLangs.length === 0}
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
+            className="btn btn-primary"
           >
             {isPending ? "生成中，請稍候…" : "生成求職信"}
           </button>
@@ -137,18 +135,14 @@ export function CoverLetter({
       )}
 
       {draft && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_280px]">
-          <div className="space-y-3">
-            <div className="flex gap-2">
+        <div className="cover-letter-layout">
+          <div className="stack">
+            <div className="toolbar-inline">
               {selectedLangs.map((lang) => (
                 <button
                   key={lang}
                   onClick={() => setActiveLang(lang)}
-                  className={`rounded-md px-3 py-1.5 text-sm ${
-                    activeLang === lang
-                      ? "bg-neutral-900 text-white"
-                      : "border border-neutral-300 text-neutral-600"
-                  }`}
+                  className={activeLang === lang ? "btn-toggle--active" : "btn-toggle"}
                 >
                   {LANG_LABEL[lang] ?? lang}
                 </button>
@@ -159,65 +153,47 @@ export function CoverLetter({
               value={draft[activeLang] ?? ""}
               onChange={(e) => setDraft((prev) => (prev ? { ...prev, [activeLang]: e.target.value } : prev))}
               rows={16}
-              className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+              className="textarea"
             />
 
-            <div className="flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-4">
+            <div className="form-toolbar">
               {!completed ? (
                 <>
-                  <button
-                    onClick={handleSave}
-                    disabled={isPending}
-                    className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                  >
+                  <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
                     儲存
                   </button>
-                  <button
-                    onClick={handleRecheck}
-                    disabled={isPending}
-                    className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                  >
+                  <button onClick={handleRecheck} disabled={isPending} className="btn btn-secondary">
                     {isPending ? "處理中…" : "重新比對職缺符合度"}
                   </button>
-                  <button
-                    onClick={handleFinalize}
-                    disabled={isPending}
-                    className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-800 disabled:opacity-50"
-                  >
+                  <button onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
                     定案
                   </button>
                 </>
               ) : (
                 <>
-                  <button
-                    onClick={() => handleCopy(draft[activeLang] ?? "")}
-                    className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-800"
-                  >
+                  <button onClick={() => handleCopy(draft[activeLang] ?? "")} className="btn btn-primary">
                     複製求職信
                   </button>
-                  <Link
-                    href="/"
-                    className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
-                  >
+                  <Link href="/" className="btn btn-secondary">
                     回首頁
                   </Link>
                 </>
               )}
-              {message && <span className="self-center text-sm text-neutral-500">{message}</span>}
+              {message && <span className="text-muted">{message}</span>}
             </div>
           </div>
 
-          <div className="rounded-lg border border-neutral-200 p-4">
-            <h3 className="text-sm font-semibold text-neutral-900">JD 符合度清單</h3>
-            <ul className="mt-2 space-y-2 text-sm">
+          <div className="card card--sm">
+            <h3 className="heading-card">JD 符合度清單</h3>
+            <ul className="checklist">
               {(checklist[resumeLanguages.includes(activeLang) ? activeLang : resumeLanguages[0]] ?? []).map(
                 (item, i) => (
-                  <li key={i} className="flex items-start gap-2">
+                  <li key={i} className="checklist-item">
                     <span>{item.covered ? "✅" : "⚠️"}</span>
-                    <span className="text-neutral-700">
+                    <span className="checklist-item-text">
                       {item.item}
                       {item.covered && item.source && (
-                        <span className="ml-1 text-xs text-neutral-400">
+                        <span className="checklist-item-source">
                           （{item.source === "resume" ? "履歷" : "求職信"}）
                         </span>
                       )}

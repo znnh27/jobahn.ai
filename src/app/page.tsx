@@ -25,44 +25,35 @@ export default async function HomePage() {
     .order("created_at", { ascending: false });
 
   return (
-    <div className="min-h-screen bg-neutral-50 px-6 py-10">
-      <div className="mx-auto max-w-3xl">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-neutral-900">jobahn</h1>
-            <p className="text-sm text-neutral-500">{user.email}</p>
+    <div className="page">
+      <div className="page-container page-container--home">
+        <div className="page-header">
+          <div className="stack-tight">
+            <h1 className="heading-page">jobahn</h1>
+            <p className="text-muted">{user.email}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/onboarding"
-              className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100"
-            >
+          <div className="toolbar-inline">
+            <Link href="/onboarding" className="btn btn-secondary">
               首次設定
             </Link>
-            <Link
-              href="/settings"
-              className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100"
-            >
+            <Link href="/settings" className="btn btn-secondary">
               設定
             </Link>
             <form action={logout}>
-              <button
-                type="submit"
-                className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100"
-              >
+              <button type="submit" className="btn btn-secondary">
                 登出
               </button>
             </form>
           </div>
         </div>
 
-        <div className="mt-8 rounded-md border border-dashed border-neutral-300 bg-white p-6 text-sm text-neutral-500">
+        <div className="card card--dashed">
           {settings?.anthropic_key_last4 ? (
             <p>目前使用你自己綁定的 Anthropic API Key（末 4 碼：{settings.anthropic_key_last4}）</p>
           ) : (
             <p>
               目前使用共用額度，不需要額外設定。想改用自己的 Key 可以去
-              <Link href="/settings" className="font-medium text-neutral-900 underline">
+              <Link href="/settings" className="link">
                 設定頁
               </Link>
               綁定。
@@ -70,57 +61,54 @@ export default async function HomePage() {
           )}
         </div>
 
-        <div className="mt-6 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-neutral-900">應徵紀錄</h2>
-          <Link
-            href="/applications/new"
-            className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-800"
-          >
+        <div className="page-header">
+          <h2 className="heading-card">應徵紀錄</h2>
+          <Link href="/applications/new" className="btn btn-primary">
             + 新增應徵
           </Link>
         </div>
 
-        <div className="mt-3 overflow-hidden rounded-lg border border-neutral-200 bg-white">
+        <div className="table-wrap">
           {applications && applications.length > 0 ? (
-            <table className="w-full text-left text-sm">
-              <thead className="bg-neutral-50 text-neutral-500">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2 font-medium">公司</th>
-                  <th className="px-4 py-2 font-medium">職缺</th>
-                  <th className="px-4 py-2 font-medium">狀態</th>
-                  <th className="px-4 py-2 font-medium">ATS</th>
-                  <th className="px-4 py-2 font-medium">下載履歷</th>
+                  <th>公司</th>
+                  <th>職缺</th>
+                  <th>狀態</th>
+                  <th>ATS</th>
+                  <th>下載履歷</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-100">
+              <tbody>
                 {applications.map((app) => (
                   <tr key={app.id}>
-                    <td className="px-4 py-2">
-                      <Link href={`/applications/${app.id}`} className="text-neutral-900 hover:underline">
+                    <td>
+                      <Link href={`/applications/${app.id}`} className="link-table">
                         {app.company_name || "未命名公司"}
                       </Link>
                     </td>
-                    <td className="px-4 py-2 text-neutral-600">{app.job_title || "—"}</td>
-                    <td className="px-4 py-2 text-neutral-600">{app.status}</td>
-                    <td className="px-4 py-2 text-neutral-600">{app.ats_score ?? "—"}</td>
-                    <td className="px-4 py-2 text-neutral-600">
+                    <td>{app.job_title || "—"}</td>
+                    <td>{app.status}</td>
+                    <td>{app.ats_score ?? "—"}</td>
+                    <td>
                       {app.status === "draft" ? (
                         "—"
                       ) : (
-                        <div className="flex flex-wrap gap-x-3 gap-y-1">
+                        <div className="download-lang-list">
                           {(app.resume_language ?? []).map((lang: string) => (
-                            <span key={lang} className="whitespace-nowrap">
+                            <span key={lang} className="download-lang-item">
                               {lang}：
                               <a
                                 href={`/applications/${app.id}/resume-download?lang=${lang}&format=docx`}
-                                className="text-neutral-900 hover:underline"
+                                className="link-table"
                               >
                                 Word
                               </a>
                               {" / "}
                               <a
                                 href={`/applications/${app.id}/resume-download?lang=${lang}&format=pdf`}
-                                className="text-neutral-900 hover:underline"
+                                className="link-table"
                               >
                                 PDF
                               </a>
@@ -134,7 +122,7 @@ export default async function HomePage() {
               </tbody>
             </table>
           ) : (
-            <p className="p-4 text-sm text-neutral-500">還沒有應徵紀錄</p>
+            <p className="table-empty">還沒有應徵紀錄</p>
           )}
         </div>
       </div>

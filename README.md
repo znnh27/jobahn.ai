@@ -2,6 +2,10 @@
 
 找工作 AI 助手，Phase 3 正式產品。技術選型與架構決策見 `../data/` 底下的設定檔（`workflow.json`、`resume_rules.json`）以及專案根目錄的建置計畫。
 
+## 改樣式
+
+全站樣式統一寫在 `src/app/design-system.css`，改顏色、間距、按鈕/卡片長相都在這一個檔案改，不用去改個別畫面的程式碼。每個畫面的 `.tsx` 檔案裡只會看到語意化的 class 名字（例如 `btn-primary`、`card`），不會有一長串工具類別。履歷所見即所得畫布（`ResumePageCanvas.tsx`）的字體大小/間距是跟著 Word/PDF 產生器（`src/lib/documents/` 底下）同一套比例校準的，改畫布樣式時記得對照著看，不然畫布長相會跟下載出來的檔案對不起來。
+
 ## 開發前要準備的東西
 
 1. 一個 [Supabase](https://supabase.com) 專案

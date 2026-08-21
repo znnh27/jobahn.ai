@@ -24,10 +24,10 @@ interface CanvasProps {
 const LANG_LABEL: Record<string, string> = { en: "英文", zh: "中文" };
 
 const ATS_BANDS = [
-  { min: 85, max: 100, label: "優秀", desc: "幾乎沒有明顯缺口，可以直接投遞", color: "bg-green-500", text: "text-green-700" },
-  { min: 70, max: 84, label: "良好", desc: "已經可以投遞，缺口項目有空再補強", color: "bg-blue-500", text: "text-blue-700" },
-  { min: 50, max: 69, label: "及格邊緣", desc: "有明顯缺口，建議先補強再投遞", color: "bg-amber-500", text: "text-amber-700" },
-  { min: 0, max: 49, label: "落差大", desc: "跟 JD 落差明顯，建議大幅修改後再投", color: "bg-red-500", text: "text-red-700" },
+  { min: 85, max: 100, label: "優秀", desc: "幾乎沒有明顯缺口，可以直接投遞", dot: "ats-band-excellent", text: "ats-band-excellent" },
+  { min: 70, max: 84, label: "良好", desc: "已經可以投遞，缺口項目有空再補強", dot: "ats-band-good", text: "ats-band-good" },
+  { min: 50, max: 69, label: "及格邊緣", desc: "有明顯缺口，建議先補強再投遞", dot: "ats-band-borderline", text: "ats-band-borderline" },
+  { min: 0, max: 49, label: "落差大", desc: "跟 JD 落差明顯，建議大幅修改後再投", dot: "ats-band-weak", text: "ats-band-weak" },
 ] as const;
 
 function getAtsBand(score: number) {
@@ -37,20 +37,20 @@ function getAtsBand(score: number) {
 function AtsScoreLegend({ score }: { score: number | null }) {
   const currentBand = score !== null ? getAtsBand(score) : null;
   return (
-    <div className="mt-3 border-t border-neutral-100 pt-3">
-      <div className="flex h-1.5 overflow-hidden rounded-full bg-neutral-100">
-        <div className="w-[49%] bg-red-400" />
-        <div className="w-[20%] bg-amber-400" />
-        <div className="w-[15%] bg-blue-400" />
-        <div className="w-[16%] bg-green-500" />
+    <div className="ats-scale">
+      <div className="ats-scale-bar">
+        <div className="ats-scale-bar-segment ats-scale-bar-segment--weak" />
+        <div className="ats-scale-bar-segment ats-scale-bar-segment--borderline" />
+        <div className="ats-scale-bar-segment ats-scale-bar-segment--good" />
+        <div className="ats-scale-bar-segment ats-scale-bar-segment--excellent" />
       </div>
-      <ul className="mt-2 space-y-1 text-xs text-neutral-500">
+      <ul className="ats-scale-legend">
         {ATS_BANDS.map((b) => (
           <li
             key={b.label}
-            className={`flex items-start gap-1.5 ${currentBand?.label === b.label ? `font-medium ${b.text}` : ""}`}
+            className={`ats-scale-legend-item ${currentBand?.label === b.label ? `ats-scale-legend-item--current ${b.text}` : ""}`}
           >
-            <span className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${b.color}`} />
+            <span className={`ats-scale-dot ${b.dot}`} />
             <span>
               {b.min}–{b.max} 分・{b.label}：{b.desc}
             </span>
@@ -140,18 +140,14 @@ export function Canvas({
 
   if (!draft) {
     return (
-      <div className="rounded-lg border border-neutral-200 bg-white p-6 text-center">
-        <p className="text-sm text-neutral-600">
+      <div className="card text-center">
+        <p className="text-body">
           還沒有生成過履歷，按下面按鈕開始生成（會呼叫 AI，依語言版本數量可能要跑一陣子）。
         </p>
-        <button
-          onClick={handleGenerate}
-          disabled={isPending}
-          className="mt-4 rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
-        >
+        <button onClick={handleGenerate} disabled={isPending} className="btn btn-primary mt-4">
           {isPending ? "生成中，請稍候…" : "生成履歷"}
         </button>
-        {message && <p className="mt-3 text-sm text-red-600">{message}</p>}
+        {message && <p className="text-error mt-3">{message}</p>}
       </div>
     );
   }
@@ -160,29 +156,21 @@ export function Canvas({
   if (!resume) return null;
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[794px_1fr]">
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex gap-2">
+    <div className="canvas-layout">
+      <div className="canvas-main">
+        <div className="page-header">
+          <div className="toolbar-inline">
             {languages.map((lang) => (
               <button
                 key={lang}
                 onClick={() => setActiveLang(lang)}
-                className={`rounded-md px-3 py-1.5 text-sm ${
-                  activeLang === lang
-                    ? "bg-neutral-900 text-white"
-                    : "border border-neutral-300 text-neutral-600"
-                }`}
+                className={activeLang === lang ? "btn-toggle--active" : "btn-toggle"}
               >
                 {LANG_LABEL[lang] ?? lang}
               </button>
             ))}
           </div>
-          {finalized && (
-            <span className="rounded-md bg-green-50 px-2 py-1 text-xs text-green-700">
-              已定案，畫布唯讀
-            </span>
-          )}
+          {finalized && <span className="finalized-tag">已定案，畫布唯讀</span>}
         </div>
 
         <ResumePageCanvas
@@ -206,65 +194,53 @@ export function Canvas({
           }
         />
 
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-neutral-200 bg-white p-3">
-          <button
-            onClick={handleSave}
-            disabled={isPending}
-            className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-          >
+        <div className="card-toolbar">
+          <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
             儲存
           </button>
-          <button
-            onClick={handleRescore}
-            disabled={isPending}
-            className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-          >
+          <button onClick={handleRescore} disabled={isPending} className="btn btn-secondary">
             {isPending ? "處理中…" : "重新檢查評分"}
           </button>
-          <button
-            onClick={handleFinalize}
-            disabled={isPending}
-            className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white hover:bg-neutral-800 disabled:opacity-50"
-          >
+          <button onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
             定案
           </button>
           {finalized && (
             <>
               <a
                 href={`/applications/${applicationId}/resume-download?lang=${activeLang}&format=docx`}
-                className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                className="btn btn-secondary"
               >
                 下載 Word
               </a>
               <a
                 href={`/applications/${applicationId}/resume-download?lang=${activeLang}&format=pdf`}
-                className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                className="btn btn-secondary"
               >
                 下載 PDF
               </a>
             </>
           )}
-          {message && <span className="self-center text-sm text-neutral-500">{message}</span>}
+          {message && <span className="text-muted">{message}</span>}
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="rounded-lg border border-neutral-200 bg-white p-4">
-          <h2 className="text-sm font-semibold text-neutral-900">ATS 評分（{LANG_LABEL[activeLang]}）</h2>
-          <p className="mt-1 text-2xl font-semibold text-neutral-900">
+      <div className="canvas-sidebar">
+        <div className="card card--sm">
+          <h2 className="heading-card">ATS 評分（{LANG_LABEL[activeLang]}）</h2>
+          <p className="ats-score-value">
             {atsScore ?? "—"}
-            <span className="text-sm font-normal text-neutral-400"> / 100</span>
+            <span className="ats-score-max"> / 100</span>
             {atsScore !== null && (
-              <span className={`ml-2 align-middle text-xs font-medium ${getAtsBand(atsScore).text}`}>
+              <span className={`ats-band-tag ${getAtsBand(atsScore).text}`}>
                 {getAtsBand(atsScore).label}
               </span>
             )}
           </p>
           <AtsScoreLegend score={atsScore} />
           {(gaps[activeLang]?.length ?? 0) > 0 && (
-            <div className="mt-2 text-sm text-neutral-600">
-              <p className="font-medium">缺口：</p>
-              <ul className="mt-1 list-disc space-y-1 pl-5">
+            <div className="text-body mt-2">
+              <p className="alert-title">缺口：</p>
+              <ul className="list-disc">
                 {gaps[activeLang].map((g, i) => (
                   <li key={i}>{g}</li>
                 ))}
@@ -273,16 +249,16 @@ export function Canvas({
           )}
         </div>
 
-        <div className="rounded-lg border border-neutral-200 bg-white p-4">
-          <h2 className="text-sm font-semibold text-neutral-900">JD 符合度清單</h2>
-          <ul className="mt-2 space-y-2 text-sm">
+        <div className="card card--sm">
+          <h2 className="heading-card">JD 符合度清單</h2>
+          <ul className="checklist">
             {(checklist[activeLang] ?? []).map((item, i) => (
-              <li key={i} className="flex items-start gap-2">
+              <li key={i} className="checklist-item">
                 <span>{item.covered ? "✅" : "⚠️"}</span>
-                <span className="text-neutral-700">
+                <span className="checklist-item-text">
                   {item.item}
                   {item.covered && item.source && (
-                    <span className="ml-1 text-xs text-neutral-400">（{item.source}）</span>
+                    <span className="checklist-item-source">（{item.source}）</span>
                   )}
                 </span>
               </li>

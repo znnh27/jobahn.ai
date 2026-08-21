@@ -20,11 +20,11 @@ export default async function SettingsPage() {
     .maybeSingle();
 
   return (
-    <div className="min-h-screen bg-neutral-50 px-6 py-10">
-      <div className="mx-auto max-w-2xl space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-neutral-900">設定</h1>
-          <Link href="/" className="text-sm text-neutral-500 hover:underline">
+    <div className="page">
+      <div className="page-container">
+        <div className="page-header">
+          <h1 className="heading-page">設定</h1>
+          <Link href="/" className="link-muted">
             回首頁
           </Link>
         </div>

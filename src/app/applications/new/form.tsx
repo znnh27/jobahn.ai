@@ -31,58 +31,48 @@ export function NewApplicationForm() {
   }
 
   return (
-    <form action={formAction} className="space-y-4 rounded-lg border border-neutral-200 bg-white p-6">
-      <div>
-        <label htmlFor="companyName" className="block text-sm font-medium text-neutral-700">
+    <form action={formAction} className="card form-stack">
+      <div className="field">
+        <label htmlFor="companyName" className="label">
           公司名稱（選填）
         </label>
-        <input
-          id="companyName"
-          name="companyName"
-          type="text"
-          className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none"
-        />
+        <input id="companyName" name="companyName" type="text" className="input" />
       </div>
 
-      <div>
-        <label htmlFor="jobTitle" className="block text-sm font-medium text-neutral-700">
+      <div className="field">
+        <label htmlFor="jobTitle" className="label">
           職稱（選填）
         </label>
-        <input
-          id="jobTitle"
-          name="jobTitle"
-          type="text"
-          className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none"
-        />
+        <input id="jobTitle" name="jobTitle" type="text" className="input" />
       </div>
 
-      <div>
-        <label htmlFor="jobUrl" className="block text-sm font-medium text-neutral-700">
+      <div className="field">
+        <label htmlFor="jobUrl" className="label">
           職缺連結（選填，自動抓取內容）
         </label>
-        <div className="mt-1 flex gap-2">
+        <div className="input-row">
           <input
             id="jobUrl"
             type="url"
             value={jobUrl}
             onChange={(e) => setJobUrl(e.target.value)}
             placeholder="https://..."
-            className="block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none"
+            className="input"
           />
           <button
             type="button"
             onClick={handleScrape}
             disabled={isScraping || !jobUrl.trim()}
-            className="shrink-0 rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+            className="btn btn-secondary"
           >
             {isScraping ? "抓取中…" : "抓取內容"}
           </button>
         </div>
-        {scrapeMessage && <p className="mt-1 text-xs text-neutral-500">{scrapeMessage}</p>}
+        {scrapeMessage && <p className="hint-text">{scrapeMessage}</p>}
       </div>
 
-      <div>
-        <label htmlFor="jobDescription" className="block text-sm font-medium text-neutral-700">
+      <div className="field">
+        <label htmlFor="jobDescription" className="label">
           JD 內容（貼上職缺頁面的文字，或用上面的連結自動抓取）
         </label>
         <textarea
@@ -92,31 +82,27 @@ export function NewApplicationForm() {
           rows={10}
           value={jobDescription}
           onChange={(e) => setJobDescription(e.target.value)}
-          className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none"
+          className="textarea"
         />
       </div>
 
       <fieldset>
-        <legend className="block text-sm font-medium text-neutral-700">要生成哪個語言版本</legend>
-        <div className="mt-2 flex gap-4">
-          <label className="flex items-center gap-2 text-sm text-neutral-700">
+        <legend className="label">要生成哪個語言版本</legend>
+        <div className="checkbox-row">
+          <label className="checkbox-label">
             <input type="checkbox" name="language" value="en" />
             英文
           </label>
-          <label className="flex items-center gap-2 text-sm text-neutral-700">
+          <label className="checkbox-label">
             <input type="checkbox" name="language" value="zh" />
             中文
           </label>
         </div>
       </fieldset>
 
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state.error && <p className="text-error">{state.error}</p>}
 
-      <button
-        type="submit"
-        disabled={isPending}
-        className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
-      >
+      <button type="submit" disabled={isPending} className="btn btn-primary">
         {isPending ? "建立中…" : "下一步：生成履歷"}
       </button>
     </form>

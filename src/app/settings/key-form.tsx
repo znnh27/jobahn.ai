@@ -14,35 +14,32 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
   );
 
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-6">
-      <h2 className="text-base font-semibold text-neutral-900">Anthropic API Key（選填）</h2>
-      <p className="mt-1 text-sm text-neutral-500">
-        預設所有生成功能都會用共用的額度，不需要你另外做任何設定就能直接用。
-        如果你想改用自己的 Claude API Key（例如想自己掌控費用），可以在下面綁定，
-        綁定後你的生成會改用你自己的額度計費。
-      </p>
+    <div className="card stack">
+      <div className="stack-tight">
+        <h2 className="heading-card">Anthropic API Key（選填）</h2>
+        <p className="text-muted">
+          預設所有生成功能都會用共用的額度，不需要你另外做任何設定就能直接用。
+          如果你想改用自己的 Claude API Key（例如想自己掌控費用），可以在下面綁定，
+          綁定後你的生成會改用你自己的額度計費。
+        </p>
+      </div>
 
       {last4 ? (
-        <div className="mt-4 flex items-center justify-between rounded-md bg-neutral-50 px-3 py-2 text-sm">
-          <span className="text-neutral-700">已綁定 · 末 4 碼 {last4}</span>
+        <div className="key-status-row">
+          <span className="text-body">已綁定 · 末 4 碼 {last4}</span>
           <form action={removeAnthropicKeyAction}>
-            <button
-              type="submit"
-              className="text-sm font-medium text-red-600 hover:underline"
-            >
+            <button type="submit" className="btn-link">
               移除，改回共用額度
             </button>
           </form>
         </div>
       ) : (
-        <div className="mt-4 rounded-md bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
-          目前使用共用額度，不需要綁定也能正常使用
-        </div>
+        <div className="key-status-note">目前使用共用額度，不需要綁定也能正常使用</div>
       )}
 
-      <form action={formAction} className="mt-4 space-y-3">
-        <div>
-          <label htmlFor="anthropicKey" className="block text-sm font-medium text-neutral-700">
+      <form action={formAction} className="form-stack">
+        <div className="field">
+          <label htmlFor="anthropicKey" className="label">
             {last4 ? "更新 API Key" : "輸入 API Key"}
           </label>
           <input
@@ -51,15 +48,15 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
             type="password"
             placeholder="sk-ant-..."
             required
-            className="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none"
+            className="input"
           />
-          <p className="mt-1 text-xs text-neutral-400">
+          <p className="hint-text">
             去{" "}
             <a
               href="https://console.anthropic.com/settings/keys"
               target="_blank"
               rel="noreferrer"
-              className="underline"
+              className="link"
             >
               Anthropic Console
             </a>{" "}
@@ -67,18 +64,10 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
           </p>
         </div>
 
-        {state.error && (
-          <p className="text-sm text-red-600">{state.error}</p>
-        )}
-        {state.success && (
-          <p className="text-sm text-green-600">已儲存</p>
-        )}
+        {state.error && <p className="text-error">{state.error}</p>}
+        {state.success && <p className="text-success">已儲存</p>}
 
-        <button
-          type="submit"
-          disabled={isPending}
-          className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
-        >
+        <button type="submit" disabled={isPending} className="btn btn-primary">
           {isPending ? "驗證中…" : "儲存"}
         </button>
       </form>

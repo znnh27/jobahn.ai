@@ -68,16 +68,12 @@ export function ResumePageCanvas({
   const contactLine = buildContactLine(contact);
 
   return (
-    <div className="resume-page mx-auto w-[794px] max-w-full bg-white p-12 text-[14.67px] leading-snug text-neutral-900 shadow-md">
-      <div className="text-center text-2xl font-bold">{name}</div>
-      <div className="mt-1 mb-3 text-center text-[10.67px] text-neutral-500">{contactLine}</div>
+    <div className="resume-page">
+      <div className="resume-name">{name}</div>
+      <div className="resume-contact">{contactLine}</div>
 
       <SectionHeader>{labels.summary}</SectionHeader>
-      <EditableParagraph
-        value={resume.summary}
-        editable={editable}
-        onCommit={onChangeSummary}
-      />
+      <EditableParagraph value={resume.summary} editable={editable} onCommit={onChangeSummary} />
 
       <SectionHeader>{labels.experience}</SectionHeader>
       {resume.work_experience.map((exp, i) => (
@@ -105,62 +101,40 @@ export function ResumePageCanvas({
 
       <SectionHeader>{labels.education}</SectionHeader>
       {resume.education.map((edu, i) => (
-        <div key={i} className="mt-2">
-          <Row left={edu.school} right={edu.location} bold />
+        <div key={i} className="resume-block">
+          <Row left={edu.school} right={edu.location} />
           {(edu.detail || edu.period) && (
-            <Row left={edu.detail ?? ""} right={edu.period ?? ""} italic muted />
+            <Row left={edu.detail ?? ""} right={edu.period ?? ""} variant="muted" />
           )}
         </div>
       ))}
 
       <SectionHeader>{labels.skills}</SectionHeader>
       <div className="mt-1">
-        <span className="font-bold">{labels.computer} </span>
-        <EditableSpan
-          value={resume.skills.join(", ")}
-          editable={editable}
-          onCommit={onChangeSkills}
-        />
+        <span className="resume-skills-label">{labels.computer} </span>
+        <EditableSpan value={resume.skills.join(", ")} editable={editable} onCommit={onChangeSkills} />
       </div>
     </div>
   );
 }
 
 function SectionHeader({ children }: { children: string }) {
-  return (
-    <div className="mt-3 mb-1 border-b border-neutral-900 pb-0.5 text-[14.67px] font-bold">
-      {children}
-    </div>
-  );
+  return <div className="resume-section-header">{children}</div>;
 }
 
 function Row({
   left,
   right,
-  bold,
-  italic,
-  muted,
+  variant,
 }: {
   left: string;
   right: string | null;
-  bold?: boolean;
-  italic?: boolean;
-  muted?: boolean;
+  variant?: "muted" | "role";
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span
-        className={`${bold ? "font-bold" : ""} ${italic ? "italic" : ""} ${muted ? "text-neutral-500" : ""}`}
-      >
-        {left}
-      </span>
-      {right && (
-        <span
-          className={`shrink-0 ${bold ? "font-bold" : ""} ${italic ? "italic" : ""} ${muted ? "text-neutral-500" : ""}`}
-        >
-          {right}
-        </span>
-      )}
+    <div className={`resume-row ${variant ? `resume-row--${variant}` : ""}`}>
+      <span className="resume-row-left">{left}</span>
+      {right && <span className="resume-row-right">{right}</span>}
     </div>
   );
 }
@@ -175,9 +149,9 @@ function ExperienceBlock({
   onChangeBullets: (bullets: string[]) => void;
 }) {
   return (
-    <div className="mt-2">
-      <Row left={entry.org} right={entry.location} bold />
-      <Row left={entry.role} right={entry.period} bold italic />
+    <div className="resume-block">
+      <Row left={entry.org} right={entry.location} />
+      <Row left={entry.role} right={entry.period} variant="role" />
       <EditableBulletList bullets={entry.bullets} editable={editable} onChange={onChangeBullets} />
     </div>
   );
@@ -197,7 +171,7 @@ function EditableParagraph({
       contentEditable={editable}
       suppressContentEditableWarning
       onBlur={(e) => onCommit(e.currentTarget.textContent ?? "")}
-      className={editable ? "rounded-sm outline-none focus:bg-amber-50" : ""}
+      className={`resume-editable ${editable ? "resume-editable--editable" : ""}`}
     >
       {value}
     </div>
@@ -218,7 +192,7 @@ function EditableSpan({
       contentEditable={editable}
       suppressContentEditableWarning
       onBlur={(e) => onCommit(e.currentTarget.textContent ?? "")}
-      className={editable ? "rounded-sm outline-none focus:bg-amber-50" : ""}
+      className={`resume-editable ${editable ? "resume-editable--editable" : ""}`}
     >
       {value}
     </span>
@@ -286,10 +260,10 @@ function EditableBulletList({
   }
 
   return (
-    <div className="mt-0.5">
+    <div className="resume-bullets">
       {bullets.map((b, i) => (
-        <div key={i} className="flex gap-1.5 pl-3">
-          <span className="select-none">{"•"}</span>
+        <div key={i} className="resume-bullet">
+          <span className="resume-bullet-dot">{"•"}</span>
           <div
             ref={(el) => {
               refs.current[i] = el;
@@ -298,7 +272,7 @@ function EditableBulletList({
             suppressContentEditableWarning
             onBlur={(e) => commitBulletText(i, e.currentTarget.textContent ?? "")}
             onKeyDown={(e) => handleKeyDown(e, i)}
-            className={`flex-1 ${editable ? "rounded-sm outline-none focus:bg-amber-50" : ""}`}
+            className={`resume-editable ${editable ? "resume-editable--editable" : ""}`}
           >
             {b}
           </div>

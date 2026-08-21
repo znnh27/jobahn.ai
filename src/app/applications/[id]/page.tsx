@@ -45,18 +45,18 @@ export default async function ApplicationDetailPage(
   };
 
   return (
-    <div className="min-h-screen bg-neutral-50 px-6 py-10">
-      <div className="mx-auto max-w-[1180px] space-y-6">
-        <div className="flex items-center justify-between">
+    <div className="page">
+      <div className="page-container page-container--canvas">
+        <div className="page-header">
           <div>
-            <h1 className="text-xl font-semibold text-neutral-900">
+            <h1 className="heading-page">
               {application.company_name || "未命名公司"} · {application.job_title || "未命名職缺"}
             </h1>
-            <p className="mt-1 text-sm text-neutral-500">
+            <p className="text-muted mt-1">
               語言版本：{(application.resume_language ?? []).join(" / ")}
             </p>
           </div>
-          <Link href="/" className="text-sm text-neutral-500 hover:underline">
+          <Link href="/" className="link-muted">
             回首頁
           </Link>
         </div>
