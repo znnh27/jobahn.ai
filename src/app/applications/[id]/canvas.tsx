@@ -23,6 +23,44 @@ interface CanvasProps {
 
 const LANG_LABEL: Record<string, string> = { en: "英文", zh: "中文" };
 
+const ATS_BANDS = [
+  { min: 85, max: 100, label: "優秀", desc: "幾乎沒有明顯缺口，可以直接投遞", color: "bg-green-500", text: "text-green-700" },
+  { min: 70, max: 84, label: "良好", desc: "已經可以投遞，缺口項目有空再補強", color: "bg-blue-500", text: "text-blue-700" },
+  { min: 50, max: 69, label: "及格邊緣", desc: "有明顯缺口，建議先補強再投遞", color: "bg-amber-500", text: "text-amber-700" },
+  { min: 0, max: 49, label: "落差大", desc: "跟 JD 落差明顯，建議大幅修改後再投", color: "bg-red-500", text: "text-red-700" },
+] as const;
+
+function getAtsBand(score: number) {
+  return ATS_BANDS.find((b) => score >= b.min && score <= b.max) ?? ATS_BANDS[ATS_BANDS.length - 1];
+}
+
+function AtsScoreLegend({ score }: { score: number | null }) {
+  const currentBand = score !== null ? getAtsBand(score) : null;
+  return (
+    <div className="mt-3 border-t border-neutral-100 pt-3">
+      <div className="flex h-1.5 overflow-hidden rounded-full bg-neutral-100">
+        <div className="w-[49%] bg-red-400" />
+        <div className="w-[20%] bg-amber-400" />
+        <div className="w-[15%] bg-blue-400" />
+        <div className="w-[16%] bg-green-500" />
+      </div>
+      <ul className="mt-2 space-y-1 text-xs text-neutral-500">
+        {ATS_BANDS.map((b) => (
+          <li
+            key={b.label}
+            className={`flex items-start gap-1.5 ${currentBand?.label === b.label ? `font-medium ${b.text}` : ""}`}
+          >
+            <span className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${b.color}`} />
+            <span>
+              {b.min}–{b.max} 分・{b.label}：{b.desc}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function Canvas({
   applicationId,
   languages,
@@ -216,7 +254,13 @@ export function Canvas({
           <p className="mt-1 text-2xl font-semibold text-neutral-900">
             {atsScore ?? "—"}
             <span className="text-sm font-normal text-neutral-400"> / 100</span>
+            {atsScore !== null && (
+              <span className={`ml-2 align-middle text-xs font-medium ${getAtsBand(atsScore).text}`}>
+                {getAtsBand(atsScore).label}
+              </span>
+            )}
           </p>
+          <AtsScoreLegend score={atsScore} />
           {(gaps[activeLang]?.length ?? 0) > 0 && (
             <div className="mt-2 text-sm text-neutral-600">
               <p className="font-medium">缺口：</p>
