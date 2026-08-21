@@ -60,3 +60,4 @@ group by provider;
 - [x] 首頁：應徵紀錄表格（簡易版，含新增應徵按鈕、每筆已定案應徵的 Word/PDF 下載連結）
 - [x] 履歷所見即所得畫布：右側直接顯示排版後的履歷（跟下載的 Word/PDF 版面一致），Professional Summary／bullet／技能可以直接點下去編輯，bullet 支援 Enter 新增、清空後 Backspace 刪除；中文用 Carlito（Calibri 相容替代字型）+ Noto Sans TC 網頁字型，跟下載檔案換行位置幾乎一致
 - [x] 履歷下載：Word（`docx`）／PDF（`@react-pdf/renderer`，中文用 Noto Sans TC 完整字集嵌入）現場產生，不重新呼叫 AI、不存檔案；中文排版另外處理過自動斷行（避免中文字間插入不該有的連字號）跟一頁塞不下的問題
+- [x] 職缺輸入支援貼連結自動抓取（Firecrawl `/v1/scrape`），抓下來的內容會帶入 JD 文字框讓使用者自己檢查/編輯，不會直接送出；也保留直接貼 JD 文字的選項

@@ -2,8 +2,28 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { scrapeJobPosting } from "@/lib/jobs/scrapeJobPosting";
 
 type CreateResult = { error?: string };
+
+type ScrapeResult = { text?: string; error?: string };
+
+export async function scrapeJobUrlAction(url: string): Promise<ScrapeResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  if (!url.trim()) return { error: "請貼上職缺連結" };
+
+  try {
+    const text = await scrapeJobPosting(url.trim());
+    return { text };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "抓取失敗" };
+  }
+}
 
 export async function createApplication(formData: FormData): Promise<CreateResult> {
   const supabase = await createClient();
