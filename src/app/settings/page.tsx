@@ -23,7 +23,7 @@ export default async function SettingsPage() {
     <div className="page">
       <div className="page-container">
         <div className="page-header">
-          <h1 className="heading-page">設定</h1>
+          <h1 className="heading-page">帳號設定</h1>
           <Link href="/" className="link-muted">
             回首頁
           </Link>

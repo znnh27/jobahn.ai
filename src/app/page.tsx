@@ -13,11 +13,15 @@ export default async function HomePage() {
     redirect("/login");
   }
 
-  const { data: settings } = await supabase
-    .from("user_settings")
-    .select("anthropic_key_last4")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const { count: experienceCount } = await supabase
+    .from("experience_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  // 沒有經歷資料庫的帳號一律先導去首次設定，沒有跳過選項。
+  if ((experienceCount ?? 0) === 0) {
+    redirect("/onboarding");
+  }
 
   const { data: applications } = await supabase
     .from("applications")
@@ -33,11 +37,11 @@ export default async function HomePage() {
             <p className="text-muted">{user.email}</p>
           </div>
           <div className="toolbar-inline">
-            <Link href="/onboarding" className="btn btn-secondary">
-              首次設定
+            <Link href="/experience" className="btn btn-secondary">
+              經歷資料庫
             </Link>
             <Link href="/settings" className="btn btn-secondary">
-              設定
+              帳號設定
             </Link>
             <form action={logout}>
               <button type="submit" className="btn btn-secondary">
@@ -45,20 +49,6 @@ export default async function HomePage() {
               </button>
             </form>
           </div>
-        </div>
-
-        <div className="card card--dashed">
-          {settings?.anthropic_key_last4 ? (
-            <p>目前使用你自己綁定的 Anthropic API Key（末 4 碼：{settings.anthropic_key_last4}）</p>
-          ) : (
-            <p>
-              目前使用共用額度，不需要額外設定。想改用自己的 Key 可以去
-              <Link href="/settings" className="link">
-                設定頁
-              </Link>
-              綁定。
-            </p>
-          )}
         </div>
 
         <div className="page-header">
