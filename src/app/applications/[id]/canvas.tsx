@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { generateAction, rescoreAction, saveDraftAction, finalizeResumeAction } from "./actions";
 import { ResumePageCanvas } from "./ResumePageCanvas";
+import { JdGapDialog } from "./JdGapDialog";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import type { ResumeContact } from "@/lib/documents/resumeDocContent";
 
@@ -79,6 +81,7 @@ export function Canvas({
   const [activeLang, setActiveLang] = useState(languages[0]);
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [gapDialogText, setGapDialogText] = useState<string | null>(null);
 
   function handleGenerate() {
     setMessage(null);
@@ -194,18 +197,9 @@ export function Canvas({
           }
         />
 
-        <div className="card-toolbar">
-          <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
-            儲存
-          </button>
-          <button onClick={handleRescore} disabled={isPending} className="btn btn-secondary">
-            {isPending ? "處理中…" : "重新檢查評分"}
-          </button>
-          <button onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
-            定案
-          </button>
-          {finalized && (
-            <>
+        {finalized ? (
+          <div className="stack-tight">
+            <div className="card-toolbar">
               <a
                 href={`/applications/${applicationId}/resume-download?lang=${activeLang}&format=docx`}
                 className="btn btn-secondary"
@@ -218,10 +212,29 @@ export function Canvas({
               >
                 下載 PDF
               </a>
-            </>
-          )}
-          {message && <span className="text-muted">{message}</span>}
-        </div>
+              <Link href="/experience" className="btn btn-secondary">
+                查看經歷資料庫
+              </Link>
+              <Link href="/" className="link-muted">
+                回首頁
+              </Link>
+            </div>
+            <p className="text-muted-xs">已經幫你把這次用到的經歷記錄回經歷資料庫了。</p>
+          </div>
+        ) : (
+          <div className="card-toolbar">
+            <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
+              儲存
+            </button>
+            <button onClick={handleRescore} disabled={isPending} className="btn btn-secondary">
+              {isPending ? "處理中…" : "重新檢查評分"}
+            </button>
+            <button onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
+              定案
+            </button>
+            {message && <span className="text-muted">{message}</span>}
+          </div>
+        )}
       </div>
 
       <div className="canvas-sidebar">
@@ -260,12 +273,53 @@ export function Canvas({
                   {item.covered && item.source && (
                     <span className="checklist-item-source">（{item.source}）</span>
                   )}
+                  {!item.covered && !finalized && (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        className="link-muted"
+                        onClick={() => setGapDialogText(item.item)}
+                      >
+                        讓 AI 幫你挖掘這段經驗
+                      </button>
+                    </>
+                  )}
                 </span>
               </li>
             ))}
           </ul>
         </div>
       </div>
+
+      {gapDialogText && (
+        <JdGapDialog
+          gapText={gapDialogText}
+          language={activeLang}
+          sections={[
+            ...resume.work_experience.map((e, i) => ({
+              section: "work_experience" as const,
+              index: i,
+              org: e.org,
+              role: e.role,
+            })),
+            ...resume.leadership.map((e, i) => ({
+              section: "leadership" as const,
+              index: i,
+              org: e.org,
+              role: e.role,
+            })),
+          ]}
+          onClose={() => setGapDialogText(null)}
+          onCommitBullet={(section, index, bulletText) =>
+            updateResume(activeLang, (r) => {
+              const items = [...r[section]];
+              items[index] = { ...items[index], bullets: [...items[index].bullets, bulletText] };
+              return { ...r, [section]: items };
+            })
+          }
+        />
+      )}
     </div>
   );
 }

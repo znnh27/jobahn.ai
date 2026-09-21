@@ -73,6 +73,7 @@ const SECTIONS = [
   ["table", "表格"],
   ["ats", "ATS 評分量表"],
   ["checklist", "JD 符合度清單"],
+  ["experience", "經歷資料庫"],
 ] as const;
 
 export default function DesignSystemPage() {
@@ -279,7 +280,7 @@ export default function DesignSystemPage() {
         {/* 檔案上傳元件 */}
         <section id="upload" className="ds-section">
           <h2 className="ds-section-title">檔案上傳元件</h2>
-          <p className="ds-section-desc">首次設定上傳履歷用的拖拉上傳元件（onboarding/upload-form.tsx）。</p>
+          <p className="ds-section-desc">上傳履歷用的拖拉上傳元件（onboarding/OnboardingUpload.tsx、experience/UploadSourceCard.tsx）。</p>
           <div className="card ds-card-demo mt-4">
             <div className="file-drop-zone">
               <div className="file-drop-zone-icon">
@@ -510,6 +511,51 @@ export default function DesignSystemPage() {
                 <span className="checklist-item-text">尚未符合的項目</span>
               </li>
             </ul>
+          </div>
+        </section>
+
+        {/* 經歷資料庫 */}
+        <section id="experience" className="ds-section">
+          <h2 className="ds-section-title">經歷資料庫</h2>
+          <p className="ds-section-desc">
+            同一件事的不同寫法（variant）用柔和的資訊色標籤標註強調重點，不用紅字/底線（那是錯誤語意），
+            對應 <span className="ds-code">/experience</span> 頁面。
+          </p>
+          <div className="card ds-card-demo mt-4">
+            <div className="exp-entry resume-block">
+              <div className="resume-row">
+                <span className="resume-row-left">範例公司股份有限公司</span>
+                <span className="resume-row-right">Taipei City, Taiwan</span>
+              </div>
+              <div className="exp-role-row resume-row resume-row--role">
+                <span className="resume-row-left">產品經理</span>
+                <span className="resume-row-right">Jan. 2023 – Present</span>
+              </div>
+              <div className="resume-bullets">
+                <div className="exp-achievement">
+                  <div className="exp-variant">
+                    <span className="resume-bullet-dot">{"•"}</span>
+                    <div className="exp-variant-bullet">
+                      <span>推動跨部門專案，將產品上線時程縮短 30%。</span>
+                      <span className="exp-variant-tag">強調專案管理與效率提升</span>
+                    </div>
+                    <button type="button" className="exp-variant-remove">
+                      刪除
+                    </button>
+                  </div>
+                  <div className="exp-variant">
+                    <span className="resume-bullet-dot">{"•"}</span>
+                    <div className="exp-variant-bullet">
+                      <span>帶領跨部門團隊重整開發流程，把交付週期從 6 週壓縮到 4 週。</span>
+                      <span className="exp-variant-tag">強調流程優化與量化成果</span>
+                    </div>
+                    <button type="button" className="exp-variant-remove">
+                      刪除
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
       </div>
