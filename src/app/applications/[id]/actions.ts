@@ -11,34 +11,23 @@ import {
   generateCoverLetterForApplication,
   recheckJdMatchWithCoverLetter,
 } from "@/lib/resumes/generateCoverLetter";
+import { mergeContentIntoExperienceDb } from "@/lib/experience/mergeIntoExperienceDb";
 
 type ResumeMap = Record<string, GeneratedResume["resume"]>;
 type ChecklistMap = Record<string, GeneratedResume["jd_match_checklist"]>;
 type GapsMap = Record<string, string[]>;
 
-/**
- * 生成履歷時 AI 可能會對公司名稱做輕微改寫（例如省略括號內的說明文字），
- * 所以比對時先試完全一致，再退而求其次比對「公司名稱的核心詞」是否互相包含，
- * 避免因為文字沒有一字不差而漏掉本來該回寫的經歷。
- */
-function findMatchingEntry<T extends { org_name: string }>(
-  candidates: T[],
-  targetOrg: string,
-): T | undefined {
-  const normalize = (s: string) => s.trim().toLowerCase();
-  const coreName = (s: string) => normalize(s.split("(")[0]).trim();
-
-  const exact = candidates.find((c) => normalize(c.org_name) === normalize(targetOrg));
-  if (exact) return exact;
-
-  const targetCore = coreName(targetOrg);
-  return candidates.find((c) => {
-    const candidateCore = coreName(c.org_name);
-    return (
-      candidateCore.length > 0 &&
-      (candidateCore.includes(targetCore) || targetCore.includes(candidateCore))
-    );
-  });
+/** 把定案履歷某個語言版本的工作經歷/領導經驗序列化成一般履歷文字，餵給跟解析履歷檔案
+ * 同一套的 mergeContentIntoExperienceDb，這樣「定案後寫回資料庫」跟「上傳履歷解析」共用
+ * 同一套比對/分組邏輯，不用各自維護一套本地字串比對規則。 */
+function serializeResumeSections(resume: GeneratedResume["resume"]): string {
+  const sections = [...(resume.work_experience ?? []), ...(resume.leadership ?? [])];
+  return sections
+    .map((s) => {
+      const bullets = s.bullets.map((b) => `- ${b}`).join("\n");
+      return `${s.org}\t${s.location ?? ""}\n${s.role}\t${s.period}\n${bullets}`;
+    })
+    .join("\n\n");
 }
 
 type GenerateResult = {
@@ -166,7 +155,6 @@ export async function finalizeResumeAction(
 
   const draft = application.resume_draft as ResumeMap;
   const languages: string[] = application.resume_language ?? [];
-  const dateTag = new Date().toISOString().slice(0, 10);
   const labelBase =
     (application.company_name || "app") + "-" + (application.job_title || applicationId.slice(0, 8));
 
@@ -174,30 +162,15 @@ export async function finalizeResumeAction(
     const resume = draft[lang];
     if (!resume) continue;
 
-    const sourceTag = `${labelBase}_${lang}_final(${dateTag})`;
-    const sections = [...(resume.work_experience ?? []), ...(resume.leadership ?? [])];
+    const rawContent = serializeResumeSections(resume);
+    if (!rawContent.trim()) continue;
 
-    // 一次抓這個語言底下所有經歷，本地比對，比較能容忍 AI 生成時對公司名稱的些微改寫
-    const { data: candidates } = await supabase
-      .from("experience_entries")
-      .select("id, org_name, description_variants")
-      .eq("user_id", user.id)
-      .eq("language", lang);
-
-    for (const section of sections) {
-      const existing = findMatchingEntry(candidates ?? [], section.org);
-      if (!existing) continue; // 找不到對應經歷就跳過，不亂造新的一筆
-
-      const updatedVariants = [
-        ...((existing.description_variants as unknown[]) ?? []),
-        { source: sourceTag, bullets: section.bullets },
-      ];
-
-      await supabase
-        .from("experience_entries")
-        .update({ description_variants: updatedVariants, updated_at: new Date().toISOString() })
-        .eq("id", existing.id);
-    }
+    await mergeContentIntoExperienceDb({
+      supabase,
+      userId: user.id,
+      sourceLabel: `${labelBase}_${lang}_定案`,
+      rawContent,
+    });
   }
 
   const { error: updateError } = await supabase

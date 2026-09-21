@@ -1,0 +1,305 @@
+import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { askClaude } from "@/lib/ai/askClaude";
+
+// Phase 1（經歷資料庫重新設計）的核心：把「新內容」（一份履歷檔案的原文，或一次應徵定案
+// 用到的內容）併進使用者既有的經歷資料庫，只會新增、絕對不會刪除既有資料。
+//
+// 跟舊版 parseAllResumesForUser 的差異：
+// 1. 舊版每次重新處理「全部」上傳過的檔案、整批 INSERT 新資料，從來沒刪掉舊的 → 每次重新
+//    解析都會重複。這版只處理「這一次的新內容」，跟現有資料庫比對後決定要併到哪裡。
+// 2. 同一件事的不同寫法（bullet）不再依「來源檔案」分組，而是依「同一個成就/同一件事」分組
+//    在同一個 achievement 底下，每個寫法附一個簡短的「強調重點」標籤，供之後挑選用。
+
+interface ExistingAchievementSummary {
+  achievementId: string;
+  sampleText: string;
+}
+
+interface ExistingEntrySummary {
+  entryId: string;
+  language: string;
+  entryType: string;
+  orgName: string;
+  location: string | null;
+  roles: string[];
+  periods: string[];
+  achievements: ExistingAchievementSummary[];
+}
+
+interface AppendVariantAction {
+  action: "append_variant";
+  entryId: string;
+  achievementId: string;
+  text: string;
+  angleLabel: string;
+}
+
+interface NewAchievementAction {
+  action: "new_achievement";
+  entryId: string;
+  text: string;
+  angleLabel: string;
+}
+
+interface AppendRoleVariantAction {
+  action: "append_role_variant";
+  entryId: string;
+  role: string;
+}
+
+interface NewEntryAction {
+  action: "new_entry";
+  language: string;
+  entryType: string;
+  orgName: string;
+  location: string | null;
+  role: string;
+  period: string;
+  achievements: { text: string; angleLabel: string }[];
+}
+
+type MergeAction =
+  | AppendVariantAction
+  | NewAchievementAction
+  | AppendRoleVariantAction
+  | NewEntryAction;
+
+interface MergePlanResponse {
+  profile: Record<string, unknown> | null;
+  conflicts_needing_confirmation: string[];
+  actions: MergeAction[];
+}
+
+export interface MergeResult {
+  newEntriesCreated: number;
+  newAchievementsCreated: number;
+  variantsAppended: number;
+  roleVariantsAppended: number;
+  conflicts: string[];
+}
+
+const SYSTEM_PROMPT = `你是履歷經歷資料庫的合併助手。使用者已經有一份整理好的經歷資料庫（依公司/職位分組，每組底下的 bullet 又依「同一件事的不同寫法」分組成 achievement），現在要把「一份新的履歷內容」併進這個資料庫。
+
+規則：
+1. 只會新增，絕對不會刪除或覆蓋既有的 achievement、variant、entry。
+2. 新內容裡的每一條 bullet，你要判斷屬於哪一種情況：
+   a. 這條講的事情跟某個既有 entry 底下某個既有 achievement 是同一件事（只是寫法不同）→ 輸出 append_variant，帶那個 entry 跟 achievement 的 id
+   b. 這條是某個既有 entry（同一家公司同一個職位）底下的新成就，資料庫裡還沒有 → 輸出 new_achievement，帶那個 entry 的 id
+   c. 這是一個全新的公司/組織或全新的職位，資料庫裡完全沒有對應的 entry → 輸出 new_entry，附完整資訊
+3. 判斷「同一家公司」時要看語意，不要只比對字串——「網際威信股份有限公司」「網際威信股份有限公司（金融科技公司...）」「HiTrust」如果指的是同一家公司，都算同一個 entry，不要因為附註文字不同就當成不同公司開新的 entry。
+4. 每一條輸出的 bullet 文字都要附一個簡短的「角度標籤」（angleLabel），描述這個寫法強調什麼重點，例如「強調從 0 到 1 實作」「強調數據分析與量化成果」「強調跨部門溝通協調」，這個標籤只給使用者自己參考挑選用，不會出現在正式履歷裡。
+5. 職稱也要比照 bullet 累積不同寫法：如果新內容對某個既有 entry 的職稱寫法（跟資料庫裡列出的 roles 比對）不完全一樣（例如「PM」vs「Project Manager」、中英文不同語言下的職稱說法），輸出 append_role_variant 把新寫法加進去；如果新內容的職稱只是大小寫、標點差異，跟既有寫法本質相同，就不用輸出這個動作，避免重複累積幾乎一樣的字串。**任職期間（period）不用做這個處理**，維持原本第一次寫入的版本就好，不管新內容怎麼描述期間都不用理它。
+6. 中文和英文內容分開處理，不要互相翻譯，language 欄位一律用 "zh" 或 "en"。
+7. 不要編造任何內容。
+8. 同時比對這份新內容裡的聯絡資訊、學歷、技能、Professional Summary，跟使用者目前已經存的 profile 資料合併：同一個真實值只是格式不同就直接正規化輸出（電話號碼一律 +886-9XXXXXXXX 格式），真的兜不起來、無法判斷哪個正確的欄位維持原本值、把說明放進 conflicts_needing_confirmation，不要把衝突文字塞進欄位本身。如果這份新內容沒有提供某個 profile 欄位的資訊，profile 就回傳 null 代表不用更新。
+9. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
+
+輸出格式（嚴格遵守）：
+{
+  "profile": { ... } | null,
+  "conflicts_needing_confirmation": string[],
+  "actions": [
+    { "action": "append_variant", "entryId": string, "achievementId": string, "text": string, "angleLabel": string },
+    { "action": "new_achievement", "entryId": string, "text": string, "angleLabel": string },
+    { "action": "append_role_variant", "entryId": string, "role": string },
+    { "action": "new_entry", "language": "zh"|"en", "entryType": "work"|"leadership", "orgName": string, "location": string|null, "role": string, "period": string, "achievements": [{ "text": string, "angleLabel": string }] }
+  ]
+}`;
+
+export async function mergeContentIntoExperienceDb(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  sourceLabel: string;
+  rawContent: string;
+}): Promise<MergeResult> {
+  const { supabase, userId, sourceLabel, rawContent } = params;
+
+  const existingSummary = await loadExistingSummary(supabase, userId);
+
+  const { data: existingProfile } = await supabase
+    .from("profile_data")
+    .select("data")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  const userPrompt = `===== 使用者目前的經歷資料庫（摘要，每個 achievement 只列一句代表性寫法）=====
+${JSON.stringify(existingSummary, null, 2)}
+
+===== 使用者目前的 profile 資料 =====
+${JSON.stringify(existingProfile?.data ?? {}, null, 2)}
+
+===== 新內容（來源：${sourceLabel}）=====
+${rawContent}`;
+
+  const response = await askClaude({
+    userId,
+    feature: "experience_merge",
+    systemPrompt: SYSTEM_PROMPT,
+    userPrompt,
+    maxTokens: 16000,
+    supabase,
+  });
+
+  const plan = parseJsonResponse(response.text);
+
+  if (plan.profile) {
+    await supabase.from("profile_data").upsert({
+      user_id: userId,
+      data: { ...(existingProfile?.data ?? {}), ...plan.profile },
+    });
+  }
+
+  const result: MergeResult = {
+    newEntriesCreated: 0,
+    newAchievementsCreated: 0,
+    variantsAppended: 0,
+    roleVariantsAppended: 0,
+    conflicts: plan.conflicts_needing_confirmation ?? [],
+  };
+
+  for (const action of plan.actions) {
+    if (action.action === "new_entry") {
+      const achievements = action.achievements.map((a) => ({
+        id: newAchievementId(),
+        variants: [{ text: a.text, angleLabel: a.angleLabel, source: sourceLabel }],
+      }));
+
+      const { error } = await supabase.from("experience_entries").insert({
+        user_id: userId,
+        language: action.language,
+        entry_type: action.entryType,
+        org_name: action.orgName,
+        location: action.location,
+        role_variants: [{ role: action.role, source: [sourceLabel] }],
+        period_variants: [{ period: action.period, source: [sourceLabel] }],
+        achievements,
+      });
+      if (error) throw new Error(`新增經歷區塊失敗：${error.message}`);
+      result.newEntriesCreated += 1;
+      result.newAchievementsCreated += achievements.length;
+      continue;
+    }
+
+    if (action.action === "new_achievement") {
+      const { data: row, error: readError } = await supabase
+        .from("experience_entries")
+        .select("achievements")
+        .eq("id", action.entryId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (readError || !row) throw new Error(`找不到要新增成就的經歷區塊：${action.entryId}`);
+
+      const achievements = Array.isArray(row.achievements) ? row.achievements : [];
+      achievements.push({
+        id: newAchievementId(),
+        variants: [{ text: action.text, angleLabel: action.angleLabel, source: sourceLabel }],
+      });
+
+      const { error: writeError } = await supabase
+        .from("experience_entries")
+        .update({ achievements, updated_at: new Date().toISOString() })
+        .eq("id", action.entryId)
+        .eq("user_id", userId);
+      if (writeError) throw new Error(`寫入新成就失敗：${writeError.message}`);
+      result.newAchievementsCreated += 1;
+      continue;
+    }
+
+    if (action.action === "append_variant") {
+      const { data: row, error: readError } = await supabase
+        .from("experience_entries")
+        .select("achievements")
+        .eq("id", action.entryId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (readError || !row) throw new Error(`找不到要新增寫法的經歷區塊：${action.entryId}`);
+
+      const achievements = Array.isArray(row.achievements) ? row.achievements : [];
+      const target = achievements.find(
+        (a: { id: string }) => a.id === action.achievementId,
+      );
+      if (!target) throw new Error(`找不到要新增寫法的 achievement：${action.achievementId}`);
+
+      target.variants.push({ text: action.text, angleLabel: action.angleLabel, source: sourceLabel });
+
+      const { error: writeError } = await supabase
+        .from("experience_entries")
+        .update({ achievements, updated_at: new Date().toISOString() })
+        .eq("id", action.entryId)
+        .eq("user_id", userId);
+      if (writeError) throw new Error(`寫入新寫法失敗：${writeError.message}`);
+      result.variantsAppended += 1;
+      continue;
+    }
+
+    if (action.action === "append_role_variant") {
+      const { data: row, error: readError } = await supabase
+        .from("experience_entries")
+        .select("role_variants")
+        .eq("id", action.entryId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (readError || !row) throw new Error(`找不到要新增職稱寫法的經歷區塊：${action.entryId}`);
+
+      const roleVariants = Array.isArray(row.role_variants) ? row.role_variants : [];
+      roleVariants.push({ role: action.role, source: [sourceLabel] });
+
+      const { error: writeError } = await supabase
+        .from("experience_entries")
+        .update({ role_variants: roleVariants, updated_at: new Date().toISOString() })
+        .eq("id", action.entryId)
+        .eq("user_id", userId);
+      if (writeError) throw new Error(`寫入新職稱寫法失敗：${writeError.message}`);
+      result.roleVariantsAppended += 1;
+      continue;
+    }
+  }
+
+  return result;
+}
+
+async function loadExistingSummary(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<ExistingEntrySummary[]> {
+  const { data, error } = await supabase
+    .from("experience_entries")
+    .select("id, language, entry_type, org_name, location, role_variants, period_variants, achievements")
+    .eq("user_id", userId);
+
+  if (error) throw new Error(`讀取既有經歷資料庫失敗：${error.message}`);
+
+  return (data ?? []).map((row) => ({
+    entryId: row.id,
+    language: row.language,
+    entryType: row.entry_type,
+    orgName: row.org_name,
+    location: row.location,
+    roles: (row.role_variants ?? []).map((r: { role: string }) => r.role),
+    periods: (row.period_variants ?? []).map((p: { period: string }) => p.period),
+    achievements: (row.achievements ?? []).map(
+      (a: { id: string; variants: { text: string }[] }) => ({
+        achievementId: a.id,
+        sampleText: a.variants[0]?.text ?? "",
+      }),
+    ),
+  }));
+}
+
+function newAchievementId(): string {
+  return `ach_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function parseJsonResponse(text: string): MergePlanResponse {
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "");
+
+  try {
+    return JSON.parse(cleaned) as MergePlanResponse;
+  } catch {
+    throw new Error("AI 回傳的合併計畫不是有效的 JSON，解析失敗");
+  }
+}

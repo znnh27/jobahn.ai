@@ -2,6 +2,14 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 
+const SUMMARY_RULES = `Professional Summary 寫作規則（一定要遵守）：
+1. 先看 JD 最重視的 1-2 項核心能力/條件，從經歷資料庫裡挑選跟這些條件最相關的主題與成就來寫，其餘經歷不用勉強塞進來湊滿。
+2. 用綜合陳述寫成一段話，不是把 bullet 條列拼接起來；控制在 3-4 句話內。
+3. 第一句定位使用者的核心優勢/專業定位，中間 1-2 句呼應 JD 最看重的能力並帶出經歷資料庫裡的具體佐證（能帶量化成果就帶），最後視情況一句帶出跟這個職缺/領域的契合度。
+4. 禁止空泛形容詞堆疊（例如「passionate」「driven」「results-oriented」單獨出現卻沒有具體事實撐著），每個特質描述都要有實際內容佐證，不能只是形容詞。
+5. 不要直接重複 work_experience 裡已經寫的 bullet 原句，用更高層次的方式歸納主題，避免跟下面內容重疊感太重。
+6. 一樣要降低 AI 感、避免堆疊術語，寫得像人類自然會寫的用詞。`;
+
 const WRITING_RULES = `寫作規則（一定要遵守）：
 1. 每條 bullet：動詞開頭 + 具體任務 + 量化成果，最多兩句話。就算用分號或子句硬塞出 3 個以上概念，也算違規，即使字數沒超版也算。
 2. 不要寫得太細碎、太過程導向（跳過一步一步的流程描述），但重點要抓到，盡量帶數字或具體成果。
@@ -19,11 +27,15 @@ export const COVERAGE_RULES = `JD 符合度清單的判定標準（務必嚴格�
 3. 每次判斷同一個項目，都要用同一套標準重新逐項檢查：先問「這句話有沒有字面上或近乎字面上支持這個要求」，不要憑整體印象覺得「這個人應該做得到」就標 true，也不要因為前一次判斷是 true 就傾向維持 true（或反過來），每次都要重新看內容本身。
 4. 如果只是職務相近、可以類推、但沒有具體事實佐證，一律標 false，並在缺口裡具體寫出缺的是什麼，不要寫模稜兩可的描述。`;
 
-const SYSTEM_PROMPT = `你是履歷客製化助手。使用者會給你：這個職缺的 JD、使用者的經歷資料庫（同一段經歷可能有多種描述變體，是他過去不同履歷版本留下的）、使用者的個人資料（聯絡方式、學歷、技能）。
+const SYSTEM_PROMPT = `你是履歷客製化助手。使用者會給你：這個職缺的 JD、使用者的經歷資料庫、使用者的個人資料（聯絡方式、學歷、技能）。
 
-你的任務：分析 JD 要求哪些條件，從經歷資料庫的變體裡挑選/合併出最適合這個職缺的內容，寫成一份完整履歷（Professional Summary、工作經歷、領導經驗/專案、學歷、技能）。
+經歷資料庫的結構說明：每筆經歷（同一家公司同一個職位）底下的 achievements 是「同一件事的不同寫法」分組——同一個 achievement 底下的每個 variant 講的是同一件真實的事，只是措辭角度不同，variant.angleLabel 標註這個寫法強調的重點（例如「強調數據分析」「強調從 0 到 1 實作」）。同一個 achievement 底下的多個 variant 不是好幾件不同的事，不要當成好幾條 bullet 分別寫進履歷。
+
+你的任務：分析 JD 要求哪些條件，針對每個 achievement，從它底下的 variant 裡挑一個角度最貼近 JD 的來寫（或以那個角度為基礎微調用字），合併成一份完整履歷（Professional Summary、工作經歷、領導經驗/專案、學歷、技能）。
 
 重要：輸出的每一段工作經歷/領導經驗的 "org" 欄位，一定要跟輸入的經歷資料庫裡對應那筆的 org_name 完全一致（一字不改），不要精簡、不要改寫、不要移除括號內的說明文字。這個欄位之後系統要拿去跟資料庫比對，改寫過會導致比對失敗。
+
+${SUMMARY_RULES}
 
 ${WRITING_RULES}
 
@@ -43,7 +55,7 @@ interface ExperienceEntryRow {
   location: string | null;
   role_variants: unknown;
   period_variants: unknown;
-  description_variants: unknown;
+  achievements: unknown;
 }
 
 export interface GeneratedResume {
@@ -94,12 +106,12 @@ export async function generateResumeForApplication(
 
   const { data: entries, error: entriesError } = await supabase
     .from("experience_entries")
-    .select("language, entry_type, org_name, location, role_variants, period_variants, description_variants")
+    .select("language, entry_type, org_name, location, role_variants, period_variants, achievements")
     .eq("user_id", userId);
 
   if (entriesError) throw new Error(`讀取經歷資料庫失敗：${entriesError.message}`);
   if (!entries || entries.length === 0) {
-    throw new Error("經歷資料庫是空的，請先到首次設定上傳並解析履歷");
+    throw new Error("經歷資料庫是空的，請先到經歷資料庫頁面上傳履歷");
   }
 
   const { data: profile } = await supabase
