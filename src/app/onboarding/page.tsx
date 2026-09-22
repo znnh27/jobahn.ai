@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { BrandMark } from "../BrandMark";
 import { OnboardingUpload } from "./OnboardingUpload";
 
 export default async function OnboardingPage() {
@@ -28,6 +29,7 @@ export default async function OnboardingPage() {
             <div className="blob blob--3" />
             <div className="blob blob--4" />
           </div>
+          <BrandMark />
           <div className="stack-tight">
             <h1 className="heading-page">建立你的經歷資料庫</h1>
             <p className="text-muted">

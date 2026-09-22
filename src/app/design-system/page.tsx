@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandMark } from "../BrandMark";
 
 const NEUTRAL_SWATCHES = [
   ["50", "#fafafa"],
@@ -90,6 +91,7 @@ export default function DesignSystemPage() {
   return (
     <div className="page">
       <div className="page-container page-container--home">
+        <BrandMark />
         <div className="page-header">
           <div>
             <h1 className="heading-page">設計系統</h1>

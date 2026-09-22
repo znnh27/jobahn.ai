@@ -1476,15 +1476,8 @@
 .home-hero-nav {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-4);
-}
-
-.home-hero-wordmark {
-  font-family: var(--font-display);
-  font-size: var(--font-lg);
-  font-weight: 700;
-  color: var(--chrome-ink);
 }
 
 .home-hero-greeting {
@@ -1495,6 +1488,12 @@
   justify-content: center;
   text-align: center;
   gap: var(--space-2);
+}
+
+.home-hero-mascot {
+  width: 160px;
+  height: auto;
+  margin-bottom: var(--space-2);
 }
 
 .home-hero-greeting-title {
@@ -1557,6 +1556,34 @@
   color: var(--chrome-ink);
   max-width: 32rem;
   margin: 0;
+}
+
+/* 除了首頁以外，每一頁左上角的小品牌標記（icon + "jobahn" 文字），
+   點擊回首頁。首頁本身不用這個，logo 已經是滿版主視覺。 */
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-decoration: none;
+  margin-bottom: var(--space-4);
+}
+
+.brand-mark-icon {
+  width: 28px;
+  height: auto;
+}
+
+.brand-mark-text {
+  font-family: var(--font-display);
+  font-size: var(--font-lg);
+  font-weight: 700;
+  color: var(--chrome-ink);
+}
+
+/* 登入/註冊卡片是置中版面，品牌標記跟著置中，不要貼左邊。 */
+.auth-card > .brand-mark {
+  justify-content: center;
+  align-self: center;
 }
 
 .btn--lg {

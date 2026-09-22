@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { BrandMark } from "../BrandMark";
 import type { ExperienceEntry } from "./ExperienceCanvas";
 import { ExperiencePageClient } from "./ExperiencePageClient";
 
@@ -34,6 +35,7 @@ export default async function ExperiencePage() {
   return (
     <div className="page">
       <div className="page-container page-container--canvas">
+        <BrandMark />
         <div className="page-header">
           <div className="stack-tight">
             <h1 className="heading-page">經歷資料庫</h1>

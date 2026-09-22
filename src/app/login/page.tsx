@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BrandMark } from "../BrandMark";
 import { login } from "./actions";
 
 export default async function LoginPage(props: PageProps<"/login">) {
@@ -7,6 +8,7 @@ export default async function LoginPage(props: PageProps<"/login">) {
   return (
     <div className="auth-page">
       <div className="auth-card">
+        <BrandMark />
         <div className="auth-card-header">
           <h1 className="heading-auth">登入</h1>
           <p className="text-muted">jobahn 找工作助手</p>

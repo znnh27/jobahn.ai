@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { BrandMark } from "../BrandMark";
 import { AnthropicKeyForm } from "./key-form";
 
 export default async function SettingsPage() {
@@ -22,6 +23,7 @@ export default async function SettingsPage() {
   return (
     <div className="page">
       <div className="page-container">
+        <BrandMark />
         <div className="page-header">
           <h1 className="heading-page">帳號設定</h1>
           <Link href="/" className="link-muted">

@@ -69,7 +69,6 @@ export default async function HomePage() {
             <div className="blob blob--4" />
           </div>
           <div className="home-hero-nav">
-            <span className="home-hero-wordmark">jobahn</span>
             <div className="toolbar-inline">
               <Link href="/experience" className="btn btn-secondary">
                 經歷資料庫
@@ -85,6 +84,12 @@ export default async function HomePage() {
             </div>
           </div>
           <div className="home-hero-greeting">
+            {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
+            <img
+              src="/logo-mascot.png"
+              alt="jobahn 吉祥物：提著公事包的石斑魚"
+              className="home-hero-mascot"
+            />
             <h1 className="home-hero-greeting-title">Hi！{displayName}</h1>
             <p className="home-hero-greeting-sub">一起來打造一份專業的履歷吧！</p>
           </div>
