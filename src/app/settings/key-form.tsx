@@ -24,7 +24,7 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
         </p>
       </div>
 
-      {last4 ? (
+      {last4 && (
         <div className="key-status-row">
           <span className="text-body">已綁定 · 末 4 碼 {last4}</span>
           <form action={removeAnthropicKeyAction}>
@@ -33,8 +33,6 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
             </button>
           </form>
         </div>
-      ) : (
-        <div className="key-status-note">目前使用共用額度，不需要綁定也能正常使用</div>
       )}
 
       <form action={formAction} className="form-stack">

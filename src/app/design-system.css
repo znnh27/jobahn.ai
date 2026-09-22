@@ -255,6 +255,7 @@
   justify-content: center;
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-4);
+  font-family: var(--font-display);
   font-size: var(--font-sm);
   font-weight: 500;
   cursor: pointer;
@@ -292,6 +293,7 @@
   background: transparent;
   border: none;
   padding: 0;
+  font-family: var(--font-display);
   font-size: var(--font-sm);
   font-weight: 500;
   color: var(--color-danger-text-strong);
@@ -304,6 +306,7 @@
 .btn-toggle {
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
+  font-family: var(--font-display);
   font-size: var(--font-sm);
   border: 1px solid var(--chrome-border-strong);
   color: var(--chrome-text);
@@ -314,6 +317,7 @@
 .btn-toggle--active {
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
+  font-family: var(--font-display);
   font-size: var(--font-sm);
   border: 1px solid transparent;
   background: var(--chrome-accent);
@@ -1404,8 +1408,8 @@
      完全不套用這組，維持原本的中性色，不要拿掉 --color-neutral-*。 */
   --chrome-bg: #fffcf4;
   --chrome-surface-tint: #fff6d9;
-  --chrome-border: #f0dfa0;
-  --chrome-border-strong: #e0c467;
+  --chrome-border: #ffe134;
+  --chrome-border-strong: #ffe134;
   --chrome-muted: #8a8270;
   --chrome-muted-light: #b3ab95;
   --chrome-text: #3a362c;
@@ -1414,8 +1418,8 @@
   --chrome-onaccent: #0f2430;
   --chrome-secondary: #60ceff;
   --chrome-onsecondary: #031e2d;
-  --chrome-secondary-text: #0387b3;
-  --chrome-secondary-bg: #e3f7ff;
+  --chrome-secondary-text: #1075b1;
+  --chrome-secondary-bg: #f2fbff;
 }
 
 .sunny-surface {
@@ -1465,6 +1469,31 @@
   padding: var(--space-8) var(--space-6);
 }
 
+/* 回訪使用者首頁：色塊蓋住整個頁面（hero + 應徵紀錄表格），不是只有
+   hero 那一塊，滑到最底部也看得到。跟 onboarding 的 .blob-bounds
+   相反——那邊是刻意縮小範圍避免蓋到文字，這裡刻意放大到整頁。 */
+.home-blob-page {
+  position: relative;
+  /* 應徵紀錄表格本身是滿版不透明白底，色塊如果貼在表格正下方會被
+     完全擋住。多留一段底部空間，讓色塊有真正露出來的地方。 */
+  padding-bottom: 4rem;
+}
+.home-blob-page > * {
+  position: relative;
+  z-index: 1;
+}
+.blob-scene--home {
+  position: absolute;
+}
+
+/* 四顆色塊改成兩顆貼頁面最上方、兩顆貼頁面最下方（用 bottom 定位，
+   不管頁面因為應徵紀錄筆數多寡而變多長，都會貼在真正的底部，
+   不是貼在 hero 底部）。 */
+.blob-scene--home .blob--1 { top: -20px; left: 6%; }
+.blob-scene--home .blob--2 { top: 6%; right: 8%; }
+.blob-scene--home .blob--3 { bottom: -20px; right: 4%; }
+.blob-scene--home .blob--4 { bottom: 10px; left: 26%; }
+
 /* 回訪使用者首頁的 hero 版本：至少佔 2/3 視窗高，裡面上排是機能性
    導覽（logo + 帳號相關按鈕），下方置中放招呼語，滑到底才是應徵紀錄。 */
 .home-hero--tall {
@@ -1504,6 +1533,17 @@
   margin: 0;
 }
 
+/* 純黃色在米白底上對比太弱，用深色描邊補回可讀性
+   （跟吉祥物插畫本身「色塊 + 淺色描邊」的畫風一致）。 */
+.home-hero-greeting-hi {
+  color: var(--chrome-accent);
+  text-shadow:
+    -1px -1px 0 var(--chrome-ink),
+    1px -1px 0 var(--chrome-ink),
+    -1px 1px 0 var(--chrome-ink),
+    1px 1px 0 var(--chrome-ink);
+}
+
 .home-hero-greeting-sub {
   font-family: var(--font-display);
   font-size: var(--font-lg);
@@ -1521,6 +1561,13 @@
   align-items: center;
   justify-content: center;
   text-align: center;
+  gap: var(--space-5);
+}
+
+.landing-heading-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: var(--space-4);
 }
 
@@ -1552,7 +1599,7 @@
   position: relative;
   z-index: 1;
   font-family: var(--font-display);
-  font-size: var(--font-lg);
+  font-size: var(--font-xl);
   color: var(--chrome-ink);
   max-width: 32rem;
   margin: 0;
@@ -1581,9 +1628,12 @@
 }
 
 /* 登入/註冊卡片是置中版面，品牌標記跟著置中，不要貼左邊。 */
-.auth-card > .brand-mark {
-  justify-content: center;
+.auth-card > .landing-mascot,
+.auth-card > .landing-wordmark {
   align-self: center;
+}
+.auth-card > .landing-wordmark {
+  text-align: center;
 }
 
 .btn--lg {

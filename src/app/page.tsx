@@ -24,10 +24,12 @@ export default async function HomePage() {
           alt="jobahn 吉祥物：提著公事包的石斑魚"
           className="landing-mascot"
         />
-        <h1 className="landing-wordmark">
-          job<span className="landing-wordmark-accent">bahn</span>
-        </h1>
-        <p className="landing-tagline">讓每個人都能把自己的經歷，講成專業履歷該有的樣子</p>
+        <div className="landing-heading-group">
+          <h1 className="landing-wordmark">
+            jo<span className="landing-wordmark-accent">bahn</span>
+          </h1>
+          <p className="landing-tagline">讓每個人都能把自己的經歷，講成專業履歷該有的樣子</p>
+        </div>
         <div className="toolbar-inline">
           <Link href="/login" className="btn btn-primary btn--lg">
             登入
@@ -60,14 +62,14 @@ export default async function HomePage() {
 
   return (
     <div className="page">
-      <div className="page-container page-container--home">
-        <div className="home-hero home-hero--tall sunny-surface">
-          <div className="blob-scene" aria-hidden="true">
-            <div className="blob blob--1" />
-            <div className="blob blob--2" />
-            <div className="blob blob--3" />
-            <div className="blob blob--4" />
-          </div>
+      <div className="page-container page-container--home home-blob-page">
+        <div className="blob-scene blob-scene--home" aria-hidden="true">
+          <div className="blob blob--1" />
+          <div className="blob blob--2" />
+          <div className="blob blob--3" />
+          <div className="blob blob--4" />
+        </div>
+        <div className="home-hero home-hero--tall">
           <div className="home-hero-nav">
             <div className="toolbar-inline">
               <Link href="/experience" className="btn btn-secondary">
@@ -90,7 +92,9 @@ export default async function HomePage() {
               alt="jobahn 吉祥物：提著公事包的石斑魚"
               className="home-hero-mascot"
             />
-            <h1 className="home-hero-greeting-title">Hi! {displayName}</h1>
+            <h1 className="home-hero-greeting-title">
+              <span className="home-hero-greeting-hi">Hi!</span> {displayName}
+            </h1>
             <p className="home-hero-greeting-sub">一起來打造一份專業的履歷吧！</p>
           </div>
         </div>
