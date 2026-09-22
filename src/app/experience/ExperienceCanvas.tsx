@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   updateEntryFieldAction,
   updatePeriodAction,
@@ -8,7 +7,6 @@ import {
   removeRoleVariantAction,
   updateAchievementVariantAction,
   removeAchievementVariantAction,
-  scanExperienceDbAction,
   type ScanFlag,
 } from "./actions";
 
@@ -26,6 +24,7 @@ export interface ExperienceEntry {
 export interface RefineRequest {
   entryId: string;
   achievementId: string;
+  variantIndex: number;
   orgName: string;
   role: string;
   seedText: string;
@@ -34,6 +33,7 @@ export interface RefineRequest {
 export interface HighlightTarget {
   entryId: string;
   achievementId: string;
+  variantIndex: number;
   color: "editing" | "updated";
 }
 
@@ -42,29 +42,21 @@ export function ExperienceCanvas({
   language,
   onRefine,
   highlight,
+  flags,
+  isScanning,
+  scanError,
+  onScan,
 }: {
   entries: ExperienceEntry[];
   language: "zh" | "en";
   onRefine: (seed: RefineRequest) => void;
   highlight: HighlightTarget | null;
+  flags: ScanFlag[];
+  isScanning: boolean;
+  scanError: string | null;
+  onScan: () => void;
 }) {
-  const [flags, setFlags] = useState<ScanFlag[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
-
   const langEntries = entries.filter((e) => e.language === language);
-
-  async function handleScan() {
-    setIsScanning(true);
-    setScanError(null);
-    try {
-      const result = await scanExperienceDbAction();
-      if (result.error) setScanError(result.error);
-      else setFlags(result.flags ?? []);
-    } finally {
-      setIsScanning(false);
-    }
-  }
 
   function flagFor(entryId: string, achievementId: string, variantIndex: number) {
     return flags.find(
@@ -86,12 +78,12 @@ export function ExperienceCanvas({
 
   return (
     <div className="resume-page" style={{ width: "100%" }}>
-      <div className="card-toolbar">
-        <button type="button" className="btn btn-secondary" disabled={isScanning} onClick={handleScan}>
-          {isScanning ? "檢查中…" : "檢查整份經歷資料庫"}
-        </button>
+      <div className="exp-scan-toolbar">
         {flags.length > 0 && <span className="text-muted">找到 {flags.length} 條建議加強</span>}
         {scanError && <span className="text-error">{scanError}</span>}
+        <button type="button" className="btn btn-secondary" disabled={isScanning} onClick={onScan}>
+          {isScanning ? "檢查中…" : "檢查整份經歷資料庫"}
+        </button>
       </div>
 
       {workEntries.length > 0 && (
@@ -177,18 +169,21 @@ function EntryBlock({
 
       <div className="resume-bullets">
         {entry.achievements.map((ach) => {
-          const isHighlighted = highlight?.entryId === entry.id && highlight?.achievementId === ach.id;
-          const highlightClass = isHighlighted
-            ? highlight?.color === "editing"
-              ? "exp-achievement--editing"
-              : "exp-achievement--updated"
-            : "";
           return (
-            <div key={ach.id} className={`exp-achievement ${highlightClass}`}>
+            <div key={ach.id} className="exp-achievement">
               {ach.variants.map((v, vi) => {
                 const flag = flagFor(entry.id, ach.id, vi);
+                const isHighlighted =
+                  highlight?.entryId === entry.id &&
+                  highlight?.achievementId === ach.id &&
+                  highlight?.variantIndex === vi;
+                const highlightClass = isHighlighted
+                  ? highlight?.color === "editing"
+                    ? "exp-variant--editing"
+                    : "exp-variant--updated"
+                  : "";
                 return (
-                  <div key={vi} className="exp-variant">
+                  <div key={vi} className={`exp-variant ${highlightClass}`}>
                     <span className="resume-bullet-dot">{"•"}</span>
                     <div className="exp-variant-bullet">
                       <EditableSpan
@@ -207,6 +202,7 @@ function EntryBlock({
                             onRefine({
                               entryId: entry.id,
                               achievementId: ach.id,
+                              variantIndex: vi,
                               orgName: entry.orgName,
                               role: primaryRole,
                               seedText: v.text,
@@ -225,6 +221,7 @@ function EntryBlock({
                         onRefine({
                           entryId: entry.id,
                           achievementId: ach.id,
+                          variantIndex: vi,
                           orgName: entry.orgName,
                           role: primaryRole,
                           seedText: v.text,

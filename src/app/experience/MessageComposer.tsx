@@ -12,7 +12,7 @@ import { useRef, useState } from "react";
 // 「連按兩下 Enter 送出」，勾選後才會在短時間內連續按兩次 Enter 時送出
 // （第一次 Enter 還是正常換行，不攔截）。偏好記在 localStorage，不用每次重選。
 
-const DOUBLE_ENTER_WINDOW_MS = 600;
+const DOUBLE_ENTER_WINDOW_MS = 1000;
 const STORAGE_KEY = "jobahn_composer_double_enter";
 
 export function MessageComposer({

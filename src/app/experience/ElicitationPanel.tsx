@@ -33,6 +33,7 @@ type Step =
 interface RefineSeed {
   entryId: string;
   achievementId: string;
+  variantIndex: number;
   orgName: string;
   role: string;
   seedText: string;
@@ -41,6 +42,7 @@ interface RefineSeed {
 interface CommittedInfo {
   entryId: string;
   achievementId: string;
+  variantIndex: number;
   syncedToOtherLanguage: boolean;
 }
 
@@ -156,10 +158,13 @@ export function ElicitationPanel({
 
   async function continueDialogue() {
     if (!composerText.trim()) return;
-    setIsPending(true);
-    setError(null);
     const reply = composerText;
     setComposerText("");
+    // 先把使用者剛送出的訊息顯示出來，不要等 AI 回覆回來才一次顯示兩則——
+    // AI 想的時候使用者應該先看到自己說了什麼，再看到打字中動畫，最後才是 AI 的回覆。
+    setTurns((prev) => [...prev, { role: "user", text: reply }]);
+    setIsPending(true);
+    setError(null);
     try {
       const result = await stepElicitationAction(
         { orgName: orgContext.orgName, role: orgContext.role, seedText: refineSeed?.seedText },
@@ -208,10 +213,11 @@ export function ElicitationPanel({
 
       if (result.error) {
         setError(result.error);
-      } else if (result.entryId && result.achievementId) {
+      } else if (result.entryId && result.achievementId && result.variantIndex !== undefined) {
         onCommitted({
           entryId: result.entryId,
           achievementId: result.achievementId,
+          variantIndex: result.variantIndex,
           syncedToOtherLanguage: result.syncedToOtherLanguage ?? false,
         });
         setShowCompletion(
@@ -429,6 +435,12 @@ export function ElicitationPanel({
                       onClick={() => {
                         setDraft(null);
                         setStep("dialogue");
+                        // 回到對話但沒有新訊息的話，畫面看起來會像沒反應——
+                        // 明確問一句，讓使用者知道現在該做什麼。
+                        setTurns((prev) => [
+                          ...prev,
+                          { role: "assistant", text: "好，那你想怎麼調整？直接打字跟我說。" },
+                        ]);
                       }}
                     >
                       還要調整

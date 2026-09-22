@@ -221,7 +221,7 @@ export async function removeAchievementVariantAction(
 
   const { data: row } = await supabase
     .from("experience_entries")
-    .select("achievements")
+    .select("org_name, language, role_variants, achievements")
     .eq("id", entryId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -231,6 +231,7 @@ export async function removeAchievementVariantAction(
   const target = achievements.find((a: { id: string }) => a.id === achievementId);
   if (!target) return;
 
+  const deletedText = target.variants[variantIndex]?.text ?? "";
   target.variants.splice(variantIndex, 1);
   const remaining =
     target.variants.length === 0
@@ -242,6 +243,44 @@ export async function removeAchievementVariantAction(
     .update({ achievements: remaining, updated_at: new Date().toISOString() })
     .eq("id", entryId)
     .eq("user_id", user.id);
+
+  // 使用者要求：任何時刻兩個語言的內容都要同步，刪除也不例外。找不到明確對應的
+  // 另一語言寫法就安靜跳過，不影響這次刪除本身有沒有成功。
+  if (deletedText) {
+    const { findMatchingVariantInOtherLanguage } = await import("@/lib/experience/syncLanguage");
+    const match = await findMatchingVariantInOtherLanguage({
+      supabase,
+      userId: user.id,
+      sourceLanguage: row.language,
+      orgName: row.org_name,
+      role: row.role_variants?.[0]?.role ?? "",
+      deletedText,
+    });
+    if (match) {
+      const { data: targetRow } = await supabase
+        .from("experience_entries")
+        .select("achievements")
+        .eq("id", match.entryId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (targetRow) {
+        const targetAchievements = Array.isArray(targetRow.achievements) ? targetRow.achievements : [];
+        const targetAch = targetAchievements.find((a: { id: string }) => a.id === match.achievementId);
+        if (targetAch && targetAch.variants[match.variantIndex]) {
+          targetAch.variants.splice(match.variantIndex, 1);
+          const targetRemaining =
+            targetAch.variants.length === 0
+              ? targetAchievements.filter((a: { id: string }) => a.id !== match.achievementId)
+              : targetAchievements;
+          await supabase
+            .from("experience_entries")
+            .update({ achievements: targetRemaining, updated_at: new Date().toISOString() })
+            .eq("id", match.entryId)
+            .eq("user_id", user.id);
+        }
+      }
+    }
+  }
 
   revalidatePath("/experience");
 }
@@ -380,6 +419,7 @@ export async function commitNewAchievementAction(params: {
     success: true,
     entryId: resultEntryId,
     achievementId: achievement.id,
+    variantIndex: 0,
     syncedToOtherLanguage: synced !== null,
   };
 }
@@ -389,6 +429,7 @@ export interface CommitResult {
   success?: boolean;
   entryId?: string;
   achievementId?: string;
+  variantIndex?: number;
   syncedToOtherLanguage?: boolean;
 }
 
@@ -420,6 +461,7 @@ export async function commitRefinedVariantAction(params: {
   if (!target) return { error: "找不到這個成就" };
 
   target.variants.push({ text: params.draftText, angleLabel: params.angleLabel, source: "AI 潤飾" });
+  const newVariantIndex = target.variants.length - 1;
 
   // 同一個 achievement 底下的其他寫法，缺同一個新事實的話自動補上
   const siblings = target.variants
@@ -465,6 +507,7 @@ export async function commitRefinedVariantAction(params: {
     success: true,
     entryId: params.entryId,
     achievementId: params.achievementId,
+    variantIndex: newVariantIndex,
     syncedToOtherLanguage: synced !== null,
   };
 }
@@ -507,11 +550,12 @@ export async function scanExperienceDbAction(): Promise<{ error?: string; flags?
   if (flat.length === 0) return { flags: [] };
 
   const { askClaude } = await import("@/lib/ai/askClaude");
-  const systemPrompt = `你是履歷內容品質檢查助手。使用者會給你一份經歷資料庫裡所有 bullet 的清單（每條有編號），逐條檢查兩件事：
+  const systemPrompt = `你是履歷內容品質檢查助手，用 Google 履歷寫作團隊提倡的 XYZ 公式（達成了什麼成果 X／用什麼數字衡量 Y／透過什麼方法 Z）當標準。使用者會給你一份經歷資料庫裡所有 bullet 的清單（每條有編號），逐條檢查三件事：
 1. 錯字/打字錯誤：不管是中文還是英文，只要有明顯的錯字、漏字、重複字，都要標記出來，suggestion 直接指出錯在哪個字、應該是什麼。
 2. 內容太籠統、沒有量化、動詞太空泛：缺乏具體數字/規模/結果的才標記，寫得已經不錯的不用列出來。
+3. 流水帳：超過兩句話、或按時間順序把好幾個階段/好幾件事塞進同一條（例如「做了什麼→花多久→怎麼協作→上線後→後續維護」全部寫進去）——就算有數字也算，因為重點被稀釋掉了，suggestion 要指出「先只留最值得講的那個成果」。
 
-同一條如果兩個問題都有，兩個都要在 suggestion 裡提到。只回傳需要加強的那幾條的編號跟建議。逐條檢查時保持同一套標準，不要因為前後文而放寬或收緊。只輸出 JSON，不要其他文字：
+同一條如果不只一個問題，都要在 suggestion 裡提到。只回傳需要加強的那幾條的編號跟建議。逐條檢查時保持同一套標準，不要因為前後文而放寬或收緊。只輸出 JSON，不要其他文字：
 { "flags": [{ "index": number, "suggestion": string }] }`;
 
   const userPrompt = flat.map((f, i) => `[${i}] ${f.text}`).join("\n");
