@@ -110,7 +110,9 @@ export function OnboardingUpload() {
                   <div className="file-item-name">{item.name}</div>
                   {item.status === "uploading" && (
                     <>
-                      <div className="file-item-status">解析中…</div>
+                      <div className="file-item-status">
+                        AI 正在仔細讀取內容，拆解成經歷資料庫用的格式，大約需要 30–60 秒，請耐心等候…
+                      </div>
                       <div className="file-item-progress-track">
                         <div className="file-item-progress-fill" />
                       </div>
@@ -138,7 +140,7 @@ export function OnboardingUpload() {
             經歷資料庫已經開始建立了！你可以直接開始寫第一份履歷，或繼續上傳更多版本讓內容更完整。
           </p>
           <div className="toolbar-inline mt-3">
-            <Link href="/applications/new" className="btn btn-primary">
+            <Link href="/applications/new" className="btn btn-sunny">
               開始寫第一份履歷
             </Link>
             <Link href="/experience" className="btn btn-secondary">
