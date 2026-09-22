@@ -32,6 +32,15 @@ const BAND_SWATCHES = [
   ["--color-band-weak", "#ef4444", "落差大 0–49"],
 ] as const;
 
+const SUNNY_SWATCHES = [
+  ["--sunny-bg", "#fffcf4"],
+  ["--sunny-ink", "#0f2430"],
+  ["--sunny-accent", "#ffe134"],
+  ["--sunny-onaccent", "#0f2430"],
+  ["--sunny-secondary", "#60ceff"],
+  ["--sunny-onsecondary", "#031e2d"],
+] as const;
+
 const SPACING = [
   ["--space-1", "0.25rem"],
   ["--space-2", "0.5rem"],
@@ -60,6 +69,7 @@ const FONT_SIZES = [
 
 const SECTIONS = [
   ["colors", "顏色"],
+  ["sunny", "陽光檸檬（首頁／onboarding）"],
   ["spacing", "間距"],
   ["radius", "圓角"],
   ["fonts", "字級"],
@@ -140,6 +150,58 @@ export default function DesignSystemPage() {
                 <span className="ds-swatch-value">{desc}</span>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section id="sunny" className="ds-section">
+          <h2 className="ds-section-title">陽光檸檬（首頁／onboarding）</h2>
+          <p className="ds-section-desc">
+            只用在使用者「還沒進入實際操作」的地方：onboarding 整頁、首頁最上方的品牌
+            header。履歷畫布、經歷資料庫這類功能頁維持原本中性清爽的樣子，不要套用這組色。
+          </p>
+
+          <h3 className="heading-card mt-4">--sunny-*</h3>
+          <div className="ds-swatch-grid">
+            {SUNNY_SWATCHES.map(([name, hex]) => (
+              <div key={name} className="ds-item">
+                <div className="ds-swatch-color" style={{ background: hex }} />
+                <span className="ds-swatch-name">{name}</span>
+                <span className="ds-swatch-value">{hex}</span>
+              </div>
+            ))}
+          </div>
+
+          <h3 className="heading-card mt-4">套用方式</h3>
+          <p className="text-body">
+            外層容器加 <code>.sunny-surface</code>（背景＋文字色）。裝飾用的色塊放進
+            <code>.blob-scene</code>（絕對定位、鋪滿父層），裡面放 1～4 個
+            <code>.blob</code>／<code>.blob--1</code>～<code>.blob--4</code>。
+            <strong>色塊的父層一定要是一個「有限高度」的區塊</strong>
+            （例如 <code>.home-hero</code> 或包一層 <code>.blob-bounds</code>），
+            不能直接包在 <code>.page</code> 這種 min-height:100vh
+            的整頁容器外面，不然色塊的百分比位置會被拉爆，跑去蓋到內文。
+          </p>
+
+          <h3 className="heading-card mt-4">預覽</h3>
+          <div className="home-hero blob-bounds sunny-surface">
+            <div className="blob-scene" aria-hidden="true">
+              <div className="blob blob--1" />
+              <div className="blob blob--2" />
+              <div className="blob blob--3" />
+              <div className="blob blob--4" />
+            </div>
+            <div className="stack-tight">
+              <h1 className="heading-page">jobahn</h1>
+              <p className="text-muted">找工作的路</p>
+            </div>
+            <div className="toolbar-inline mt-3">
+              <button type="button" className="btn btn-sunny">
+                開始建立資料庫
+              </button>
+              <button type="button" className="btn btn-sunny-secondary">
+                找工作的路
+              </button>
+            </div>
           </div>
         </section>
 

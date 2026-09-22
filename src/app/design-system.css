@@ -49,6 +49,12 @@
   --radius-md: 0.375rem;
   --radius-lg: 0.5rem;
 
+  /* ---- 標題字型：圓潤親切風格，Baloo 2（英數）+ Huninn 粉圓體（中文）----
+     實際字型檔在 layout.tsx 透過 next/font/google 載入，這裡只是把
+     產生出來的 CSS 變數接起來用。履歷畫布（.resume-*）不用這組，
+     維持 Carlito/Noto Sans TC，要跟下載的 Word/PDF 對齊。 */
+  --font-display: var(--font-baloo), var(--font-huninn), "Noto Sans TC", sans-serif;
+
   /* ---- 字級 ---- */
   --font-xs: 0.75rem;
   --font-sm: 0.875rem;
@@ -70,7 +76,7 @@
 
 .page {
   min-height: 100vh;
-  background: var(--color-neutral-50);
+  background: var(--chrome-bg);
   padding: var(--space-10) var(--space-6);
 }
 
@@ -102,7 +108,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-neutral-50);
+  background: var(--chrome-bg);
   padding-inline: var(--space-4);
 }
 
@@ -151,42 +157,46 @@
    ============================================================ */
 
 .heading-page {
+  font-family: var(--font-display);
   font-size: var(--font-xl);
   font-weight: 600;
-  color: var(--color-neutral-900);
+  color: var(--chrome-ink);
 }
 
 .heading-card {
+  font-family: var(--font-display);
   font-size: var(--font-sm);
   font-weight: 600;
-  color: var(--color-neutral-900);
+  color: var(--chrome-ink);
 }
 
 .heading-card--lg {
+  font-family: var(--font-display);
   font-size: var(--font-lg);
   font-weight: 600;
-  color: var(--color-neutral-900);
+  color: var(--chrome-ink);
 }
 
 .heading-auth {
+  font-family: var(--font-display);
   font-size: var(--font-2xl);
   font-weight: 600;
-  color: var(--color-neutral-900);
+  color: var(--chrome-ink);
 }
 
 .text-muted {
   font-size: var(--font-sm);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 .text-muted-xs {
   font-size: var(--font-xs);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 .text-body {
   font-size: var(--font-sm);
-  color: var(--color-neutral-600);
+  color: var(--chrome-text);
 }
 
 /* ============================================================
@@ -195,7 +205,7 @@
 
 .card {
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-neutral-200);
+  border: 1px solid var(--chrome-border);
   background: var(--color-white);
   padding: var(--space-6);
 }
@@ -208,7 +218,7 @@
   border-style: dashed;
   padding: var(--space-6);
   font-size: var(--font-sm);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 .card-toolbar {
@@ -217,7 +227,7 @@
   align-items: center;
   gap: var(--space-2);
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-neutral-200);
+  border: 1px solid var(--chrome-border);
   background: var(--color-white);
   padding: var(--space-3);
 }
@@ -262,20 +272,20 @@
 }
 
 .btn-primary {
-  background: var(--color-neutral-900);
-  color: var(--color-white);
+  background: var(--chrome-accent);
+  color: var(--chrome-onaccent);
 }
 .btn-primary:hover:not(:disabled) {
-  background: var(--color-neutral-800);
+  filter: brightness(0.96);
 }
 
 .btn-secondary {
   background: var(--color-white);
-  color: var(--color-neutral-700);
-  border-color: var(--color-neutral-300);
+  color: var(--chrome-text);
+  border-color: var(--chrome-border-strong);
 }
 .btn-secondary:hover:not(:disabled) {
-  background: var(--color-neutral-50);
+  background: var(--chrome-surface-tint);
 }
 
 .btn-link {
@@ -295,8 +305,8 @@
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-sm);
-  border: 1px solid var(--color-neutral-300);
-  color: var(--color-neutral-600);
+  border: 1px solid var(--chrome-border-strong);
+  color: var(--chrome-text);
   background: var(--color-white);
   cursor: pointer;
 }
@@ -306,8 +316,8 @@
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-sm);
   border: 1px solid transparent;
-  background: var(--color-neutral-900);
-  color: var(--color-white);
+  background: var(--chrome-accent);
+  color: var(--chrome-onaccent);
   cursor: pointer;
 }
 
@@ -341,7 +351,7 @@
 .hint-text {
   margin-top: var(--space-1);
   font-size: var(--font-xs);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 .key-status-row {
@@ -349,17 +359,17 @@
   align-items: center;
   justify-content: space-between;
   border-radius: var(--radius-md);
-  background: var(--color-neutral-50);
+  background: var(--chrome-surface-tint);
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-sm);
 }
 
 .key-status-note {
   border-radius: var(--radius-md);
-  background: var(--color-neutral-50);
+  background: var(--chrome-surface-tint);
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-sm);
-  color: var(--color-neutral-600);
+  color: var(--chrome-text);
 }
 
 /* 少量間距輔助類別：某個元素要跟前一個手足元素拉開距離，但兩者放進 flex/gap
@@ -379,7 +389,7 @@
 .label {
   font-size: var(--font-sm);
   font-weight: 500;
-  color: var(--color-neutral-700);
+  color: var(--chrome-text);
 }
 
 .input,
@@ -388,19 +398,19 @@
   display: block;
   width: 100%;
   border-radius: var(--radius-md);
-  border: 1px solid var(--color-neutral-300);
+  border: 1px solid var(--chrome-border-strong);
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-sm);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   background: var(--color-white);
-  color: var(--color-neutral-900);
+  color: var(--chrome-ink);
 }
 
 .input:focus,
 .textarea:focus {
-  outline: 2px solid var(--color-neutral-900);
+  outline: 2px solid var(--chrome-secondary);
   outline-offset: 1px;
-  border-color: var(--color-neutral-900);
+  border-color: var(--chrome-secondary);
 }
 
 .checkbox-row {
@@ -414,7 +424,7 @@
   align-items: center;
   gap: var(--space-2);
   font-size: var(--font-sm);
-  color: var(--color-neutral-700);
+  color: var(--chrome-text);
 }
 
 .input-row {
@@ -493,21 +503,21 @@
    ============================================================ */
 
 .link {
-  color: var(--color-neutral-900);
+  color: var(--chrome-secondary-text);
   font-weight: 500;
   text-decoration: underline;
 }
 
 .link-muted {
   font-size: var(--font-sm);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 .link-muted:hover {
   text-decoration: underline;
 }
 
 .link-table {
-  color: var(--color-neutral-900);
+  color: var(--chrome-secondary-text);
 }
 .link-table:hover {
   text-decoration: underline;
@@ -520,7 +530,7 @@
 .table-wrap {
   overflow: hidden;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--color-neutral-200);
+  border: 1px solid var(--chrome-border);
   background: var(--color-white);
 }
 
@@ -532,8 +542,8 @@
 }
 
 .data-table thead {
-  background: var(--color-neutral-50);
-  color: var(--color-neutral-500);
+  background: var(--chrome-surface-tint);
+  color: var(--chrome-muted);
 }
 
 .data-table th {
@@ -543,17 +553,17 @@
 
 .data-table td {
   padding: var(--space-2) var(--space-4);
-  color: var(--color-neutral-600);
+  color: var(--chrome-text);
 }
 
 .data-table tbody tr {
-  border-top: 1px solid var(--color-neutral-100);
+  border-top: 1px solid var(--chrome-border);
 }
 
 .table-empty {
   padding: var(--space-4);
   font-size: var(--font-sm);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 .download-lang-list {
@@ -668,13 +678,13 @@
 }
 
 .checklist-item-text {
-  color: var(--color-neutral-700);
+  color: var(--chrome-text);
 }
 
 .checklist-item-source {
   margin-left: var(--space-1);
   font-size: var(--font-xs);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 /* ============================================================
@@ -696,18 +706,18 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  border: 2px dashed var(--color-neutral-300);
+  border: 2px dashed var(--chrome-border-strong);
   border-radius: var(--radius-lg);
   padding: var(--space-8) var(--space-4);
   text-align: center;
   cursor: pointer;
-  background: var(--color-neutral-50);
+  background: var(--chrome-surface-tint);
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 .file-drop-zone:hover,
 .file-drop-zone--active {
-  border-color: var(--color-info-text);
-  background: var(--color-info-bg);
+  border-color: var(--chrome-secondary);
+  background: var(--chrome-secondary-bg);
 }
 
 .file-drop-zone-icon {
@@ -717,19 +727,19 @@
   width: 3rem;
   height: 3rem;
   border-radius: 999px;
-  background: var(--color-info-bg);
-  color: var(--color-info-text);
+  background: var(--chrome-secondary-bg);
+  color: var(--chrome-secondary-text);
 }
 
 .file-drop-zone-text {
   font-size: var(--font-sm);
   font-weight: 500;
-  color: var(--color-info-text);
+  color: var(--chrome-secondary-text);
 }
 
 .file-drop-zone-hint {
   font-size: var(--font-xs);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 .file-item-list {
@@ -744,7 +754,7 @@
   align-items: center;
   gap: var(--space-3);
   border-radius: var(--radius-md);
-  background: var(--color-info-bg);
+  background: var(--chrome-secondary-bg);
   padding: var(--space-3);
 }
 
@@ -761,7 +771,7 @@
   flex-shrink: 0;
   border-radius: var(--radius-sm);
   background: var(--color-white);
-  color: var(--color-info-text);
+  color: var(--chrome-secondary-text);
 }
 
 .file-item--error .file-item-icon {
@@ -776,7 +786,7 @@
 .file-item-name {
   font-size: var(--font-sm);
   font-weight: 500;
-  color: var(--color-neutral-800);
+  color: var(--chrome-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -785,7 +795,7 @@
 .file-item-status {
   margin-top: 0.125rem;
   font-size: var(--font-xs);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 .file-item-status--error {
@@ -798,14 +808,14 @@
   width: 100%;
   overflow: hidden;
   border-radius: 999px;
-  background: var(--color-neutral-200);
+  background: var(--chrome-border);
 }
 
 .file-item-progress-fill {
   height: 100%;
   width: 40%;
   border-radius: 999px;
-  background: var(--color-info-text);
+  background: var(--chrome-secondary);
   animation: file-item-progress-slide 1.1s ease-in-out infinite;
 }
 
@@ -842,7 +852,7 @@
   justify-content: space-between;
   padding-block: var(--space-2);
   font-size: var(--font-sm);
-  border-top: 1px solid var(--color-neutral-100);
+  border-top: 1px solid var(--chrome-border);
 }
 
 .file-list-item:first-child {
@@ -853,14 +863,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--color-neutral-700);
+  color: var(--chrome-text);
 }
 
 .file-list-item-meta {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 .mt-8 { margin-top: var(--space-8); }
@@ -881,7 +891,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  border-top: 1px solid var(--color-neutral-100);
+  border-top: 1px solid var(--chrome-border);
   padding-top: var(--space-4);
 }
 
@@ -999,7 +1009,7 @@
 .exp-entry {
   margin-bottom: var(--space-6);
   padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--color-neutral-100);
+  border-bottom: 1px solid var(--chrome-border);
 }
 
 .exp-entry:last-child {
@@ -1019,7 +1029,7 @@
   border: none;
   padding: 0;
   font-size: var(--font-xs);
-  color: var(--color-neutral-400);
+  color: var(--chrome-muted-light);
   cursor: pointer;
 }
 .exp-role-row-remove:hover {
@@ -1061,8 +1071,8 @@
 .exp-variant-tag {
   flex-shrink: 0;
   border-radius: 999px;
-  background: var(--color-info-bg);
-  color: var(--color-info-text);
+  background: var(--chrome-secondary-bg);
+  color: var(--chrome-secondary-text);
   padding: 0.0625rem var(--space-2);
   font-size: var(--font-xs);
   white-space: nowrap;
@@ -1074,7 +1084,7 @@
   border: none;
   padding: 0;
   font-size: var(--font-xs);
-  color: var(--color-neutral-400);
+  color: var(--chrome-muted-light);
   cursor: pointer;
 }
 .exp-variant-remove:hover {
@@ -1084,7 +1094,7 @@
 .exp-empty-state {
   text-align: center;
   padding: var(--space-10) var(--space-4);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 /* ============================================================
@@ -1122,7 +1132,7 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--space-4);
-  border-bottom: 1px solid var(--color-neutral-100);
+  border-bottom: 1px solid var(--chrome-border);
 }
 
 .elicitation-close {
@@ -1130,12 +1140,12 @@
   border: none;
   font-size: var(--font-xl);
   line-height: 1;
-  color: var(--color-neutral-400);
+  color: var(--chrome-muted-light);
   cursor: pointer;
   padding: var(--space-1);
 }
 .elicitation-close:hover {
-  color: var(--color-neutral-900);
+  color: var(--chrome-ink);
 }
 
 .elicitation-messages {
@@ -1157,14 +1167,14 @@
 
 .elicitation-bubble--assistant {
   align-self: flex-start;
-  background: var(--color-neutral-50);
-  color: var(--color-neutral-900);
+  background: var(--chrome-surface-tint);
+  color: var(--chrome-ink);
 }
 
 .elicitation-bubble--user {
   align-self: flex-end;
-  background: var(--color-neutral-900);
-  color: var(--color-white);
+  background: var(--chrome-accent);
+  color: var(--chrome-onaccent);
 }
 
 .elicitation-bubble--full {
@@ -1184,7 +1194,7 @@
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: var(--color-neutral-400);
+  background: var(--chrome-muted-light);
   animation: elicitation-typing-bounce 1.2s ease-in-out infinite;
 }
 .elicitation-typing-dot:nth-child(2) { animation-delay: 0.15s; }
@@ -1205,19 +1215,19 @@
 .elicitation-option-btn {
   text-align: left;
   border-radius: var(--radius-md);
-  border: 1px solid var(--color-neutral-300);
+  border: 1px solid var(--chrome-border-strong);
   background: var(--color-white);
   padding: var(--space-2) var(--space-3);
   font-size: var(--font-sm);
   cursor: pointer;
 }
 .elicitation-option-btn:hover {
-  border-color: var(--color-neutral-900);
-  background: var(--color-neutral-50);
+  border-color: var(--chrome-accent);
+  background: var(--chrome-surface-tint);
 }
 
 .elicitation-composer-wrap {
-  border-top: 1px solid var(--color-neutral-100);
+  border-top: 1px solid var(--chrome-border);
   padding: var(--space-3);
 }
 
@@ -1234,7 +1244,7 @@
 .elicitation-composer-option {
   margin-top: var(--space-2);
   font-size: var(--font-xs);
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
 }
 
 /* ---- 畫布上「AI 潤飾」跟整份掃描標記 ---- */
@@ -1246,7 +1256,7 @@
   border: none;
   padding: 0;
   font-size: var(--font-xs);
-  color: var(--color-info-text);
+  color: var(--chrome-secondary-text);
   cursor: pointer;
   transition: opacity 0.1s ease;
 }
@@ -1309,7 +1319,7 @@
 
 .completion-popup-message {
   font-size: var(--font-base);
-  color: var(--color-neutral-900);
+  color: var(--chrome-ink);
   margin-bottom: var(--space-4);
 }
 
@@ -1321,7 +1331,7 @@
 .exp-lang-tabs {
   display: flex;
   gap: var(--space-4);
-  border-bottom: 1px solid var(--color-neutral-200);
+  border-bottom: 1px solid var(--chrome-border);
 }
 
 .exp-lang-tab {
@@ -1331,14 +1341,14 @@
   padding: var(--space-2) var(--space-1) var(--space-3);
   font-size: var(--font-base);
   font-weight: 500;
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
   cursor: pointer;
   margin-bottom: -1px;
 }
 
 .exp-lang-tab--active {
-  color: var(--color-neutral-900);
-  border-bottom-color: var(--color-neutral-900);
+  color: var(--chrome-ink);
+  border-bottom-color: var(--chrome-accent);
 }
 
 /* 側欄分頁：改成一個獨立的分段式切換鈕（segmented control），跟語言分頁的
@@ -1346,7 +1356,7 @@
 .exp-sidebar-tabs {
   display: flex;
   gap: 2px;
-  background: var(--color-neutral-100);
+  background: var(--chrome-surface-tint);
   border-radius: var(--radius-md);
   padding: 2px;
   margin-bottom: var(--space-3);
@@ -1360,12 +1370,272 @@
   padding: var(--space-2) var(--space-2);
   font-size: var(--font-xs);
   font-weight: 500;
-  color: var(--color-neutral-500);
+  color: var(--chrome-muted);
   cursor: pointer;
 }
 
 .exp-sidebar-tab--active {
-  color: var(--color-neutral-900);
+  color: var(--chrome-ink);
   background: var(--color-white);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* ============================================================
+   陽光檸檬：首頁 / onboarding 專用的行銷層配色
+   只用在使用者「還沒進入實際操作」的地方（onboarding 整頁、
+   首頁最上方的品牌 header）。履歷畫布、經歷資料庫這類功能頁
+   維持原本中性清爽的樣子，不要套用這組色。
+   ============================================================ */
+
+:root {
+  --sunny-bg: #fffcf4;
+  --sunny-ink: #0f2430;
+  --sunny-accent: #ffe134;
+  --sunny-onaccent: #0f2430;
+  --sunny-secondary: #60ceff;
+  --sunny-onsecondary: #031e2d;
+
+  /* ---- 全站改版：從陽光檸檬延伸出來的「介面用」色階 ----
+     黃色/藍色本尊只拿來做大面積填色（按鈕、色塊、進度條），
+     上面一律疊深色字。真的需要「文字顏色」「連結色」「圖示色」
+     的地方，用底下這些對比足夠的衍生色，不要直接拿 --sunny-accent
+     當文字色（黃字在白底上幾乎看不見）。
+     履歷畫布本體（.resume-*）跟提示訊息/徽章/ATS 量表這三塊
+     完全不套用這組，維持原本的中性色，不要拿掉 --color-neutral-*。 */
+  --chrome-bg: #fffcf4;
+  --chrome-surface-tint: #fff6d9;
+  --chrome-border: #f0dfa0;
+  --chrome-border-strong: #e0c467;
+  --chrome-muted: #8a8270;
+  --chrome-muted-light: #b3ab95;
+  --chrome-text: #3a362c;
+  --chrome-ink: #0f2430;
+  --chrome-accent: #ffe134;
+  --chrome-onaccent: #0f2430;
+  --chrome-secondary: #60ceff;
+  --chrome-onsecondary: #031e2d;
+  --chrome-secondary-text: #0387b3;
+  --chrome-secondary-bg: #e3f7ff;
+}
+
+.sunny-surface {
+  position: relative;
+  overflow: hidden;
+  background: var(--sunny-bg);
+  color: var(--sunny-ink);
+}
+
+.sunny-surface .heading-page,
+.sunny-surface .heading-card,
+.sunny-surface .heading-card--lg {
+  color: var(--sunny-ink);
+}
+
+.sunny-surface .text-muted {
+  color: var(--sunny-ink);
+  opacity: 0.65;
+}
+
+.sunny-surface > *,
+.blob-bounds > * {
+  position: relative;
+  z-index: 1;
+}
+
+.btn-sunny {
+  background: var(--sunny-accent);
+  color: var(--sunny-onaccent);
+}
+.btn-sunny:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.btn-sunny-secondary {
+  background: var(--sunny-secondary);
+  color: var(--sunny-onsecondary);
+}
+.btn-sunny-secondary:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+/* 首頁最上方的品牌 header：獨立一張圓角橫幅卡片，不是整頁背景，
+   底下的應徵紀錄表格維持在橫幅外面，不受影響。 */
+.home-hero {
+  border-radius: var(--radius-lg);
+  padding: var(--space-8) var(--space-6);
+}
+
+/* 回訪使用者首頁的 hero 版本：至少佔 2/3 視窗高，裡面上排是機能性
+   導覽（logo + 帳號相關按鈕），下方置中放招呼語，滑到底才是應徵紀錄。 */
+.home-hero--tall {
+  min-height: 66vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.home-hero-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.home-hero-wordmark {
+  font-family: var(--font-display);
+  font-size: var(--font-lg);
+  font-weight: 700;
+  color: var(--chrome-ink);
+}
+
+.home-hero-greeting {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--space-2);
+}
+
+.home-hero-greeting-title {
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: var(--chrome-ink);
+  margin: 0;
+}
+
+.home-hero-greeting-sub {
+  font-family: var(--font-display);
+  font-size: var(--font-lg);
+  color: var(--chrome-ink);
+  margin: 0;
+}
+
+/* 未登入時看到的滿版品牌首頁：跟 .page 一樣是整頁高度，直接用視窗
+   置中的方式排版，色塊（.blob-scene）用整個視窗高度算位置——這裡
+   內容是「置中」的，不是像 onboarding 那樣貼在頂端，所以不會有色塊
+   蓋到文字的問題，不需要另外包 .blob-bounds。 */
+.landing-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--space-4);
+}
+
+.landing-mascot {
+  width: 220px;
+  height: auto;
+  position: relative;
+  z-index: 1;
+}
+
+.landing-wordmark {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-display);
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: var(--chrome-ink);
+  margin: 0;
+}
+
+.landing-wordmark-accent {
+  background: var(--chrome-accent);
+  color: var(--chrome-onaccent);
+  padding: 0 0.15em;
+  border-radius: 0.25em;
+}
+
+.landing-tagline {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-display);
+  font-size: var(--font-lg);
+  color: var(--chrome-ink);
+  max-width: 32rem;
+  margin: 0;
+}
+
+.btn--lg {
+  padding: var(--space-3) var(--space-8);
+  font-size: var(--font-base);
+  border-radius: var(--radius-lg);
+}
+
+/* 色塊裝飾要限制在一個「有限高度的區塊」裡面算百分比位置，不能直接套在
+   整頁（.page 是 min-height:100vh，百分比會被拉爆，色塊跟著跑到跟內文
+   文字疊在一起）。onboarding 頁用這個包住歡迎文字，不用整頁當基準。 */
+.blob-bounds {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  padding: var(--space-8) var(--space-6) var(--space-10);
+}
+
+/* 裝飾用色塊：純視覺、不帶任何資訊，用在 JSX 裡記得加 aria-hidden。
+   位置用百分比（跟著容器等比例縮放，視窗變窄不會跑版），
+   大小用固定 px（色塊本身不需要跟著縮放）。 */
+.blob-scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: inherit;
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.blob--1 {
+  top: 3%;
+  left: 10%;
+  width: 139px;
+  height: 150px;
+  background: var(--sunny-accent);
+  border-radius: 42% 58% 55% 45% / 55% 40% 60% 45%;
+}
+
+.blob--2 {
+  top: 63%;
+  right: 12%;
+  width: 86px;
+  height: 90px;
+  background: var(--sunny-accent);
+  border-radius: 50% 50% 45% 55% / 45% 55% 50% 50%;
+}
+
+.blob--3 {
+  bottom: 57%;
+  right: -1%;
+  width: 110px;
+  height: 122px;
+  background: var(--sunny-secondary);
+  border-radius: 65% 47% 40% 70% / 50% 75% 35% 60%;
+  opacity: 0.4;
+}
+
+.blob--4 {
+  bottom: -8%;
+  left: 44%;
+  width: 66px;
+  height: 62px;
+  background: var(--sunny-secondary);
+  border-radius: 50% 50% 40% 60% / 55% 45% 55% 45%;
+  opacity: 0.3;
+}
+
+/* .blob-bounds（onboarding 歡迎區塊）比首頁橫幅矮很多，blob--1 原本的
+   大小幾乎等於整個區塊高度，會直接掃過內文那行字。這裡讓它縮小、
+   往左上角外面推出去一部分，變成單純的角落點綴，不會蓋到文字。 */
+.blob-bounds .blob--1 {
+  top: -55%;
+  left: -3%;
+  width: 130px;
+  height: 130px;
 }

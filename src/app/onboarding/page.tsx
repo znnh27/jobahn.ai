@@ -19,14 +19,22 @@ export default async function OnboardingPage() {
   // CTA 按鈕根本來不及顯示就被導走。
 
   return (
-    <div className="page">
+    <div className="page sunny-surface">
       <div className="page-container">
-        <div className="stack-tight">
-          <h1 className="heading-page">建立你的經歷資料庫</h1>
-          <p className="text-muted">
-            把手上所有版本的履歷都丟進來，上傳完會自動呼叫 AI
-            解析、整理成你的經歷資料庫，之後寫任何職缺的履歷都會從這裡挑選內容。
-          </p>
+        <div className="home-hero blob-bounds">
+          <div className="blob-scene" aria-hidden="true">
+            <div className="blob blob--1" />
+            <div className="blob blob--2" />
+            <div className="blob blob--3" />
+            <div className="blob blob--4" />
+          </div>
+          <div className="stack-tight">
+            <h1 className="heading-page">建立你的經歷資料庫</h1>
+            <p className="text-muted">
+              把手上所有版本的履歷都丟進來，上傳完會自動呼叫 AI
+              解析、整理成你的經歷資料庫，之後寫任何職缺的履歷都會從這裡挑選內容。
+            </p>
+          </div>
         </div>
 
         <OnboardingUpload />
