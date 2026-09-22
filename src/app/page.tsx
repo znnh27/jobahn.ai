@@ -10,7 +10,34 @@ export default async function HomePage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    return (
+      <div className="page sunny-surface landing-hero">
+        <div className="blob-scene" aria-hidden="true">
+          <div className="blob blob--1" />
+          <div className="blob blob--2" />
+          <div className="blob blob--3" />
+          <div className="blob blob--4" />
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
+        <img
+          src="/logo-mascot.png"
+          alt="jobahn 吉祥物：提著公事包的石斑魚"
+          className="landing-mascot"
+        />
+        <h1 className="landing-wordmark">
+          job<span className="landing-wordmark-accent">bahn</span>
+        </h1>
+        <p className="landing-tagline">讓每個人都能把自己的經歷，講成專業履歷該有的樣子</p>
+        <div className="toolbar-inline">
+          <Link href="/login" className="btn btn-primary btn--lg">
+            登入
+          </Link>
+          <Link href="/signup" className="btn btn-secondary btn--lg">
+            註冊
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   const { count: experienceCount } = await supabase
@@ -28,26 +55,38 @@ export default async function HomePage() {
     .select("id, company_name, job_title, status, ats_score, resume_language, created_at")
     .order("created_at", { ascending: false });
 
+  const displayName =
+    (user.user_metadata?.display_name as string | undefined) || user.email?.split("@")[0] || "你";
+
   return (
     <div className="page">
       <div className="page-container page-container--home">
-        <div className="page-header">
-          <div className="stack-tight">
-            <h1 className="heading-page">jobahn</h1>
-            <p className="text-muted">{user.email}</p>
+        <div className="home-hero home-hero--tall sunny-surface">
+          <div className="blob-scene" aria-hidden="true">
+            <div className="blob blob--1" />
+            <div className="blob blob--2" />
+            <div className="blob blob--3" />
+            <div className="blob blob--4" />
           </div>
-          <div className="toolbar-inline">
-            <Link href="/experience" className="btn btn-secondary">
-              經歷資料庫
-            </Link>
-            <Link href="/settings" className="btn btn-secondary">
-              帳號設定
-            </Link>
-            <form action={logout}>
-              <button type="submit" className="btn btn-secondary">
-                登出
-              </button>
-            </form>
+          <div className="home-hero-nav">
+            <span className="home-hero-wordmark">jobahn</span>
+            <div className="toolbar-inline">
+              <Link href="/experience" className="btn btn-secondary">
+                經歷資料庫
+              </Link>
+              <Link href="/settings" className="btn btn-secondary">
+                帳號設定
+              </Link>
+              <form action={logout}>
+                <button type="submit" className="btn btn-secondary">
+                  登出
+                </button>
+              </form>
+            </div>
+          </div>
+          <div className="home-hero-greeting">
+            <h1 className="home-hero-greeting-title">Hi！{displayName}</h1>
+            <p className="home-hero-greeting-sub">一起來打造一份專業的履歷吧！</p>
           </div>
         </div>
 
