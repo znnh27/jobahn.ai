@@ -90,7 +90,7 @@ export default async function HomePage() {
               alt="jobahn 吉祥物：提著公事包的石斑魚"
               className="home-hero-mascot"
             />
-            <h1 className="home-hero-greeting-title">Hi！{displayName}</h1>
+            <h1 className="home-hero-greeting-title">Hi! {displayName}</h1>
             <p className="home-hero-greeting-sub">一起來打造一份專業的履歷吧！</p>
           </div>
         </div>
