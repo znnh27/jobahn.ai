@@ -1486,13 +1486,25 @@
   position: absolute;
 }
 
-/* 四顆色塊改成兩顆貼頁面最上方、兩顆貼頁面最下方（用 bottom 定位，
-   不管頁面因為應徵紀錄筆數多寡而變多長，都會貼在真正的底部，
-   不是貼在 hero 底部）。 */
-.blob-scene--home .blob--1 { top: -20px; left: 6%; }
-.blob-scene--home .blob--2 { top: 6%; right: 8%; }
-.blob-scene--home .blob--3 { bottom: -20px; right: 4%; }
-.blob-scene--home .blob--4 { bottom: 10px; left: 26%; }
+/* 額外補充的兩顆色塊，讓整頁色塊數量更多，登入前後的滿版畫面都會用到。 */
+.blob--5 {
+  width: 58px;
+  height: 54px;
+  background: var(--chrome-secondary);
+  border-radius: 50% 50% 42% 58% / 58% 42% 55% 45%;
+  opacity: 0.5;
+}
+.blob--6 {
+  width: 64px;
+  height: 60px;
+  background: var(--chrome-accent);
+  border-radius: 42% 58% 50% 50% / 55% 45% 58% 42%;
+  opacity: 0.6;
+}
+.blob-scene--home .blob--5 { top: 30%; right: 22%; }
+.blob-scene--home .blob--6 { bottom: 18%; left: 10%; }
+.landing-hero .blob--5 { top: 30%; right: 22%; }
+.landing-hero .blob--6 { bottom: 22%; left: 14%; }
 
 /* 回訪使用者首頁的 hero 版本：至少佔 2/3 視窗高，裡面上排是機能性
    導覽（logo + 帳號相關按鈕），下方置中放招呼語，滑到底才是應徵紀錄。 */
@@ -1527,21 +1539,14 @@
 
 .home-hero-greeting-title {
   font-family: var(--font-display);
-  font-size: 2.5rem;
+  font-size: 3rem;
   font-weight: 700;
   color: var(--chrome-ink);
   margin: 0;
 }
 
-/* 純黃色在米白底上對比太弱，用深色描邊補回可讀性
-   （跟吉祥物插畫本身「色塊 + 淺色描邊」的畫風一致）。 */
 .home-hero-greeting-hi {
-  color: var(--chrome-accent);
-  text-shadow:
-    -1px -1px 0 var(--chrome-ink),
-    1px -1px 0 var(--chrome-ink),
-    -1px 1px 0 var(--chrome-ink),
-    1px 1px 0 var(--chrome-ink);
+  color: #6a9ab1;
 }
 
 .home-hero-greeting-sub {

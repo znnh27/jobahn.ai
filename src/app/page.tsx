@@ -17,6 +17,8 @@ export default async function HomePage() {
           <div className="blob blob--2" />
           <div className="blob blob--3" />
           <div className="blob blob--4" />
+          <div className="blob blob--5" />
+          <div className="blob blob--6" />
         </div>
         {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
         <img
@@ -68,6 +70,8 @@ export default async function HomePage() {
           <div className="blob blob--2" />
           <div className="blob blob--3" />
           <div className="blob blob--4" />
+          <div className="blob blob--5" />
+          <div className="blob blob--6" />
         </div>
         <div className="home-hero home-hero--tall">
           <div className="home-hero-nav">
