@@ -99,7 +99,7 @@ create policy "experience_entries_all_own" on public.experience_entries
 
 -- =========================================================
 -- profile_data：聯絡資訊、學歷、技能清單、Professional Summary 變體
--- 對應 jobahn/data/profile.json，每人一列
+-- 每人一列
 -- =========================================================
 create table if not exists public.profile_data (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -115,7 +115,6 @@ create policy "profile_data_all_own" on public.profile_data
 -- =========================================================
 -- resume_rules：寫作規則設定檔，使用者可在介面上編輯
 -- user_id 為 null 代表系統預設值（新使用者複製這份當起點）
--- 對應 jobahn/data/resume_rules.json
 -- =========================================================
 create table if not exists public.resume_rules (
   user_id uuid primary key references auth.users(id) on delete cascade,
