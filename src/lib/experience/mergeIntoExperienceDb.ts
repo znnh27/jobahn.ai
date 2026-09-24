@@ -13,7 +13,7 @@ import { askClaude } from "@/lib/ai/askClaude";
 
 interface ExistingAchievementSummary {
   achievementId: string;
-  sampleText: string;
+  variantTexts: string[];
 }
 
 interface ExistingEntrySummary {
@@ -35,11 +35,15 @@ interface AppendVariantAction {
   angleLabel: string;
 }
 
+interface VariantDraft {
+  text: string;
+  angleLabel: string;
+}
+
 interface NewAchievementAction {
   action: "new_achievement";
   entryId: string;
-  text: string;
-  angleLabel: string;
+  variants: VariantDraft[];
 }
 
 interface AppendRoleVariantAction {
@@ -56,7 +60,7 @@ interface NewEntryAction {
   location: string | null;
   role: string;
   period: string;
-  achievements: { text: string; angleLabel: string }[];
+  achievements: { variants: VariantDraft[] }[];
 }
 
 type MergeAction =
@@ -87,6 +91,9 @@ const SYSTEM_PROMPT = `你是履歷經歷資料庫的合併助手。使用者已
    a. 這條講的事情跟某個既有 entry 底下某個既有 achievement 是同一件事（只是寫法不同）→ 輸出 append_variant，帶那個 entry 跟 achievement 的 id
    b. 這條是某個既有 entry（同一家公司同一個職位）底下的新成就，資料庫裡還沒有 → 輸出 new_achievement，帶那個 entry 的 id
    c. 這是一個全新的公司/組織或全新的職位，資料庫裡完全沒有對應的 entry → 輸出 new_entry，附完整資訊
+   判斷「是不是同一件事」要看底層事件，不要看措辭：同一個專案、同一個產出、同一個量化指標、同一段合作關係，就算用詞、長短、強調角度、數字寫法完全不同，都算同一件事。資料庫裡每個 achievement 會列出它目前「全部」的寫法（variantTexts），請跟每一條都比對，不要只看第一條。
+   **拿不準時一律選 append_variant**：多一條寫法沒有傷害，多出一個重複的 achievement 會污染資料庫。只有在確定是資料庫裡沒出現過的另一件事時，才用 new_achievement。
+   如果新內容裡有好幾條 bullet 講的是同一件新的事，把它們放進同一個 new_achievement（或 new_entry 底下同一個 achievement）的 variants 陣列，不要拆成好幾個 achievement。
 3. 判斷「同一家公司」時要看語意，不要只比對字串——「網際威信股份有限公司」「網際威信股份有限公司（金融科技公司...）」「HiTrust」如果指的是同一家公司，都算同一個 entry，不要因為附註文字不同就當成不同公司開新的 entry。
 4. 每一條輸出的 bullet 文字都要附一個簡短的「角度標籤」（angleLabel），描述這個寫法強調什麼重點，例如「強調從 0 到 1 實作」「強調數據分析與量化成果」「強調跨部門溝通協調」，這個標籤只給使用者自己參考挑選用，不會出現在正式履歷裡。
 5. 職稱也要比照 bullet 累積不同寫法：如果新內容對某個既有 entry 的職稱寫法（跟資料庫裡列出的 roles 比對）不完全一樣（例如「PM」vs「Project Manager」、中英文不同語言下的職稱說法），輸出 append_role_variant 把新寫法加進去；如果新內容的職稱只是大小寫、標點差異，跟既有寫法本質相同，就不用輸出這個動作，避免重複累積幾乎一樣的字串。**任職期間（period）不用做這個處理**，維持原本第一次寫入的版本就好，不管新內容怎麼描述期間都不用理它。
@@ -101,9 +108,9 @@ const SYSTEM_PROMPT = `你是履歷經歷資料庫的合併助手。使用者已
   "conflicts_needing_confirmation": string[],
   "actions": [
     { "action": "append_variant", "entryId": string, "achievementId": string, "text": string, "angleLabel": string },
-    { "action": "new_achievement", "entryId": string, "text": string, "angleLabel": string },
+    { "action": "new_achievement", "entryId": string, "variants": [{ "text": string, "angleLabel": string }] },
     { "action": "append_role_variant", "entryId": string, "role": string },
-    { "action": "new_entry", "language": "zh"|"en", "entryType": "work"|"leadership", "orgName": string, "location": string|null, "role": string, "period": string, "achievements": [{ "text": string, "angleLabel": string }] }
+    { "action": "new_entry", "language": "zh"|"en", "entryType": "work"|"leadership", "orgName": string, "location": string|null, "role": string, "period": string, "achievements": [{ "variants": [{ "text": string, "angleLabel": string }] }] }
   ]
 }`;
 
@@ -123,7 +130,7 @@ export async function mergeContentIntoExperienceDb(params: {
     .eq("user_id", userId)
     .maybeSingle();
 
-  const userPrompt = `===== 使用者目前的經歷資料庫（摘要，每個 achievement 只列一句代表性寫法）=====
+  const userPrompt = `===== 使用者目前的經歷資料庫（摘要，每個 achievement 列出目前全部的寫法）=====
 ${JSON.stringify(existingSummary, null, 2)}
 
 ===== 使用者目前的 profile 資料 =====
@@ -160,10 +167,10 @@ ${rawContent}`;
 
   for (const action of plan.actions) {
     if (action.action === "new_entry") {
-      const achievements = action.achievements.map((a) => ({
-        id: newAchievementId(),
-        variants: [{ text: a.text, angleLabel: a.angleLabel, source: sourceLabel }],
-      }));
+      const achievements = action.achievements
+        .map((a) => toVariants(a.variants, sourceLabel))
+        .filter((variants) => variants.length > 0)
+        .map((variants) => ({ id: newAchievementId(), variants }));
 
       const { error } = await supabase.from("experience_entries").insert({
         user_id: userId,
@@ -190,11 +197,11 @@ ${rawContent}`;
         .maybeSingle();
       if (readError || !row) throw new Error(`找不到要新增成就的經歷區塊：${action.entryId}`);
 
+      const variants = toVariants(action.variants, sourceLabel);
+      if (variants.length === 0) continue;
+
       const achievements = Array.isArray(row.achievements) ? row.achievements : [];
-      achievements.push({
-        id: newAchievementId(),
-        variants: [{ text: action.text, angleLabel: action.angleLabel, source: sourceLabel }],
-      });
+      achievements.push({ id: newAchievementId(), variants });
 
       const { error: writeError } = await supabase
         .from("experience_entries")
@@ -220,6 +227,11 @@ ${rawContent}`;
         (a: { id: string }) => a.id === action.achievementId,
       );
       if (!target) throw new Error(`找不到要新增寫法的 achievement：${action.achievementId}`);
+
+      // 應徵定案寫回時，直接沿用資料庫原文的 bullet 會被 AI 當成「新寫法」再加一次，
+      // 所以寫入前先比對，文字實質相同就跳過
+      const key = normalizeForDedupe(action.text);
+      if (target.variants.some((v: { text: string }) => normalizeForDedupe(v.text) === key)) continue;
 
       target.variants.push({ text: action.text, angleLabel: action.angleLabel, source: sourceLabel });
 
@@ -281,10 +293,24 @@ async function loadExistingSummary(
     achievements: (row.achievements ?? []).map(
       (a: { id: string; variants: { text: string }[] }) => ({
         achievementId: a.id,
-        sampleText: a.variants[0]?.text ?? "",
+        variantTexts: (a.variants ?? []).map((v) => v.text),
       }),
     ),
   }));
+}
+
+function toVariants(variants: VariantDraft[] | undefined, sourceLabel: string) {
+  return (Array.isArray(variants) ? variants : [])
+    .filter((v) => v.text?.trim())
+    .map((v) => ({ text: v.text, angleLabel: v.angleLabel ?? "", source: sourceLabel }));
+}
+
+// 忽略空白、全形/半形標點與大小寫差異，只用來判斷「是不是同一段文字」
+function normalizeForDedupe(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s\p{P}]/gu, "");
 }
 
 function newAchievementId(): string {
