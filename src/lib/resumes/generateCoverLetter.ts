@@ -1,32 +1,104 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
-import { COVERAGE_RULES, type GeneratedResume } from "./generateResume";
+import { COVERAGE_RULES, readScoreBasis, type GeneratedResume } from "./generateResume";
+import { coveredByResume } from "./atsScore";
+import { buildContactLine, pickName, readContact } from "./contact";
+import { isCompanyResearchAvailable, researchCompany } from "@/lib/jobs/researchCompany";
+import { companyMentionedInJd } from "@/lib/jobs/companyInJd";
+import { letterLength, letterLengthUnit } from "@/lib/text/letterLength";
+import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
+import { toTraditional } from "@/lib/text/toTraditional";
 
-const COVER_LETTER_RULES = `寫作規則：
-1. 英文用 "Dear Hiring Manager," 開頭，中文用「招聘主管您好，」開頭。
-2. 禁止使用 em-dash（—），改用逗號、分號，或拆成兩句話。
-3. 降低 AI 感，避免堆疊術語、過度正式的寫法，避免像「served as the connective point」這種聽起來假假的措辭，盡量寫得像人類自然會寫的用詞，避免用三項並列的清單當偷懶的寫法。
-4. 內容依照：這份履歷內容、JD 要求、履歷裡沒放進去但 JD 有列出的條件，去寫求職信，補上履歷放不進去的缺口。
+// 寫作規則來自作者長期人工修改求職信後整理的寫作準則。
+// 例子都換成通用的，不放使用者本人的經歷（這套 prompt 所有使用者共用）。
+const COVER_LETTER_RULES = `求職信結構（四段式，篇幅半頁到一頁）：
+1. 開頭自我介紹：姓名、目前背景一句話帶過、從哪裡得知這個職缺（資料裡沒有就略過，不要編）、簡短的應徵動機（1 到 2 句）。
+2. 應徵動機：為什麼是「這間公司」，不是泛用的「為什麼是這個產業」。有提供公司研究素材時，從裡面挑 1 到 2 個具體、只有這間公司才有的特色（特有的用詞、制度、做法，例如「扁平組織讓新人也能發言」「學徒制文化」「橫跨上百個城市的據點網絡」；不是「創新」「以客戶為中心」這種每間公司都會講的空話），跟使用者的實際經歷或做事風格連結成一句自然的話，不要生硬地並列「公司特色」加「我的特質」。沒有素材、或素材裡找不到夠具體的內容時，改寫以這個職位工作內容為主的動機，絕對不能編造公司特色。
+3. 個人亮點：2 到 3 個具體案例，最好對應履歷裡已經寫的內容，用不同的語氣重新敘事（不是逐字複製履歷 bullet），並明確扣回 JD 的資格要求。逐條核對 JD 符合度清單，重要的資格都要在信裡找得到呼應；履歷沒寫到的條件，只有資料裡有真實經歷可以支撐才補。
+4. 結尾：感謝對方撥空閱讀、提醒履歷已附上、期待後續機會。聯絡方式由系統接在署名下方，信裡不用再寫。
+段落之間不要重複：同一個特質、同一組數字在整封信只出現一次。
+
+誠實原則（最重要）：
+1. 每一句都要有履歷或資料裡的事實支撐。不能為了對應 JD 關鍵字編造、誇大，也不能把某個方法或技巧套到錯誤的專案上（方法歸屬錯了跟捏造一樣嚴重）。
+2. 不要用「上線」「發布」、launched、released 這類暗示正式產品發表的字眼，除非資料裡明確寫了已經正式上線；個人專案、小範圍測試的產品用「開發」「實測」這類中性說法。
+3. JD 要求、但使用者完全沒有相關經歷的，不要假裝有。可以在結尾段誠實承認，用展現熱情、期待成長的語氣（例如「這正是吸引我的地方，我期待在這樣的環境裡快速學習」），不要用消極被動的語氣（例如「這點我心裡有數，也做好了準備」）。
+4. 團隊合作、獨立作業這類特質有時是互斥的重點，每次都要看這份 JD 實際要的是什麼再決定強調哪一個，而且只能寫資料裡看得出來的特質，不能憑空推論。
 5. 如果要用「使用者正在開發一個 AI 工具」這件事當佐證去補缺口，只能提到「有在開發一個 AI 工具」這個事實本身，絕對不要描述這個工具的細節、功能、或用途。
-6. 長度跟語氣比照一般求職信，四到五段，不要過長。`;
 
-const SYSTEM_PROMPT = `你是求職信寫作助手。使用者會給你：JD、已經定案的履歷內容、JD 符合度清單（標記履歷還缺少哪些條件）。
+語氣與格式（中英共用）：
+1. 英文用 "Dear Hiring Manager," 開頭，中文用「招聘主管您好，」開頭。
+2. 不用破折號（em-dash「—」，中文破折號也不用），改用逗號、分號，或拆成兩句。
+3. 避免 AI 感：不用三個以上的形容詞或動詞堆疊當句子骨架，不用三項並列湊字數，不用聽起來像模板的業務套話（例如 "I'd love to put my skills to work for your clients"）。用平實、直接、像真人會講的話寫。
+4. 不要把 JD 原文的關鍵字直接放在句子開頭當宣稱（例如「我擅長假設驅動的問題解決」），要讓這個能力從具體案例的敘述裡自然浮現。
+5. 一個句子講一件事，太長就拆成兩句，不要把因果關係、時間順序全部揉在同一句。
+6. 非技術職缺不用過度技術化的詞，換成一般人看得懂的說法。
+7. 同一個資訊（例如某段經歷的公司名稱、某個特質）在同一段裡不要出現兩次。`;
+
+const SYSTEM_PROMPT = `你是求職信寫作助手。使用者會給你：JD、已經定案的履歷內容、JD 符合度清單（標記履歷還缺少哪些條件），有時還有剛上網查到的公司研究素材。
 
 你的任務：寫一封求職信，語氣自然、針對這個職缺客製化，適度用已經定案履歷裡沒放進去、但 JD 有列出的條件去補強說服力。
 
 ${COVER_LETTER_RULES}
 
+結尾敬語（例如 "Sincerely,"、「敬祝 順心」）的下一行，只寫 {{SIGNATURE}} 這個記號，不要寫任何名字，系統會自動換成使用者的名字跟聯絡方式。
+
 只輸出求職信本文（含開頭問候與署名），不要有其他說明文字、不要用 markdown 包起來。`;
+
+// 只寫「目標語言：zh」時，AI 看到的素材如果是英文履歷，常常會直接沿用英文寫。語言要講清楚。
+const LANGUAGE_INSTRUCTION: Record<string, string> = {
+  zh: `整封信一律用繁體中文（台灣用語）撰寫。就算下面的履歷素材是英文，也要改寫成中文，不要直接照抄英文；專有名詞、產品名、工具名可以保留英文。
+中文額外規則：
+1. 全部用全形標點（，。；：「」），不要混用半形逗號、句號。
+2. 避免翻譯腔（例如「即使……也是如此」「在……的交會點」），用中文母語者會自然講出的句子結構。
+3. 避免不像人話的用詞，例如「早期職涯產品人才」這種硬翻的職稱式開場。
+4. 地點、日期格式整封信前後一致，不要中英夾雜。`,
+  en: `Write the entire letter in English, even if the resume material below is in Chinese. Rewrite naturally in English instead of translating word for word.
+英文額外規則：
+1. 自我介紹用自然的英文語序，例如 "I am Alex Chen"，不要用「姓, 名」的名單格式（"I am Chen, Alex"）。
+2. 專有名詞、認證縮寫、組織全名要用正確的大小寫跟單複數（例如 Apple MFi 不是 APPLE MFI）。`,
+};
+
+const SIGNATURE_MARK = "{{SIGNATURE}}";
+
+/** 把 {{SIGNATURE}} 換成署名（名字＋聯絡方式）；AI 漏寫記號時接在信尾。 */
+function placeSignature(text: string, signature: string): string {
+  if (text.includes(SIGNATURE_MARK)) {
+    return text.replace(SIGNATURE_MARK, signature).replace(/\n{3,}/g, "\n\n").trimEnd();
+  }
+  return signature ? `${text}\n${signature}` : text;
+}
+
+/** 中文字佔所有字母（中文字＋英文字母）的比例夠高，才算是中文信。 */
+function looksChinese(text: string): boolean {
+  const cjk = (text.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const latin = (text.match(/[A-Za-z]/g) ?? []).length;
+  return cjk > 0 && cjk / (cjk + latin) > 0.5;
+}
+
+export interface CoverLetterOptions {
+  /** 每個語言的字數上限（中文算字、英文算 words），沒有就不限。 */
+  wordLimits: Record<string, number>;
+  /** 先上網研究這間公司（需要 FIRECRAWL_API_KEY）。 */
+  research: boolean;
+}
+
+export interface CoverLetterGenerateInfo {
+  /** 有勾研究時：參考了哪些網頁；查不到（或因為公司名稱對不上而跳過）是空陣列。沒勾研究是 null。 */
+  researchSources: string[] | null;
+  /** JD 裡找不到填的公司名稱時，回傳那個名稱，畫面上提醒使用者確認。 */
+  companyMismatch: string | null;
+}
 
 export async function generateCoverLetterForApplication(
   supabase: SupabaseClient,
   userId: string,
   applicationId: string,
-): Promise<void> {
+  options: CoverLetterOptions,
+): Promise<CoverLetterGenerateInfo> {
   const { data: application, error: appError } = await supabase
     .from("applications")
-    .select("job_description, resume_snapshot, cover_letter_language, jd_match_checklist")
+    .select("job_description, company_name, resume_snapshot, cover_letter_language, jd_match_checklist")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -48,63 +120,141 @@ export async function generateCoverLetterForApplication(
   const checklist: Record<string, GeneratedResume["jd_match_checklist"]> =
     application.jd_match_checklist ?? {};
 
+  const { data: profile } = await supabase
+    .from("profile_data")
+    .select("data")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const contact = readContact(profile?.data);
+
+  // JD 裡找不到填的公司名稱（真實發生過：公司名稱填 A 公司，JD 卻貼成 B 公司的職缺），公司研究可能查到別間公司，
+  // 這種情況一律不研究，應徵動機只照 JD 寫，並提醒使用者確認公司名稱。
+  const companyMismatch =
+    companyMentionedInJd(application.company_name, application.job_description) === false
+      ? (application.company_name as string)
+      : null;
+
+  // 公司研究每次都重新查（不沿用上一次或別的職缺的資料），各語言版本共用同一份。
+  const research =
+    options.research && !companyMismatch && isCompanyResearchAvailable()
+      ? await researchCompany(application.company_name ?? "", application.job_description ?? "")
+      : null;
+  const researchSection = companyMismatch
+    ? `===== 公司研究 =====\n這筆應徵填的公司名稱沒有出現在 JD 裡，可能填錯或 JD 貼錯，所以沒有查公司資料。公司名稱一律以 JD 原文為準，第二段（應徵動機）以這個職位的工作內容為主，不要編造公司特色。`
+    : !options.research
+    ? `===== 公司研究 =====\n這次沒有查公司資料。第二段（應徵動機）以這個職位的工作內容為主，不要編造公司特色。`
+    : research
+      ? `===== 公司研究素材（剛上網查的「${application.company_name}」相關頁面）=====\n只用明確是在講這間公司的內容；搜尋結果可能混到同名或無關的頁面，看不出來是這間公司的就不要用。\n\n${research.material}`
+      : `===== 公司研究 =====\n查不到這間公司夠具體的公開資料。第二段（應徵動機）以這個職位的工作內容為主，不要編造公司特色。`;
+
   const draft: Record<string, string> = {};
 
   for (const lang of languages) {
     // 求職信語言不一定等於履歷語言，找不到完全對應時就用第一個有的履歷版本當內容依據
     const resumeLang = resumeSnapshot[lang] ? lang : Object.keys(resumeSnapshot)[0];
-    const resume = resumeSnapshot[resumeLang];
+    const { layout: _layout, ...resume } = resumeSnapshot[resumeLang]; // eslint-disable-line @typescript-eslint/no-unused-vars
     const checklistForResume = checklist[resumeLang] ?? [];
+    const name = pickName(contact, lang);
+    // 署名＝名字＋聯絡方式（結尾段要附聯絡方式，由程式放，不讓 AI 自己寫，AI 會亂編）。
+    const signature = [name, buildContactLine(contact, lang)].filter(Boolean).join("\n");
+
+    // 字數上限扣掉署名的長度，AI 寫的本文才是剩下能用的字數。
+    const limit = options.wordLimits[lang];
+    const bodyLimit = limit ? Math.max(50, limit - letterLength(signature, lang)) : null;
+    const unit = letterLengthUnit(lang);
+    const limitInstruction = bodyLimit
+      ? `字數上限：信的本文（不含 {{SIGNATURE}}）一定要在 ${bodyLimit} ${unit}以內，${lang === "zh" ? "中文算字數，不含空白" : "count words"}。篇幅縮短時保留四段結構，優先減少第三段的案例數量（留最有力的 1 到 2 個）。`
+      : null;
 
     const userPrompt = [
-      `目標語言：${lang}`,
+      LANGUAGE_INSTRUCTION[lang] ?? `目標語言：${lang}`,
+      name ? `使用者的名字（開頭自我介紹用）：${name}` : null,
+      limitInstruction,
       `===== JD =====`,
       application.job_description,
       `===== 已定案的履歷內容 =====`,
       JSON.stringify(resume, null, 2),
-      `===== JD 符合度清單（尚未涵蓋的部分可以考慮在求職信補強）=====`,
-      JSON.stringify(checklistForResume, null, 2),
-    ].join("\n\n");
+      `===== JD 符合度清單（逐條核對；尚未涵蓋的部分可以考慮在求職信補強）=====`,
+      JSON.stringify(
+        checklistForResume.map((i) => ({
+          item: i.item,
+          importance: i.importance ?? null,
+          covered: coveredByResume(i),
+          gap: i.gap ?? null,
+        })),
+        null,
+        2,
+      ),
+      researchSection,
+    ]
+      .filter((part): part is string => part !== null)
+      .join("\n\n");
 
-    const response = await askClaude({
-      userId,
-      feature: "cover_letter",
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt,
-      maxTokens: 2000,
-      supabase,
-    });
+    const ask = (prompt: string) =>
+      askClaude({ userId, feature: "cover_letter", systemPrompt: SYSTEM_PROMPT, userPrompt: prompt, maxTokens: 2000, supabase });
 
-    draft[lang] = response.text.trim();
+    let text = (await ask(userPrompt)).text.trim();
+    // 中文版偶爾還是會被英文素材帶著寫成英文，檢查一次，不對就明講再寫一次。
+    if (lang === "zh" && !looksChinese(text)) {
+      text = (
+        await ask(
+          `${userPrompt}\n\n注意：你上一次把這封信寫成英文了，這是錯的。這次整封信（包含開頭問候跟結尾敬語）都一定要用繁體中文寫。`,
+        )
+      ).text.trim();
+    }
+    // 超過字數上限：告訴 AI 實際寫了多少，請它縮短重寫一次。
+    const bodyLength = letterLength(text.replace(SIGNATURE_MARK, ""), lang);
+    if (bodyLimit && bodyLength > bodyLimit) {
+      text = (
+        await ask(
+          `${userPrompt}\n\n===== 上一版（太長）=====\n${text}\n\n上一版本文有 ${bodyLength} ${unit}，超過上限 ${bodyLimit} ${unit}。請在保留四段結構、事實不變的前提下縮短到 ${bodyLimit} ${unit}以內，只輸出縮短後的完整求職信。`,
+        )
+      ).text.trim();
+    }
+
+    if (lang === "zh") text = toFullWidthPunctuation(toTraditional(text));
+    draft[lang] = placeSignature(text, signature);
   }
 
   const { error: updateError } = await supabase
     .from("applications")
-    .update({ cover_letter_draft: draft })
+    // 信換了，上一封信的比對結果就不適用，清掉（頁面會先顯示只算履歷的對照）。
+    .update({ cover_letter_draft: draft, cover_letter_checklist: null })
     .eq("id", applicationId)
     .eq("user_id", userId);
 
   if (updateError) throw new Error(`儲存求職信失敗：${updateError.message}`);
+
+  return { researchSources: options.research ? (research?.sources ?? []) : null, companyMismatch };
 }
 
-const RECHECK_SYSTEM_PROMPT = `你是求職信與履歷符合度檢查助手。使用者會給你 JD、先前已經定義好的 JD 符合度清單、履歷內容、求職信內容。
+const RECHECK_SYSTEM_PROMPT = `你是求職信比對助手。使用者會給你 JD、幾項「履歷沒寫到的 JD 條件」、跟一封求職信。
 
-你的任務：針對清單裡的每一項，重新檢查「履歷或求職信」現在有沒有涵蓋到，item 文字要保持跟先前清單完全一樣，不要新增、刪除、改寫項目。source 欄位要標明是被履歷涵蓋（"resume"）還是求職信涵蓋（"cover_letter"），都沒涵蓋就是 null。
+你的任務：逐項判斷這封求職信有沒有補上這項條件。判斷要穩定：同一封信每次判斷結果都要一樣，只看信裡有沒有「明確、具體」對應到這項的內容。
 
 ${COVERAGE_RULES}
 
-只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。輸出格式：
-{ "jd_match_checklist": [{ "item": string, "covered": boolean, "source": "resume"|"cover_letter"|null }] }`;
+只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。item 文字照抄。輸出格式：
+{ "results": [{ "item": string, "covered": boolean }] }`;
 
+type Checklist = GeneratedResume["jd_match_checklist"];
+
+/**
+ * 求職信頁的 JD 條件對照：履歷＋求職信合起來算。
+ * - 履歷已經定案，履歷寫到的項目直接固定打勾，不再讓 AI 重判。
+ * - AI 只判斷「履歷沒寫到的項目，求職信有沒有補上」。
+ * - 這封信跟上次比對時一模一樣，就直接沿用上次的結果，不呼叫 AI。
+ * 結果存在 cover_letter_checklist，不動履歷頁用的 jd_match_checklist。
+ */
 export async function recheckJdMatchWithCoverLetter(
   supabase: SupabaseClient,
   userId: string,
   applicationId: string,
   editedCoverLetterDraft: Record<string, string>,
-): Promise<Record<string, GeneratedResume["jd_match_checklist"]>> {
+): Promise<Record<string, Checklist>> {
   const { data: application, error: appError } = await supabase
     .from("applications")
-    .select("job_description, resume_snapshot, jd_match_checklist, cover_letter_language")
+    .select("job_description, resume_snapshot, jd_match_checklist, cover_letter_checklist, cover_letter_language, score_basis")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -114,54 +264,62 @@ export async function recheckJdMatchWithCoverLetter(
   }
 
   const resumeSnapshot: Record<string, GeneratedResume["resume"]> = application.resume_snapshot ?? {};
-  const existingChecklists: Record<string, GeneratedResume["jd_match_checklist"]> =
-    application.jd_match_checklist ?? {};
+  const resumeChecklists: Record<string, Checklist> = application.jd_match_checklist ?? {};
+  const previous: Record<string, Checklist> = application.cover_letter_checklist ?? {};
+  const basis = readScoreBasis(application.score_basis);
   const languages: string[] = application.cover_letter_language ?? [];
-
-  const updatedChecklists: Record<string, GeneratedResume["jd_match_checklist"]> = {
-    ...existingChecklists,
-  };
+  const updated: Record<string, Checklist> = { ...previous };
 
   for (const lang of languages) {
     const resumeLang = resumeSnapshot[lang] ? lang : Object.keys(resumeSnapshot)[0];
-    const existingItems = existingChecklists[resumeLang] ?? [];
     const coverLetter = editedCoverLetterDraft[lang] ?? "";
+    if (previous[lang] && basis.cover_letter[lang] === coverLetter) continue;
 
-    const userPrompt = [
-      `===== JD =====`,
-      application.job_description,
-      `===== 先前已經定義好的 JD 符合度清單（item 文字要保持不變）=====`,
-      JSON.stringify(existingItems.map((i) => i.item), null, 2),
-      `===== 履歷內容 =====`,
-      JSON.stringify(resumeSnapshot[resumeLang], null, 2),
-      `===== 求職信內容 =====`,
-      coverLetter,
-    ].join("\n\n");
+    const resumeItems = resumeChecklists[resumeLang] ?? [];
+    const missing = resumeItems.filter((i) => !coveredByResume(i));
+    let letterCovers = new Set<string>();
 
-    const response = await askClaude({
-      userId,
-      feature: "jd_recheck",
-      systemPrompt: RECHECK_SYSTEM_PROMPT,
-      userPrompt,
-      maxTokens: 3000,
-      temperature: 0,
-      supabase,
+    if (missing.length > 0 && coverLetter.trim()) {
+      const userPrompt = [
+        `===== JD =====`,
+        application.job_description,
+        `===== 履歷沒寫到的 JD 條件 =====`,
+        JSON.stringify(missing.map((i) => i.item), null, 2),
+        `===== 求職信內容 =====`,
+        coverLetter,
+      ].join("\n\n");
+
+      const response = await askClaude({
+        userId,
+        feature: "jd_recheck",
+        systemPrompt: RECHECK_SYSTEM_PROMPT,
+        userPrompt,
+        maxTokens: 2000,
+        temperature: 0,
+        supabase,
+      });
+
+      const parsed = JSON.parse(
+        response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
+      ) as { results: { item: string; covered: boolean }[] };
+      letterCovers = new Set(parsed.results.filter((r) => r.covered).map((r) => r.item.trim()));
+    }
+
+    updated[lang] = resumeItems.map((i) => {
+      if (coveredByResume(i)) return { ...i, covered: true, source: "resume" as const };
+      const byLetter = letterCovers.has(i.item.trim());
+      return { ...i, covered: byLetter, source: byLetter ? ("cover_letter" as const) : null };
     });
-
-    const parsed = JSON.parse(
-      response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
-    ) as { jd_match_checklist: GeneratedResume["jd_match_checklist"] };
-
-    updatedChecklists[resumeLang] = parsed.jd_match_checklist;
+    basis.cover_letter[lang] = coverLetter;
   }
 
   const { error: updateError } = await supabase
     .from("applications")
-    .update({ cover_letter_draft: editedCoverLetterDraft, jd_match_checklist: updatedChecklists })
+    .update({ cover_letter_draft: editedCoverLetterDraft, cover_letter_checklist: updated, score_basis: basis })
     .eq("id", applicationId)
     .eq("user_id", userId);
 
   if (updateError) throw new Error(`儲存重新比對結果失敗：${updateError.message}`);
 
-  return updatedChecklists;
+  return updated;
 }

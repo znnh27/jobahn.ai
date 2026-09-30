@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { BrandMark } from "../../BrandMark";
+import { AppNav, getDisplayName } from "../../AppNav";
 import { NewApplicationForm } from "./form";
+import { StepBar } from "../../StepBar";
 
 export default async function NewApplicationPage() {
   const supabase = await createClient();
@@ -15,14 +15,12 @@ export default async function NewApplicationPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page page--with-nav">
+      <AppNav userName={getDisplayName(user)} />
       <div className="page-container">
-        <BrandMark />
-        <div className="page-header">
+        <div className="page-title-block">
           <h1 className="heading-page">新增應徵</h1>
-          <Link href="/" className="link-muted">
-            回首頁
-          </Link>
+          <StepBar current={0} />
         </div>
         <NewApplicationForm />
       </div>
