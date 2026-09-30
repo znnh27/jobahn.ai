@@ -6,7 +6,7 @@ export function BrandMark() {
   return (
     <Link href="/" className="brand-mark">
       {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態小圖示，不需要 next/image 的最佳化 */}
-      <img src="/logo-mascot.png" alt="jobahn" className="brand-mark-icon" />
+      <img src="/logo-head.png" alt="jobahn" className="brand-mark-icon" />
       <span className="brand-mark-text">jobahn</span>
     </Link>
   );

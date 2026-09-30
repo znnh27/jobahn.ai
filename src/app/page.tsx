@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { logout } from "@/app/logout/actions";
+import { AppNav, getDisplayName } from "./AppNav";
+import { ApplicationsTable } from "./ApplicationsTable";
+import { PlusIcon } from "./icons";
+import { BlobScene } from "./BlobScene";
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -12,14 +15,7 @@ export default async function HomePage() {
   if (!user) {
     return (
       <div className="page sunny-surface landing-hero">
-        <div className="blob-scene" aria-hidden="true">
-          <div className="blob blob--1" />
-          <div className="blob blob--2" />
-          <div className="blob blob--3" />
-          <div className="blob blob--4" />
-          <div className="blob blob--5" />
-          <div className="blob blob--6" />
-        </div>
+        <BlobScene count={6} />
         {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
         <img
           src="/logo-mascot.png"
@@ -59,36 +55,14 @@ export default async function HomePage() {
     .select("id, company_name, job_title, status, ats_score, resume_language, created_at")
     .order("created_at", { ascending: false });
 
-  const displayName =
-    (user.user_metadata?.display_name as string | undefined) || user.email?.split("@")[0] || "你";
+  const displayName = getDisplayName(user);
 
   return (
-    <div className="page">
-      <div className="page-container page-container--home home-blob-page">
-        <div className="blob-scene blob-scene--home" aria-hidden="true">
-          <div className="blob blob--1" />
-          <div className="blob blob--2" />
-          <div className="blob blob--3" />
-          <div className="blob blob--4" />
-          <div className="blob blob--5" />
-          <div className="blob blob--6" />
-        </div>
+    <div className="page page--with-nav page--blobs">
+      <AppNav userName={displayName} />
+      <BlobScene className="blob-scene--home" />
+      <div className="page-container page-container--home">
         <div className="home-hero home-hero--tall">
-          <div className="home-hero-nav">
-            <div className="toolbar-inline">
-              <Link href="/experience" className="btn btn-secondary">
-                經歷資料庫
-              </Link>
-              <Link href="/settings" className="btn btn-secondary">
-                帳號設定
-              </Link>
-              <form action={logout}>
-                <button type="submit" className="btn btn-secondary">
-                  登出
-                </button>
-              </form>
-            </div>
-          </div>
           <div className="home-hero-greeting">
             {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
             <img
@@ -104,65 +78,16 @@ export default async function HomePage() {
         </div>
 
         <div className="page-header">
-          <h2 className="heading-card">應徵紀錄</h2>
+          <h2 className="heading-page">應徵紀錄</h2>
           <Link href="/applications/new" className="btn btn-primary">
-            + 新增應徵
+            <PlusIcon />
+            新增應徵
           </Link>
         </div>
 
         <div className="table-wrap">
           {applications && applications.length > 0 ? (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>公司</th>
-                  <th>職缺</th>
-                  <th>狀態</th>
-                  <th>ATS</th>
-                  <th>下載履歷</th>
-                </tr>
-              </thead>
-              <tbody>
-                {applications.map((app) => (
-                  <tr key={app.id}>
-                    <td>
-                      <Link href={`/applications/${app.id}`} className="link-table">
-                        {app.company_name || "未命名公司"}
-                      </Link>
-                    </td>
-                    <td>{app.job_title || "—"}</td>
-                    <td>{app.status}</td>
-                    <td>{app.ats_score ?? "—"}</td>
-                    <td>
-                      {app.status === "draft" ? (
-                        "—"
-                      ) : (
-                        <div className="download-lang-list">
-                          {(app.resume_language ?? []).map((lang: string) => (
-                            <span key={lang} className="download-lang-item">
-                              {lang}：
-                              <a
-                                href={`/applications/${app.id}/resume-download?lang=${lang}&format=docx`}
-                                className="link-table"
-                              >
-                                Word
-                              </a>
-                              {" / "}
-                              <a
-                                href={`/applications/${app.id}/resume-download?lang=${lang}&format=pdf`}
-                                className="link-table"
-                              >
-                                PDF
-                              </a>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <ApplicationsTable applications={applications} />
           ) : (
             <p className="table-empty">還沒有應徵紀錄</p>
           )}
