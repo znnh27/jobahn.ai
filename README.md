@@ -1,6 +1,6 @@
 # jobahn
 
-找工作 AI 助手，Phase 3 正式產品。技術選型與架構決策見 `../data/` 底下的設定檔（`workflow.json`、`resume_rules.json`）以及專案根目錄的建置計畫。
+找工作 AI 助手：把你的經歷整理成經歷資料庫，針對每一份 JD 生成客製化的中英文履歷與求職信。
 
 ## 改樣式
 
@@ -12,7 +12,7 @@
 
 1. 一個 [Supabase](https://supabase.com) 專案
 2. 一個 [Vercel](https://vercel.com) 帳號（部署用）
-3. 一個 [Firecrawl](https://firecrawl.dev) API Key（抓職缺頁面用）
+3. 一個 [Firecrawl](https://firecrawl.dev) API Key（選填：貼職缺連結自動抓取、寫求職信前上網研究公司會用到。沒設的話這兩個功能不會出現，改成直接貼 JD 文字、求職信的應徵動機以職位內容來寫。研究一次公司大約用 4 credits）
 
 Anthropic API 呼叫走雙模式（見 `.env.local.example` 的 `AI_PROVIDER` 說明）：本機開發預設用你自己的 Claude Pro/Max 訂閱（透過已登入的 Claude Code CLI，不用申請 API Key），部署到 Vercel 後才需要切成 API 模式並填入共用的 `ANTHROPIC_API_KEY`。`/settings` 頁的 API Key 綁定是選填功能，使用者不綁也能直接用（走共用額度），不是強制 BYOK。
 
@@ -25,6 +25,7 @@ Anthropic API 呼叫走雙模式（見 `.env.local.example` 的 `AI_PROVIDER` �
    - `supabase/migrations/0004_ai_usage_log.sql`
    - `supabase/migrations/0005_experience_achievements.sql`
    - `supabase/migrations/0006_drop_original_resumes.sql`
+   - `supabase/migrations/0007_scoring_basis.sql`
 2. 複製 `.env.local.example` 成 `.env.local`，填入 Supabase 專案的 URL／anon key／service role key，以及 Firecrawl API Key
 3. 安裝依賴並啟動開發伺服器：
 
