@@ -2,7 +2,8 @@ import type { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildResumeDocx } from "@/lib/documents/buildResumeDocx";
 import { buildResumePdf } from "@/lib/documents/buildResumePdf";
-import type { ResumeContact } from "@/lib/documents/resumeDocContent";
+import { readContact } from "@/lib/resumes/contact";
+import { resumeFileName } from "@/lib/documents/resumeFileName";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 
 export async function GET(
@@ -47,30 +48,31 @@ export async function GET(
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const contact: ResumeContact = (profile?.data as { contact?: ResumeContact })?.contact ?? {
-    name_zh: null,
-    name_en: null,
-    email: null,
-    phone: null,
-    linkedin: null,
-    portfolio: null,
-  };
+  const contact = readContact(profile?.data);
 
   const input = { contact, resume: resumeSnapshot[lang], language: lang };
   const buffer = format === "docx" ? await buildResumeDocx(input) : await buildResumePdf(input);
 
-  const namePart = (application.company_name || "resume") + "-" + (application.job_title || id.slice(0, 8));
-  const fileName = `${namePart}_${lang}.${format}`.replace(/[^\w.\-一-鿿]+/g, "_");
+  const fileName = resumeFileName({
+    companyName: application.company_name,
+    jobTitle: application.job_title,
+    contact,
+    language: lang,
+    ext: format,
+  });
 
   const contentType =
     format === "docx"
       ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       : "application/pdf";
 
+  // HTTP 標頭只能放 ASCII，檔名有中文（公司名、職稱）時直接塞進去會出錯。
+  // filename 放 ASCII 備用檔名，filename* 用 UTF-8 編碼放真正的中文檔名（RFC 6266），瀏覽器會優先用後者。
+  const asciiFallback = fileName.replace(/[^\x20-\x7e]+/g, "_");
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": contentType,
-      "Content-Disposition": `attachment; filename="${fileName}"`,
+      "Content-Disposition": `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
     },
   });
 }

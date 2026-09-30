@@ -74,7 +74,7 @@ create policy "original_resumes_all_own" on public.original_resumes
 
 -- =========================================================
 -- experience_entries：經歷資料庫，每個使用者自己的一份
--- 對應 jobahn/data/experience_db.json 的「公司/組織 -> 描述變體」結構
+-- 經歷資料庫：「公司/組織 -> 描述變體」結構
 -- =========================================================
 create table if not exists public.experience_entries (
   id uuid primary key default gen_random_uuid(),

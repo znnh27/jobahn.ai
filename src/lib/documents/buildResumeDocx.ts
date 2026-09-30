@@ -3,12 +3,14 @@ import {
   AlignmentType,
   BorderStyle,
   Document,
+  LineRuleType,
   Packer,
   Paragraph,
   TabStopType,
   TextRun,
 } from "docx";
-import { buildContactLine, getLabels, pickName, type ResumeDocInput } from "./resumeDocContent";
+import { CONTACT_SEPARATOR, contactParts, getLabels, pickName, type ResumeDocInput } from "./resumeDocContent";
+import { resolveMetrics, type ResumeMetrics } from "@/lib/resumes/typography";
 
 const PAGE_MARGIN_TWIPS = 720; // 0.5"
 const PAGE_WIDTH_TWIPS = 11906; // A4
@@ -16,18 +18,30 @@ const RIGHT_TAB_POS = PAGE_WIDTH_TWIPS - PAGE_MARGIN_TWIPS * 2;
 
 const FONT = "Calibri";
 
-function sectionHeader(text: string): Paragraph {
+// 字級、行距、段落間距都用 resolveMetrics() 算，跟 PDF（ResumePdfDocument）同一組數字。
+// 行距一律用「固定」：英文用「至少」的話，Word 會照 Calibri 自己的行高撐開，跟 PDF 對不上。
+
+// docx 的字級單位是半點（half-point），11pt = 22；間距單位是 1/20 pt（twip）。
+const halfPt = (pt: number) => Math.round(pt * 2);
+const twip = (pt: number) => Math.round(pt * 20);
+
+/** 跟 PDF 一樣：字級比內文大的段落，行高照內文的行距比例放大。 */
+function exactLine(fontPt: number, m: ResumeMetrics) {
+  return { line: twip((fontPt * m.line) / m.body), lineRule: LineRuleType.EXACT };
+}
+
+function sectionHeader(text: string, m: ResumeMetrics): Paragraph {
   return new Paragraph({
     border: { bottom: { style: BorderStyle.SINGLE, size: 6, space: 1, color: "000000" } },
-    spacing: { before: 200, after: 80 },
-    children: [new TextRun({ text, bold: true, font: FONT })],
+    spacing: { before: twip(m.sectionBefore), after: twip(m.sectionAfter), ...exactLine(m.header, m) },
+    children: [new TextRun({ text, bold: true, size: halfPt(m.header), font: FONT })],
   });
 }
 
-function orgLine(org: string, location: string | null): Paragraph {
+function orgLine(org: string, location: string | null, m: ResumeMetrics): Paragraph {
   return new Paragraph({
     tabStops: [{ type: TabStopType.RIGHT, position: RIGHT_TAB_POS }],
-    spacing: { before: 120 },
+    spacing: { before: twip(m.block) },
     children: [
       new TextRun({ text: org, bold: true, font: FONT }),
       new TextRun({ text: `\t${location ?? ""}`, font: FONT }),
@@ -48,33 +62,43 @@ function roleLine(role: string, period: string): Paragraph {
 function bulletParagraph(text: string): Paragraph {
   return new Paragraph({
     bullet: { level: 0 },
-    children: [new TextRun({ text, size: 22, font: FONT })],
+    // 縮排跟 PDF 一樣（bullet 往內 12pt、符號欄 10pt），Word 預設的清單縮排比較寬，一行放的字會變少。
+    indent: { left: twip(22), hanging: twip(10) },
+    children: [new TextRun({ text, font: FONT })],
   });
 }
 
 export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
   const { contact, resume, language } = input;
   const labels = getLabels(language);
+  const t = resolveMetrics(language, resume.layout);
   const name = pickName(contact, language);
-  const contactLine = buildContactLine(contact);
+  // 聯絡資訊一行：標籤粗體、內容一般字重，用「 / 」隔開。
+  const contactRuns = contactParts(contact, language).flatMap((p, i) => [
+    ...(i > 0 ? [new TextRun({ text: CONTACT_SEPARATOR, size: halfPt(t.contact), font: FONT })] : []),
+    new TextRun({ text: `${p.label}: `, bold: true, size: halfPt(t.contact), font: FONT }),
+    new TextRun({ text: p.value, size: halfPt(t.contact), font: FONT }),
+  ]);
 
   const children: Paragraph[] = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: name, bold: true, size: 36, font: FONT })],
+      spacing: { line: twip(t.name * 1.2), lineRule: LineRuleType.EXACT },
+      children: [new TextRun({ text: name, bold: true, size: halfPt(t.name), font: FONT })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: contactLine, size: 16, font: FONT })],
+      spacing: { before: twip(t.contactBefore), after: twip(t.contactAfter), ...exactLine(t.contact, t) },
+      children: contactRuns,
     }),
-    sectionHeader(labels.summary),
+    sectionHeader(labels.summary, t),
     new Paragraph({
       alignment: AlignmentType.JUSTIFIED,
-      children: [new TextRun({ text: resume.summary, size: 22, font: FONT })],
+      children: [new TextRun({ text: resume.summary, font: FONT })],
     }),
-    sectionHeader(labels.experience),
+    sectionHeader(labels.experience, t),
     ...resume.work_experience.flatMap((exp) => [
-      orgLine(exp.org, exp.location),
+      orgLine(exp.org, exp.location, t),
       roleLine(exp.role, exp.period),
       ...exp.bullets.map(bulletParagraph),
     ]),
@@ -82,9 +106,9 @@ export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
 
   if (resume.leadership.length > 0) {
     children.push(
-      sectionHeader(labels.leadership),
+      sectionHeader(labels.leadership, t),
       ...resume.leadership.flatMap((exp) => [
-        orgLine(exp.org, exp.location),
+        orgLine(exp.org, exp.location, t),
         roleLine(exp.role, exp.period),
         ...exp.bullets.map(bulletParagraph),
       ]),
@@ -92,9 +116,9 @@ export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
   }
 
   children.push(
-    sectionHeader(labels.education),
+    sectionHeader(labels.education, t),
     ...resume.education.flatMap((edu) => {
-      const rows = [orgLine(edu.school, edu.location)];
+      const rows = [orgLine(edu.school, edu.location, t)];
       if (edu.detail || edu.period) {
         rows.push(
           new Paragraph({
@@ -111,11 +135,11 @@ export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
   );
 
   children.push(
-    sectionHeader(labels.skills),
+    sectionHeader(labels.skills, t),
     new Paragraph({
       children: [
-        new TextRun({ text: `${labels.computer} `, bold: true, size: 22, font: FONT }),
-        new TextRun({ text: resume.skills.join(", "), size: 22, font: FONT }),
+        new TextRun({ text: `${labels.computer} `, bold: true, font: FONT }),
+        new TextRun({ text: resume.skills.join(", "), font: FONT }),
       ],
     }),
   );
@@ -124,7 +148,8 @@ export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
     styles: {
       default: {
         document: {
-          run: { font: FONT, size: 22 },
+          run: { font: FONT, size: halfPt(t.body) },
+          paragraph: { spacing: { line: twip(t.line), lineRule: LineRuleType.EXACT } },
         },
       },
     },

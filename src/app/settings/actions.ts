@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import type { ResumeContact } from "@/lib/resumes/contact";
 
 async function verifyAnthropicKey(key: string): Promise<boolean> {
   try {
@@ -59,4 +60,47 @@ export async function removeAnthropicKey() {
 // 給 <form action> 用的版本：不回傳值（回傳值另外用 useActionState 處理的表單走 removeAnthropicKey）
 export async function removeAnthropicKeyAction(): Promise<void> {
   await removeAnthropicKey();
+}
+
+/** 儲存履歷抬頭（姓名＋聯絡資訊）。標記 contact_confirmed，之後上傳履歷解析出來的聯絡資訊
+ * 就不會蓋掉使用者自己填的內容（見 lib/experience/mergeIntoExperienceDb.ts）。 */
+export async function saveContactAction(
+  contact: ResumeContact,
+): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const clean = (v: string | null) => (v && v.trim() ? v.trim() : null);
+  const cleaned = {
+    name_zh: clean(contact.name_zh),
+    name_en: clean(contact.name_en),
+    email: clean(contact.email),
+    phone: clean(contact.phone),
+    linkedin: clean(contact.linkedin),
+    portfolio: clean(contact.portfolio),
+    others: (contact.others ?? [])
+      .map((o) => ({ label: o.label.trim(), value: o.value.trim() }))
+      .filter((o) => o.label && o.value),
+  };
+  if (!cleaned.name_zh && !cleaned.name_en) return { error: "至少要填一個名字（中文或英文）" };
+  if (!cleaned.email) return { error: "請填 Email" };
+
+  const { data: existing } = await supabase
+    .from("profile_data")
+    .select("data")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const { error } = await supabase.from("profile_data").upsert({
+    user_id: user.id,
+    data: { ...(existing?.data ?? {}), contact: cleaned, contact_confirmed: true },
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/settings");
+  revalidatePath("/applications", "layout");
+  return { success: true };
 }

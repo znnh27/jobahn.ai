@@ -1,14 +1,10 @@
 import "server-only";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
+import type { ResumeContact } from "@/lib/resumes/contact";
 
-export interface ResumeContact {
-  name_zh: string | null;
-  name_en: string | null;
-  email: string | null;
-  phone: string | null;
-  linkedin: string | null;
-  portfolio: string | null;
-}
+// 姓名、聯絡資訊的型別跟格式放在 lib/resumes/contact.ts（畫布、求職信也要用，不能是 server-only）。
+export type { ResumeContact } from "@/lib/resumes/contact";
+export { pickName, contactParts, buildContactLine, CONTACT_SEPARATOR } from "@/lib/resumes/contact";
 
 export interface ResumeDocInput {
   contact: ResumeContact;
@@ -37,18 +33,4 @@ const LABELS: Record<string, Record<string, string>> = {
 
 export function getLabels(language: string) {
   return LABELS[language] ?? LABELS.en;
-}
-
-export function pickName(contact: ResumeContact, language: string): string {
-  const primary = language === "zh" ? contact.name_zh : contact.name_en;
-  return primary || contact.name_zh || contact.name_en || "";
-}
-
-export function buildContactLine(contact: ResumeContact): string {
-  const parts: string[] = [];
-  if (contact.email) parts.push(`Email: ${contact.email}`);
-  if (contact.phone) parts.push(`Phone: ${contact.phone}`);
-  if (contact.linkedin) parts.push(`LinkedIn: ${contact.linkedin}`);
-  if (contact.portfolio) parts.push(`Portfolio: ${contact.portfolio}`);
-  return parts.join("   /   ");
 }

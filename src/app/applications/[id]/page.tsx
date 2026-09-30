@@ -1,10 +1,12 @@
-import Link from "next/link";
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { BrandMark } from "../../BrandMark";
+import { AppNav, getDisplayName } from "../../AppNav";
+import { ApplicationTitle } from "./ApplicationTitle";
 import { Canvas } from "./canvas";
-import { CoverLetter } from "./cover-letter";
-import type { ResumeContact } from "@/lib/documents/resumeDocContent";
+import { StepBar } from "../../StepBar";
+import { reachedStepFromStatus } from "../../steps";
+import { readContact } from "@/lib/resumes/contact";
+import { isCompanyResearchAvailable } from "@/lib/jobs/researchCompany";
 
 export default async function ApplicationDetailPage(
   props: PageProps<"/applications/[id]">,
@@ -36,31 +38,19 @@ export default async function ApplicationDetailPage(
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const contact = (profile?.data as { contact?: ResumeContact })?.contact ?? {
-    name_zh: null,
-    name_en: null,
-    email: null,
-    phone: null,
-    linkedin: null,
-    portfolio: null,
-  };
+  const contact = readContact(profile?.data);
 
   return (
-    <div className="page">
+    <div className="page page--with-nav">
+      <AppNav userName={getDisplayName(user)} />
       <div className="page-container page-container--canvas">
-        <BrandMark />
-        <div className="page-header">
-          <div>
-            <h1 className="heading-page">
-              {application.company_name || "未命名公司"} · {application.job_title || "未命名職缺"}
-            </h1>
-            <p className="text-muted mt-1">
-              語言版本：{(application.resume_language ?? []).join(" / ")}
-            </p>
-          </div>
-          <Link href="/" className="link-muted">
-            回首頁
-          </Link>
+        <div className="page-title-block">
+          <ApplicationTitle
+            applicationId={application.id}
+            companyName={application.company_name}
+            jobTitle={application.job_title}
+            status={application.status}
+          />
         </div>
 
         <Canvas
@@ -72,18 +62,23 @@ export default async function ApplicationDetailPage(
           initialGaps={application.ats_gaps ?? {}}
           initialFinalized={application.status !== "draft"}
           contact={contact}
+          hasCoverLetter={!!application.cover_letter_draft}
+          initialCoverLetterLanguages={application.cover_letter_language ?? []}
+          researchAvailable={isCompanyResearchAvailable()}
+          stepBar={
+            <StepBar
+              key="step-bar"
+              current={1}
+              reached={reachedStepFromStatus(application.status)}
+              applicationId={application.id}
+              job={{
+                companyName: application.company_name,
+                jobTitle: application.job_title,
+                jobDescription: application.job_description,
+              }}
+            />
+          }
         />
-
-        {application.status !== "draft" && (
-          <CoverLetter
-            applicationId={application.id}
-            resumeLanguages={application.resume_language ?? []}
-            initialCoverLetterLanguages={application.cover_letter_language ?? []}
-            initialDraft={application.cover_letter_draft}
-            initialChecklist={application.jd_match_checklist ?? {}}
-            initialCompleted={application.status === "completed"}
-          />
-        )}
       </div>
     </div>
   );

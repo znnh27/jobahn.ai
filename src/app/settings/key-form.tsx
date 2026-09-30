@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { Spinner } from "@/app/ProgressBar";
 import { setAnthropicKey, removeAnthropicKeyAction } from "./actions";
 
 type ActionResult = { error?: string; success?: boolean };
@@ -66,7 +67,8 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
         {state.success && <p className="text-success">已儲存</p>}
 
         <button type="submit" disabled={isPending} className="btn btn-primary">
-          {isPending ? "驗證中…" : "儲存"}
+          {isPending && <Spinner />}
+          {isPending ? "驗證中" : "儲存"}
         </button>
       </form>
     </div>
