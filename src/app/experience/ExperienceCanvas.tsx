@@ -1,5 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import { ConfirmDialog } from "@/app/ConfirmDialog";
+import { ResumePaper } from "@/app/ResumePaper";
+import type { ResumeLayoutSettings } from "@/lib/resumes/typography";
 import {
   updateEntryFieldAction,
   updatePeriodAction,
@@ -18,7 +22,11 @@ export interface ExperienceEntry {
   location: string | null;
   roleVariants: { role: string; source: string[] }[];
   periodVariants: { period: string; source: string[] }[];
-  achievements: { id: string; variants: { text: string; angleLabel: string; source: string }[] }[];
+  achievements: {
+    id: string;
+    /** reviewedText：上次通過檢查（或使用者按 ✕ 不改）時的文字；跟 text 不一樣就代表之後改過，要重新檢查。 */
+    variants: { text: string; angleLabel: string; source: string; reviewedText?: string }[];
+  }[];
 }
 
 export interface RefineRequest {
@@ -28,6 +36,8 @@ export interface RefineRequest {
   orgName: string;
   role: string;
   seedText: string;
+  /** 從建議卡片進來時，卡片上寫的問題（這條為什麼被標記）。 */
+  issue?: string;
 }
 
 export interface HighlightTarget {
@@ -40,21 +50,22 @@ export interface HighlightTarget {
 export function ExperienceCanvas({
   entries,
   language,
-  onRefine,
+  layout,
+  onActivateFlag,
   highlight,
   flags,
-  isScanning,
-  scanError,
-  onScan,
+  activeFlagKey,
 }: {
   entries: ExperienceEntry[];
   language: "zh" | "en";
-  onRefine: (seed: RefineRequest) => void;
+  /** 字級／上下間距，跟履歷畫布同一套（typography.ts）。 */
+  layout: ResumeLayoutSettings;
+  /** 點畫布上有標記的那一條：右欄對應的建議卡片要亮起來、對齊到這一條。 */
+  onActivateFlag: (key: string) => void;
   highlight: HighlightTarget | null;
   flags: ScanFlag[];
-  isScanning: boolean;
-  scanError: string | null;
-  onScan: () => void;
+  /** 右欄被點選的那張建議卡片，對應的 bullet 要標亮。 */
+  activeFlagKey: string | null;
 }) {
   const langEntries = entries.filter((e) => e.language === language);
 
@@ -68,7 +79,7 @@ export function ExperienceCanvas({
     return (
       <div className="card exp-empty-state">
         {language === "zh" ? "還沒有中文版的經歷資料。" : "還沒有英文版的經歷資料。"}
-        從右邊上傳一份履歷，或等你完成第一次應徵，內容就會自動記錄在這裡。
+        按上面的「新增經歷」上傳一份履歷或跟 AI 聊，或等你完成第一次應徵，內容就會自動記錄在這裡。
       </div>
     );
   }
@@ -77,20 +88,19 @@ export function ExperienceCanvas({
   const leadershipEntries = langEntries.filter((e) => e.entryType !== "work");
 
   return (
-    <div className="resume-page" style={{ width: "100%" }}>
-      <div className="exp-scan-toolbar">
-        {flags.length > 0 && <span className="text-muted">找到 {flags.length} 條建議加強</span>}
-        {scanError && <span className="text-error">{scanError}</span>}
-        <button type="button" className="btn btn-secondary" disabled={isScanning} onClick={onScan}>
-          {isScanning ? "檢查中…" : "檢查整份經歷資料庫"}
-        </button>
-      </div>
-
+    <ResumePaper language={language} layout={layout}>
       {workEntries.length > 0 && (
         <>
           <div className="resume-section-header">工作經歷</div>
           {workEntries.map((entry) => (
-            <EntryBlock key={entry.id} entry={entry} flagFor={flagFor} onRefine={onRefine} highlight={highlight} />
+            <EntryBlock
+              key={entry.id}
+              entry={entry}
+              flagFor={flagFor}
+              onActivateFlag={onActivateFlag}
+              highlight={highlight}
+              activeFlagKey={activeFlagKey}
+            />
           ))}
         </>
       )}
@@ -99,27 +109,50 @@ export function ExperienceCanvas({
         <>
           <div className="resume-section-header">領導經驗／專案</div>
           {leadershipEntries.map((entry) => (
-            <EntryBlock key={entry.id} entry={entry} flagFor={flagFor} onRefine={onRefine} highlight={highlight} />
+            <EntryBlock
+              key={entry.id}
+              entry={entry}
+              flagFor={flagFor}
+              onActivateFlag={onActivateFlag}
+              highlight={highlight}
+              activeFlagKey={activeFlagKey}
+            />
           ))}
         </>
       )}
-    </div>
+    </ResumePaper>
   );
 }
 
 function EntryBlock({
   entry,
   flagFor,
-  onRefine,
+  onActivateFlag,
   highlight,
+  activeFlagKey,
 }: {
   entry: ExperienceEntry;
   flagFor: (entryId: string, achievementId: string, variantIndex: number) => ScanFlag | undefined;
-  onRefine: (seed: RefineRequest) => void;
+  onActivateFlag: (key: string) => void;
   highlight: HighlightTarget | null;
+  activeFlagKey: string | null;
 }) {
+  // 按「刪除」先跳網站自己的確認視窗（不用瀏覽器原生的 confirm()）。
+  const [pendingDelete, setPendingDelete] = useState<{ achievementId: string; variantIndex: number; text: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await removeAchievementVariantAction(entry.id, pendingDelete.achievementId, pendingDelete.variantIndex);
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+    }
+  }
+
   const period = entry.periodVariants[0]?.period ?? "";
-  const primaryRole = entry.roleVariants[0]?.role ?? "";
 
   return (
     <div className="exp-entry resume-block">
@@ -182,8 +215,25 @@ function EntryBlock({
                     ? "exp-variant--editing"
                     : "exp-variant--updated"
                   : "";
+                // 有檢查建議的 bullet：畫布上只留一個小標記，建議內容放在右欄的註解卡片（FlagRail），
+                // 用 data-flag-key 讓卡片對齊到這一條。
+                const key = `${entry.id}:${ach.id}:${vi}`;
+                const flagClass = flag ? `exp-variant--flagged ${activeFlagKey === key ? "exp-variant--flag-active" : ""}` : "";
                 return (
-                  <div key={vi} className={`exp-variant ${highlightClass}`}>
+                  <div
+                    key={vi}
+                    className={`exp-variant ${highlightClass} ${flagClass}`}
+                    data-flag-key={flag ? key : undefined}
+                    // 點有標記的這一條，右欄對應的卡片會亮起來並對齊過來（反過來點卡片也會捲到這一條）。
+                    onClick={
+                      flag
+                        ? (e) => {
+                            e.stopPropagation();
+                            onActivateFlag(key);
+                          }
+                        : undefined
+                    }
+                  >
                     <span className="resume-bullet-dot">{"•"}</span>
                     <div className="exp-variant-bullet">
                       <EditableSpan
@@ -192,51 +242,13 @@ function EntryBlock({
                         onCommit={(text) => updateAchievementVariantAction(entry.id, ach.id, vi, text)}
                       />
                       <span className="exp-variant-tag">{v.angleLabel}</span>
-                      {flag && (
-                        <button
-                          type="button"
-                          className="exp-flag-marker"
-                          title={flag.suggestion}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRefine({
-                              entryId: entry.id,
-                              achievementId: ach.id,
-                              variantIndex: vi,
-                              orgName: entry.orgName,
-                              role: primaryRole,
-                              seedText: v.text,
-                            });
-                          }}
-                        >
-                          ⚠ {flag.suggestion}
-                        </button>
-                      )}
                     </div>
                     <button
                       type="button"
-                      className="exp-refine-btn"
+                      className="exp-variant-remove"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onRefine({
-                          entryId: entry.id,
-                          achievementId: ach.id,
-                          variantIndex: vi,
-                          orgName: entry.orgName,
-                          role: primaryRole,
-                          seedText: v.text,
-                        });
-                      }}
-                    >
-                      AI 潤飾
-                    </button>
-                    <button
-                      type="button"
-                      className="exp-variant-remove"
-                      onClick={() => {
-                        if (confirm("刪除這個寫法？")) {
-                          removeAchievementVariantAction(entry.id, ach.id, vi);
-                        }
+                        setPendingDelete({ achievementId: ach.id, variantIndex: vi, text: v.text });
                       }}
                     >
                       刪除
@@ -248,6 +260,16 @@ function EntryBlock({
           );
         })}
       </div>
+      {pendingDelete && (
+        <ConfirmDialog
+          title="刪除這個寫法？"
+          message={`「${pendingDelete.text}」會從經歷資料庫移除；另一個語言如果有對應的寫法，也會一起刪掉。`}
+          confirmLabel="刪除"
+          pending={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDelete(null)}
+        />
+      )}
     </div>
   );
 }

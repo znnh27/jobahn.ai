@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { BrandMark } from "../BrandMark";
-import { OnboardingUpload } from "./OnboardingUpload";
+import { AppNav, getDisplayName } from "../AppNav";
+import { AddExperienceChoice } from "../AddExperienceChoice";
+import { BlobScene } from "../BlobScene";
 
 export default async function OnboardingPage() {
   const supabase = await createClient();
@@ -19,27 +20,24 @@ export default async function OnboardingPage() {
   // 會讓這個頁面重新判斷「現在已經有資料了」而立刻把使用者導回首頁，導致完成訊息跟
   // CTA 按鈕根本來不及顯示就被導走。
 
+  // 版面跟首頁一致：色塊滿版鋪在整頁後面，中間是大 logo，兩張入口卡片疊在色塊上面。
   return (
-    <div className="page sunny-surface">
-      <div className="page-container">
-        <div className="home-hero blob-bounds">
-          <div className="blob-scene" aria-hidden="true">
-            <div className="blob blob--1" />
-            <div className="blob blob--2" />
-            <div className="blob blob--3" />
-            <div className="blob blob--4" />
-          </div>
-          <BrandMark />
-          <div className="stack-tight">
-            <h1 className="heading-page">建立你的經歷資料庫</h1>
-            <p className="text-muted">
-              把手上所有版本的履歷都丟進來，上傳完會自動呼叫 AI
-              解析、整理成你的經歷資料庫，之後寫任何職缺的履歷都會從這裡挑選內容。
+    <div className="page page--with-nav page--blobs">
+      <AppNav minimal userName={getDisplayName(user)} />
+      <BlobScene className="blob-scene--home" />
+      <div className="page-container page-container--home">
+        <div className="home-hero">
+          <div className="home-hero-greeting">
+            {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
+            <img src="/logo-mascot.png" alt="jobahn 吉祥物：提著公事包的石斑魚" className="home-hero-mascot" />
+            <h1 className="home-hero-greeting-title home-hero-greeting-title--xs">首次登入：建立你的經歷資料庫</h1>
+            <p className="home-hero-greeting-sub">
+              有現成的履歷就直接上傳；沒有也沒關係，說說你做過的事，AI 會陪你寫出第一份履歷。
             </p>
           </div>
         </div>
 
-        <OnboardingUpload />
+        <AddExperienceChoice mode="onboarding" />
       </div>
     </div>
   );

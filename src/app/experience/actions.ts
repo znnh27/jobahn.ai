@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { readLayoutSettings, type ResumeLayoutSettings } from "@/lib/resumes/typography";
 import { extractResumeText } from "@/lib/resumes/extractText";
 import { mergeContentIntoExperienceDb } from "@/lib/experience/mergeIntoExperienceDb";
 import {
@@ -415,6 +416,7 @@ export async function commitNewAchievementAction(params: {
   });
 
   revalidatePath("/experience");
+  revalidatePath("/"); // 首次設定走「直接打字」時，首頁要知道使用者已經有經歷資料庫了
   return {
     success: true,
     entryId: resultEntryId,
@@ -439,8 +441,12 @@ export interface CommitResult {
 export async function commitRefinedVariantAction(params: {
   entryId: string;
   achievementId: string;
+  /** 被潤飾的是哪一個寫法。replace 模式會直接蓋掉它。 */
+  variantIndex: number;
   draftText: string;
   angleLabel: string;
+  /** replace：取代原本那條（預設，潤飾就是要改掉原本的寫法）；append：另存成同一件事的新寫法。 */
+  mode?: "replace" | "append";
 }): Promise<CommitResult> {
   const supabase = await createClient();
   const {
@@ -460,13 +466,22 @@ export async function commitRefinedVariantAction(params: {
   const target = achievements.find((a: { id: string }) => a.id === params.achievementId);
   if (!target) return { error: "找不到這個成就" };
 
-  target.variants.push({ text: params.draftText, angleLabel: params.angleLabel, source: "AI 潤飾" });
-  const newVariantIndex = target.variants.length - 1;
+  // 潤飾完的寫法照規則寫過，算已經通過檢查（reviewedText 等於目前文字），下次檢查不會再標它。
+  const refined = { text: params.draftText, angleLabel: params.angleLabel, source: "AI 潤飾", reviewedText: params.draftText };
+  let newVariantIndex: number;
+  if (params.mode !== "append" && target.variants[params.variantIndex]) {
+    // 取代原本那條：原本的流水帳不留在資料庫，不然下次檢查又會被標出同樣的問題。
+    target.variants[params.variantIndex] = { ...target.variants[params.variantIndex], ...refined };
+    newVariantIndex = params.variantIndex;
+  } else {
+    target.variants.push(refined);
+    newVariantIndex = target.variants.length - 1;
+  }
 
   // 同一個 achievement 底下的其他寫法，缺同一個新事實的話自動補上
   const siblings = target.variants
     .map((v: { text: string; angleLabel: string }, i: number) => ({ index: i, text: v.text, angleLabel: v.angleLabel }))
-    .filter((_: unknown, i: number) => i !== target.variants.length - 1);
+    .filter((_: unknown, i: number) => i !== newVariantIndex);
   if (siblings.length > 0) {
     const { syncSiblingVariants } = await import("@/lib/experience/syncSiblingVariants");
     const updates = await syncSiblingVariants({
@@ -516,12 +531,35 @@ export interface ScanFlag {
   entryId: string;
   achievementId: string;
   variantIndex: number;
+  /** 被檢查的那條原文。套用改寫前用來確認內容沒被改過。 */
+  text: string;
   suggestion: string;
+  /** AI 直接給的改寫版本（按 ✓ 就套用）。沒辦法只靠現有內容改好（例如缺數字）時可能是 null。 */
+  rewrite: string | null;
 }
 
-/** 「檢查整份經歷資料庫」：一次 AI 呼叫掃過所有 bullet，標記寫得太籠統/沒量化的，
- * 不會自動打開對話，只負責標記，深挖與否由使用者自己決定。 */
-export async function scanExperienceDbAction(): Promise<{ error?: string; flags?: ScanFlag[] }> {
+export interface ReviewedVariant {
+  entryId: string;
+  achievementId: string;
+  variantIndex: number;
+  text: string;
+}
+
+type StoredVariant = { text: string; angleLabel?: string; source?: string; reviewedText?: string };
+
+/** 已經通過檢查、之後沒再改過的寫法：reviewedText 跟目前文字一樣。這種不用再檢查一次。 */
+function isReviewed(v: StoredVariant) {
+  return typeof v.reviewedText === "string" && v.reviewedText === v.text;
+}
+
+/** 「檢查整份經歷資料庫」：一次檢查一批（offset 起算 limit 條），前端一批一批呼叫，才能顯示真實的 0–100% 進度。
+ * 只檢查「還沒通過、或通過後又改過」的寫法；total 是這次要檢查的條數，reviewedCount 是跳過的條數。
+ * 通過的條目放在 passed 回傳，全部檢查完前端再一次標記（檢查途中不能改資料，不然分批的編號會跑掉）。
+ * 不會自動打開對話，只負責標記，要不要改由使用者自己決定。 */
+export async function scanExperienceDbAction(
+  offset = 0,
+  limit = 20,
+): Promise<{ error?: string; flags?: ScanFlag[]; passed?: ReviewedVariant[]; total?: number; reviewedCount?: number }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -531,41 +569,54 @@ export async function scanExperienceDbAction(): Promise<{ error?: string; flags?
   const { data: entries, error } = await supabase
     .from("experience_entries")
     .select("id, achievements")
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    // 分批檢查時每一批都要重新撈，順序必須固定，編號才對得上。
+    .order("id");
   if (error) return { error: error.message };
-  if (!entries || entries.length === 0) return { flags: [] };
+  if (!entries || entries.length === 0) return { flags: [], passed: [], total: 0, reviewedCount: 0 };
 
-  const flat = entries.flatMap((entry) =>
-    (entry.achievements ?? []).flatMap(
-      (ach: { id: string; variants: { text: string }[] }) =>
-        ach.variants.map((v, variantIndex: number) => ({
-          entryId: entry.id,
-          achievementId: ach.id,
-          variantIndex,
-          text: v.text,
-        })),
+  const all = entries.flatMap((entry) =>
+    (entry.achievements ?? []).flatMap((ach: { id: string; variants: StoredVariant[] }) =>
+      ach.variants.map((v, variantIndex: number) => ({
+        entryId: entry.id,
+        achievementId: ach.id,
+        variantIndex,
+        text: v.text,
+        reviewed: isReviewed(v),
+      })),
     ),
   );
+  const flat = all.filter((f) => !f.reviewed);
 
-  if (flat.length === 0) return { flags: [] };
+  const total = flat.length;
+  const reviewedCount = all.length - flat.length;
+  const batch = flat.slice(offset, offset + limit);
+  if (batch.length === 0) return { flags: [], passed: [], total, reviewedCount };
 
   const { askClaude } = await import("@/lib/ai/askClaude");
-  const systemPrompt = `你是履歷內容品質檢查助手，用 Google 履歷寫作團隊提倡的 XYZ 公式（達成了什麼成果 X／用什麼數字衡量 Y／透過什麼方法 Z）當標準。使用者會給你一份經歷資料庫裡所有 bullet 的清單（每條有編號），逐條檢查三件事：
-1. 錯字/打字錯誤：不管是中文還是英文，只要有明顯的錯字、漏字、重複字，都要標記出來，suggestion 直接指出錯在哪個字、應該是什麼。
-2. 內容太籠統、沒有量化、動詞太空泛：缺乏具體數字/規模/結果的才標記，寫得已經不錯的不用列出來。
-3. 流水帳：超過兩句話、或按時間順序把好幾個階段/好幾件事塞進同一條（例如「做了什麼→花多久→怎麼協作→上線後→後續維護」全部寫進去）——就算有數字也算，因為重點被稀釋掉了，suggestion 要指出「先只留最值得講的那個成果」。
+  const { BULLET_RULES } = await import("@/lib/experience/bulletRules");
+  const { toTraditional } = await import("@/lib/text/toTraditional");
+  const systemPrompt = `你是履歷內容品質檢查助手。使用者會給你經歷資料庫裡一批 bullet 的清單（每條有編號），照下面的規則逐條檢查。這是經歷資料庫，還沒有目標 JD。
 
-同一條如果不只一個問題，都要在 suggestion 裡提到。只回傳需要加強的那幾條的編號跟建議。逐條檢查時保持同一套標準，不要因為前後文而放寬或收緊。只輸出 JSON，不要其他文字：
-{ "flags": [{ "index": number, "suggestion": string }] }`;
+${BULLET_RULES}
 
-  const userPrompt = flat.map((f, i) => `[${i}] ${f.text}`).join("\n");
+另外也要抓錯字：不管中文英文，明顯的錯字、漏字、重複字都要標記，suggestion 直接指出錯在哪個字、應該是什麼。
+
+每條都用同一套標準，不要因為前後文放寬或收緊。全部符合就是通過，不用列出來；有任何一條不符合就要列出：
+- suggestion：用繁體中文一兩句話講清楚問題在哪（同一條有好幾個問題都要提到）。
+- rewrite：直接給一個照規則改好的版本，語言跟原文相同，中文一律繁體。只能用原文裡已經有的事實跟數字，不要編造；如果問題是缺數字、光靠原文改不好，rewrite 還是先把結構改對，並在 suggestion 提醒「補上數字會更好，可以點『跟 AI 聊』補」。只有錯字的話，rewrite 就是改好錯字的原文。
+
+只輸出 JSON，不要其他文字：
+{ "flags": [{ "index": number, "suggestion": string, "rewrite": string | null }] }`;
+
+  const userPrompt = batch.map((f, i) => `[${i}] ${f.text}`).join("\n");
 
   const response = await askClaude({
     userId: user.id,
     feature: "experience_bulk_scan",
     systemPrompt,
     userPrompt,
-    maxTokens: 8000,
+    maxTokens: 12000,
     temperature: 0,
     supabase,
   });
@@ -575,23 +626,132 @@ export async function scanExperienceDbAction(): Promise<{ error?: string; flags?
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/```\s*$/i, "");
 
-  let parsed: { flags: { index: number; suggestion: string }[] };
+  let parsed: { flags: { index: number; suggestion: string; rewrite?: string | null }[] };
   try {
-    parsed = JSON.parse(cleaned) as { flags: { index: number; suggestion: string }[] };
+    parsed = JSON.parse(cleaned) as typeof parsed;
   } catch {
     return { error: "AI 回傳的檢查結果不完整（可能是內容太多被截斷），請再檢查一次看看" };
   }
 
-  const flags: ScanFlag[] = parsed.flags
-    .filter((f) => flat[f.index])
-    .map((f) => ({
-      entryId: flat[f.index].entryId,
-      achievementId: flat[f.index].achievementId,
-      variantIndex: flat[f.index].variantIndex,
-      suggestion: f.suggestion,
-    }));
+  const flaggedIndexes = new Set<number>();
+  const flags: ScanFlag[] = [];
+  for (const f of parsed.flags ?? []) {
+    const item = batch[f.index];
+    if (!item) continue;
+    flaggedIndexes.add(f.index);
+    const rewrite = f.rewrite?.trim() ? toTraditional(f.rewrite.trim()) : null;
+    flags.push({
+      entryId: item.entryId,
+      achievementId: item.achievementId,
+      variantIndex: item.variantIndex,
+      text: item.text,
+      suggestion: toTraditional(f.suggestion),
+      rewrite: rewrite && rewrite !== item.text ? rewrite : null,
+    });
+  }
+  const passed: ReviewedVariant[] = batch
+    .filter((_, i) => !flaggedIndexes.has(i))
+    .map(({ entryId, achievementId, variantIndex, text }) => ({ entryId, achievementId, variantIndex, text }));
 
-  return { flags };
+  return { flags, passed, total, reviewedCount };
+}
+
+/** 把這幾條標成「已經檢查過」（通過、或使用者按 ✕ 決定不改）。只在文字還跟當時一樣時才標，
+ * 之後內容一改，reviewedText 就對不上，下次檢查會重新檢查。 */
+export async function markVariantsReviewedAction(items: ReviewedVariant[]): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+  if (items.length === 0) return {};
+
+  const byEntry = new Map<string, ReviewedVariant[]>();
+  for (const item of items) byEntry.set(item.entryId, [...(byEntry.get(item.entryId) ?? []), item]);
+
+  for (const [entryId, list] of byEntry) {
+    const { data: row } = await supabase
+      .from("experience_entries")
+      .select("achievements")
+      .eq("id", entryId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!row) continue;
+    const achievements = Array.isArray(row.achievements) ? row.achievements : [];
+    let changed = false;
+    for (const item of list) {
+      const ach = achievements.find((a: { id: string }) => a.id === item.achievementId);
+      const v: StoredVariant | undefined = ach?.variants?.[item.variantIndex];
+      if (v && v.text === item.text && v.reviewedText !== v.text) {
+        v.reviewedText = v.text;
+        changed = true;
+      }
+    }
+    if (!changed) continue;
+    await supabase
+      .from("experience_entries")
+      .update({ achievements })
+      .eq("id", entryId)
+      .eq("user_id", user.id);
+  }
+  // 只改了「檢查過」的記號，畫面上看不到差別，不用 revalidate。
+  return {};
+}
+
+/** 註解卡片按 ✓：用 AI 檢查時給的改寫版本取代原本那條，並同步到另一個語言。 */
+export async function applyFlagRewriteAction(params: {
+  entryId: string;
+  achievementId: string;
+  variantIndex: number;
+  originalText: string;
+  newText: string;
+}): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const { data: row } = await supabase
+    .from("experience_entries")
+    .select("org_name, location, language, entry_type, role_variants, period_variants, achievements")
+    .eq("id", params.entryId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!row) return { error: "找不到這個經歷區塊" };
+
+  const achievements = Array.isArray(row.achievements) ? row.achievements : [];
+  const ach = achievements.find((a: { id: string }) => a.id === params.achievementId);
+  const v: StoredVariant | undefined = ach?.variants?.[params.variantIndex];
+  if (!v) return { error: "找不到這一條" };
+  if (v.text !== params.originalText) return { error: "這條在檢查之後被改過了，請重新檢查一次" };
+
+  v.text = params.newText;
+  v.reviewedText = params.newText;
+
+  const { error } = await supabase
+    .from("experience_entries")
+    .update({ achievements, updated_at: new Date().toISOString() })
+    .eq("id", params.entryId)
+    .eq("user_id", user.id);
+  if (error) return { error: error.message };
+
+  const { syncToOtherLanguage } = await import("@/lib/experience/syncLanguage");
+  await syncToOtherLanguage({
+    supabase,
+    userId: user.id,
+    sourceLanguage: row.language,
+    orgName: row.org_name,
+    role: row.role_variants?.[0]?.role ?? "",
+    location: row.location ?? null,
+    period: row.period_variants?.[0]?.period ?? "",
+    entryType: row.entry_type,
+    text: params.newText,
+    sourceLabel: "檢查建議（雙語同步）",
+  });
+
+  revalidatePath("/experience");
+  return {};
 }
 
 /** JD 缺口挖掘用：從應徵履歷草稿裡的公司名稱，找出對應的經歷資料庫 entry id，
@@ -629,4 +789,29 @@ export async function findEntryIdByOrgAction(
     );
   });
   return fuzzy?.id ?? null;
+}
+
+/**
+ * 存經歷資料庫的字級／上下間距（每個語言各一份），也當之後新生成履歷的預設排版。
+ * 只動 profile_data.data.resume_layout，其他資料原樣保留。
+ */
+export async function saveDefaultLayoutAction(
+  language: string,
+  layout: ResumeLayoutSettings,
+): Promise<{ error?: string; success?: boolean }> {
+  if (language !== "zh" && language !== "en") return { error: "不支援的語言" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const { data: existing } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
+  const data = existing?.data ?? {};
+  const { error } = await supabase.from("profile_data").upsert({
+    user_id: user.id,
+    data: { ...data, resume_layout: { ...(data.resume_layout ?? {}), [language]: readLayoutSettings(layout, language) } },
+  });
+  if (error) return { error: error.message };
+  return { success: true };
 }

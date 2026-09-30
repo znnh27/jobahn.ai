@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { EstimatedProgress } from "@/app/ProgressBar";
 import Link from "next/link";
 import { uploadAndMergeResumeAction } from "@/app/experience/actions";
 
@@ -29,7 +30,6 @@ function CheckIcon() {
 }
 
 export function OnboardingUpload() {
-  const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<UploadItemState[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
 
@@ -59,18 +59,26 @@ export function OnboardingUpload() {
               : item,
           ),
         );
+      }).catch(() => {
+        // 請求本身失敗（斷網、逾時、伺服器掛掉）時也要把狀態改掉，不然會永遠停在「讀取中」，看起來像沒反應。
+        setItems((prev) =>
+          prev.map((item) =>
+            item.key === key ? { ...item, status: "error", message: "上傳失敗，請檢查網路後再試一次" } : item,
+          ),
+        );
       });
     });
   }
 
   return (
     <div className="stack">
-      <div className="card">
-        <label className="label">選擇履歷檔案（可多選，docx / doc / pdf，單檔 3MB 以內）</label>
+      <div>
+        <p className="label">選擇履歷檔案（可多選，docx / doc / pdf，單檔 3MB 以內）</p>
 
-        <div
+        {/* 用原生 <label> 包住選檔欄位，點擊由瀏覽器直接開選檔視窗。以前用程式代按 input.click()，
+            但 input 的點擊會冒泡回拖放區再代按一次，Safari 遇到連開兩次會直接取消，視窗就跳不出來。 */}
+        <label
           className={`file-drop-zone ${isDragActive ? "file-drop-zone--active" : ""}`}
-          onClick={() => inputRef.current?.click()}
           onDragOver={(e) => {
             e.preventDefault();
             setIsDragActive(true);
@@ -82,15 +90,14 @@ export function OnboardingUpload() {
             handleFiles(e.dataTransfer.files);
           }}
         >
-          <div className="file-drop-zone-icon">
+          <span className="file-drop-zone-icon">
             <UploadCloudIcon />
-          </div>
+          </span>
           <span className="file-drop-zone-text">拖曳檔案到這裡，或點擊選擇</span>
           <span className="file-drop-zone-hint">
             可一次選多個檔案，上傳完自動解析，docx / doc / pdf，單檔 3MB 以內
           </span>
           <input
-            ref={inputRef}
             type="file"
             multiple
             accept=".docx,.doc,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/pdf"
@@ -100,7 +107,7 @@ export function OnboardingUpload() {
             }}
             className="file-input-hidden"
           />
-        </div>
+        </label>
 
         {items.length > 0 && (
           <div className="file-item-list">
@@ -109,14 +116,7 @@ export function OnboardingUpload() {
                 <div className="file-item-body">
                   <div className="file-item-name">{item.name}</div>
                   {item.status === "uploading" && (
-                    <>
-                      <div className="file-item-status">
-                        AI 正在仔細讀取內容，拆解成經歷資料庫用的格式，大約需要 30–60 秒，請耐心等候…
-                      </div>
-                      <div className="file-item-progress-track">
-                        <div className="file-item-progress-fill" />
-                      </div>
-                    </>
+                    <EstimatedProgress expectedMs={45000} label="AI 正在讀取內容，拆解成經歷資料庫的格式（大約 30–60 秒）…" />
                   )}
                   {item.status === "done" && <div className="file-item-status">{item.message}</div>}
                   {item.status === "error" && (
@@ -135,7 +135,7 @@ export function OnboardingUpload() {
       </div>
 
       {hasSuccess && (
-        <div className="card">
+        <div>
           <p className="text-success">
             經歷資料庫已經開始建立了！你可以直接開始寫第一份履歷，或繼續上傳更多版本讓內容更完整。
           </p>

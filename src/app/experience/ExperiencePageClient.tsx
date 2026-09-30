@@ -1,30 +1,83 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ExperienceCanvas, type ExperienceEntry, type HighlightTarget } from "./ExperienceCanvas";
-import { UploadSourceCard } from "./UploadSourceCard";
+import Link from "next/link";
+import { FlagRail } from "./FlagRail";
 import { ElicitationPanel } from "./ElicitationPanel";
-import { scanExperienceDbAction, type ScanFlag } from "./actions";
+import { LangSwitch } from "@/app/LangSwitch";
+import { LayoutMenu } from "@/app/LayoutMenu";
+import { readLayoutSettings, type ResumeLayoutSettings } from "@/lib/resumes/typography";
+import { ProgressBar } from "@/app/ProgressBar";
+import {
+  applyFlagRewriteAction,
+  markVariantsReviewedAction,
+  saveDefaultLayoutAction,
+  scanExperienceDbAction,
+  type ReviewedVariant,
+  type ScanFlag,
+} from "./actions";
+import { flagKey } from "./FlagRail";
+import type { RefineRequest } from "./ExperienceCanvas";
 
-interface RefineSeed {
-  entryId: string;
-  achievementId: string;
-  variantIndex: number;
-  orgName: string;
-  role: string;
-  seedText: string;
-}
+type RefineSeed = RefineRequest;
 
-type PanelState = { mode: "new" } | { mode: "refine"; seed: RefineSeed } | null;
+// 檢查整份經歷資料庫時一次送幾條給 AI。拆批才能顯示真實進度，也比較不會因為內容太多被截斷。
+const SCAN_BATCH_SIZE = 20;
+// 一批平常大約要跑多久（毫秒），用來讓進度條在一批之內也慢慢往前走。
+const SCAN_BATCH_EXPECTED_MS = 12000;
 
-export function ExperiencePageClient({ entries }: { entries: ExperienceEntry[] }) {
+// 新增經歷改到 /experience/add（跟首次設定同一套兩張卡片），這頁的 AI 面板只剩潤飾用。
+type PanelState = { mode: "refine"; seed: RefineSeed } | null;
+
+type LayoutMap = Partial<Record<"zh" | "en", ResumeLayoutSettings>>;
+
+export function ExperiencePageClient({
+  entries,
+  initialLayouts,
+}: {
+  entries: ExperienceEntry[];
+  /** 使用者調過的字級／上下間距（存在帳號裡，也是新履歷的預設排版）。 */
+  initialLayouts: LayoutMap;
+}) {
+  const [layouts, setLayouts] = useState<LayoutMap>(initialLayouts);
+  const layoutSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [panel, setPanel] = useState<PanelState>(null);
-  const [sidebarTab, setSidebarTab] = useState<"upload" | "add">("upload");
+  const [activeFlagKey, setActiveFlagKey] = useState<string | null>(null);
   const [activeLanguage, setActiveLanguage] = useState<"zh" | "en">("zh");
   const [highlight, setHighlight] = useState<HighlightTarget | null>(null);
   const [flags, setFlags] = useState<ScanFlag[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  // 檢查完沒有任何建議時的說明（例如「全部都通過了」），有建議時不顯示。
+  const [scanNote, setScanNote] = useState<string | null>(null);
+  // done：跑完幾批；batches：總共幾批（第一批回來前不知道總數，先當 1 批）；creep：目前這批跑到幾成（0–0.9）。
+  const [scan, setScan] = useState<{ done: number; batches: number } | null>(null);
+  const [creep, setCreep] = useState(0);
+
+  useEffect(() => {
+    if (!isScanning) return;
+    const start = Date.now();
+    const timer = setInterval(() => {
+      setCreep(Math.min(0.9, 1 - Math.exp(-(Date.now() - start) / SCAN_BATCH_EXPECTED_MS)));
+    }, 200);
+    return () => clearInterval(timer);
+  }, [isScanning, scan?.done]);
+
+  const scanProgress = scan ? ((scan.done + (scan.done < scan.batches ? creep : 0)) / scan.batches) * 100 : null;
+
+  const layout = readLayoutSettings(layouts[activeLanguage], activeLanguage);
+
+  // 畫面馬上套用，停 0.5 秒後存到帳號。
+  function changeLayout(next: ResumeLayoutSettings) {
+    const lang = activeLanguage;
+    setLayouts((prev) => ({ ...prev, [lang]: next }));
+    if (layoutSaveTimer.current) clearTimeout(layoutSaveTimer.current);
+    layoutSaveTimer.current = setTimeout(async () => {
+      const result = await saveDefaultLayoutAction(lang, next);
+      if (result.error) setScanError(`字級／間距沒有存到（${result.error}）`);
+    }, 500);
+  }
 
   const hasZh = entries.some((e) => e.language === "zh");
   const hasEn = entries.some((e) => e.language === "en");
@@ -32,13 +85,83 @@ export function ExperiencePageClient({ entries }: { entries: ExperienceEntry[] }
   async function handleScan() {
     setIsScanning(true);
     setScanError(null);
+    setScanNote(null);
+    setCreep(0);
+    setScan({ done: 0, batches: 1 });
+    const collected: ScanFlag[] = [];
+    const passed: ReviewedVariant[] = [];
+    let skipped = 0;
+    let checked = 0;
     try {
-      const result = await scanExperienceDbAction();
-      if (result.error) setScanError(result.error);
-      else setFlags(result.flags ?? []);
+      let offset = 0;
+      let total = Infinity;
+      while (offset < total) {
+        const result = await scanExperienceDbAction(offset, SCAN_BATCH_SIZE);
+        if (result.error) {
+          setScanError(result.error);
+          return;
+        }
+        collected.push(...(result.flags ?? []));
+        passed.push(...(result.passed ?? []));
+        total = result.total ?? 0;
+        skipped = result.reviewedCount ?? 0;
+        checked = total;
+        offset += SCAN_BATCH_SIZE;
+        const batches = Math.max(1, Math.ceil(total / SCAN_BATCH_SIZE));
+        setCreep(0);
+        setScan({ done: Math.min(batches, offset / SCAN_BATCH_SIZE), batches });
+      }
+      setFlags(collected);
+      setActiveFlagKey(null);
+      // 通過的記下來，內容沒再改的話下次檢查就跳過。等全部批次跑完才記，分批的編號才不會跑掉。
+      if (passed.length > 0) void markVariantsReviewedAction(passed);
+      if (collected.length === 0) {
+        setScanNote(
+          checked === 0
+            ? `全部 ${skipped} 條之前都檢查過了，而且之後沒有改動，這次不用再檢查。`
+            : `這次檢查的 ${checked} 條都符合規則${skipped > 0 ? `（另外 ${skipped} 條之前就通過了，沒有改動所以跳過）` : ""}。`,
+        );
+      }
+    } catch (e) {
+      setScanError(e instanceof Error ? e.message : "檢查失敗，請再試一次");
     } finally {
       setIsScanning(false);
+      // 停在 100% 一下再收起來，讓使用者看到「跑完了」。
+      setTimeout(() => setScan(null), 600);
     }
+  }
+
+  function removeFlag(flag: ScanFlag) {
+    const key = flagKey(flag);
+    setFlags((prev) => prev.filter((f) => flagKey(f) !== key));
+    setActiveFlagKey((k) => (k === key ? null : k));
+  }
+
+  // 卡片按 ✓：直接用 AI 給的改寫取代原本那條。先把卡片拿掉，存檔跟雙語同步在背景跑。
+  function handleAccept(flag: ScanFlag) {
+    if (!flag.rewrite) return;
+    removeFlag(flag);
+    setHighlight({ entryId: flag.entryId, achievementId: flag.achievementId, variantIndex: flag.variantIndex, color: "updated" });
+    void applyFlagRewriteAction({
+      entryId: flag.entryId,
+      achievementId: flag.achievementId,
+      variantIndex: flag.variantIndex,
+      originalText: flag.text,
+      newText: flag.rewrite,
+    }).then((result) => {
+      if (result.error) {
+        setScanError(result.error);
+        setFlags((prev) => [...prev, flag]);
+      }
+    });
+  }
+
+  // 卡片按 ✕：這條不改。記成「檢查過」，內容沒再改的話之後檢查不會再標它。
+  function handleDismiss(flag: ScanFlag) {
+    removeFlag(flag);
+    void markVariantsReviewedAction([
+      { entryId: flag.entryId, achievementId: flag.achievementId, variantIndex: flag.variantIndex, text: flag.text },
+    ]);
   }
 
   function openRefine(seed: RefineSeed) {
@@ -68,76 +191,81 @@ export function ExperiencePageClient({ entries }: { entries: ExperienceEntry[] }
 
   function clearHighlightIfIdle() {
     if (!panel) setHighlight(null);
+    setActiveFlagKey(null);
   }
+
+  // 右欄只顯示目前語言的建議。
+  const langEntryIds = new Set(entries.filter((e) => e.language === activeLanguage).map((e) => e.id));
+  const visibleFlags = flags.filter((f) => langEntryIds.has(f.entryId));
 
   return (
     <>
       <div className="canvas-layout">
-        <div className="exp-lang-tabs">
-          <button
-            type="button"
-            className={activeLanguage === "zh" ? "exp-lang-tab exp-lang-tab--active" : "exp-lang-tab"}
-            onClick={() => setActiveLanguage("zh")}
-          >
-            中文履歷{!hasZh && "（尚無資料）"}
-          </button>
-          <button
-            type="button"
-            className={activeLanguage === "en" ? "exp-lang-tab exp-lang-tab--active" : "exp-lang-tab"}
-            onClick={() => setActiveLanguage("en")}
-          >
-            英文履歷{!hasEn && "（尚無資料）"}
-          </button>
-        </div>
-
-        <div className="exp-sidebar-tabs">
-          <button
-            type="button"
-            className={sidebarTab === "upload" ? "exp-sidebar-tab exp-sidebar-tab--active" : "exp-sidebar-tab"}
-            onClick={() => setSidebarTab("upload")}
-          >
-            上傳履歷來源
-          </button>
-          <button
-            type="button"
-            className={sidebarTab === "add" ? "exp-sidebar-tab exp-sidebar-tab--active" : "exp-sidebar-tab"}
-            onClick={() => setSidebarTab("add")}
-          >
-            跟 AI 聊，新增經歷
-          </button>
-        </div>
-
         <div className="canvas-main" onClick={clearHighlightIfIdle}>
+          <div className="canvas-bar">
+            <div className="canvas-bar-start">
+              <LangSwitch
+                options={[
+                  { value: "zh" as const, label: `中文履歷${hasZh ? "" : "（尚無資料）"}` },
+                  { value: "en" as const, label: `英文履歷${hasEn ? "" : "（尚無資料）"}` },
+                ]}
+                value={activeLanguage}
+                onChange={setActiveLanguage}
+              />
+              <LayoutMenu layout={layout} onChange={changeLayout} />
+            </div>
+            <div className="canvas-bar-actions">
+              {scanError && <span className="text-error">{scanError}</span>}
+              <Link href={`/experience/add?lang=${activeLanguage}`} className="btn btn-secondary">
+                新增經歷
+              </Link>
+              <button type="button" className="btn btn-secondary" disabled={isScanning} onClick={handleScan}>
+                檢查整份經歷資料庫
+              </button>
+            </div>
+          </div>
+          {scanProgress !== null && (
+            <ProgressBar
+              value={scanProgress}
+              label={
+                scan && scan.batches > 1
+                  ? `正在逐條檢查經歷資料庫（第 ${Math.min(scan.done + 1, scan.batches)} / ${scan.batches} 批）…`
+                  : "正在逐條檢查經歷資料庫…"
+              }
+            />
+          )}
           <ExperienceCanvas
             entries={entries}
             language={activeLanguage}
-            onRefine={openRefine}
+            layout={layout}
+            onActivateFlag={setActiveFlagKey}
             highlight={highlight}
-            flags={flags}
-            isScanning={isScanning}
-            scanError={scanError}
-            onScan={handleScan}
+            flags={visibleFlags}
+            activeFlagKey={activeFlagKey}
           />
         </div>
-        <div className="canvas-sidebar">
-          {sidebarTab === "upload" ? (
-            <UploadSourceCard />
+
+        {/* 右欄：檢查建議的註解卡片，每張對齊畫布上對應的那一條（像 Google Docs 的註解）。 */}
+        <div className="canvas-sidebar canvas-sidebar--rail">
+          {visibleFlags.length > 0 ? (
+            <>
+              <p className="flag-rail-summary">找到 {visibleFlags.length} 條建議加強</p>
+              <FlagRail
+                flags={visibleFlags}
+                entries={entries}
+                activeKey={activeFlagKey}
+                onActivate={setActiveFlagKey}
+                onAccept={handleAccept}
+                onDismiss={handleDismiss}
+                onRefine={openRefine}
+              />
+            </>
+          ) : scanNote ? (
+            <p className="flag-rail-empty">{scanNote}</p>
           ) : (
-            <div className="card">
-              <h2 className="heading-card">跟 AI 聊，新增一段經歷</h2>
-              <p className="text-muted mt-1">
-                腦中有一段經歷還沒整理成文字？直接跟 AI 聊，它會問出細節、幫你寫成專業的履歷寫法。這次會新增到「
-                {activeLanguage === "zh" ? "中文履歷" : "英文履歷"}
-                」，並且幫你同步到{activeLanguage === "zh" ? "英文履歷" : "中文履歷"}中。
-              </p>
-              <button
-                type="button"
-                className="btn btn-primary mt-3"
-                onClick={() => setPanel({ mode: "new" })}
-              >
-                開始
-              </button>
-            </div>
+            <p className="flag-rail-empty">
+              按「檢查整份經歷資料庫」，AI 會照履歷寫作規則逐條檢查錯字、太籠統、流水帳的寫法，建議會出現在這裡，對齊對應的那一條。之前通過、之後沒改過的不會重複檢查。
+            </p>
           )}
         </div>
       </div>

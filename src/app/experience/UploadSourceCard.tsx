@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { EstimatedProgress } from "@/app/ProgressBar";
 import { uploadAndMergeResumeAction } from "./actions";
 
 type UploadItemState = {
@@ -27,8 +28,8 @@ function CheckIcon() {
   );
 }
 
+// 經歷資料庫側欄面板「上傳履歷來源」分頁的內容（外框跟標題由面板提供）。
 export function UploadSourceCard() {
-  const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<UploadItemState[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
 
@@ -56,20 +57,23 @@ export function UploadSourceCard() {
               : item,
           ),
         );
+      }).catch(() => {
+        // 請求本身失敗（斷網、逾時、伺服器掛掉）時也要把狀態改掉，不然會永遠停在「讀取中」，看起來像沒反應。
+        setItems((prev) =>
+          prev.map((item) =>
+            item.key === key ? { ...item, status: "error", message: "上傳失敗，請檢查網路後再試一次" } : item,
+          ),
+        );
       });
     });
   }
 
   return (
-    <div className="card">
-      <h2 className="heading-card">＋ 新增履歷來源</h2>
-      <p className="text-muted mt-1">
-        用其他軟體另外寫過履歷嗎？上傳之後會自動跟現有內容比對合併，不會重複。
-      </p>
-
-      <div
+    <div>
+      {/* 用原生 <label> 包住選檔欄位，點擊由瀏覽器直接開選檔視窗。以前用程式代按 input.click()，
+          但 input 的點擊會冒泡回拖放區再代按一次，Safari 遇到連開兩次會直接取消，視窗就跳不出來。 */}
+      <label
         className={`file-drop-zone ${isDragActive ? "file-drop-zone--active" : ""}`}
-        onClick={() => inputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();
           setIsDragActive(true);
@@ -81,13 +85,12 @@ export function UploadSourceCard() {
           handleFiles(e.dataTransfer.files);
         }}
       >
-        <div className="file-drop-zone-icon">
+        <span className="file-drop-zone-icon">
           <UploadCloudIcon />
-        </div>
+        </span>
         <span className="file-drop-zone-text">拖曳檔案到這裡，或點擊選擇</span>
         <span className="file-drop-zone-hint">可一次選多個檔案，docx / doc / pdf，單檔 3MB 以內</span>
         <input
-          ref={inputRef}
           type="file"
           multiple
           accept=".docx,.doc,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/pdf"
@@ -97,7 +100,7 @@ export function UploadSourceCard() {
           }}
           className="file-input-hidden"
         />
-      </div>
+      </label>
 
       {items.length > 0 && (
         <div className="file-item-list">
@@ -106,12 +109,7 @@ export function UploadSourceCard() {
               <div className="file-item-body">
                 <div className="file-item-name">{item.name}</div>
                 {item.status === "uploading" && (
-                  <>
-                    <div className="file-item-status">解析中…</div>
-                    <div className="file-item-progress-track">
-                      <div className="file-item-progress-fill" />
-                    </div>
-                  </>
+                  <EstimatedProgress expectedMs={45000} label="AI 正在讀取內容、跟現有經歷比對合併…" />
                 )}
                 {item.status === "done" && <div className="file-item-status">{item.message}</div>}
                 {item.status === "error" && (

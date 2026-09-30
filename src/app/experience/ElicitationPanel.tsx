@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ExperienceEntry } from "./ExperienceCanvas";
 import {
   stepElicitationAction,
@@ -37,6 +38,42 @@ interface RefineSeed {
   orgName: string;
   role: string;
   seedText: string;
+  /** 從「建議加強」卡片進來時，卡片上寫的問題。 */
+  issue?: string;
+}
+
+// 潤飾對話存在瀏覽器裡（localStorage），關掉面板、點到別的地方、甚至重新整理，
+// 回到同一條再點潤飾都能從上次的地方繼續。一段對話只有幾 KB，確認更新後就清掉。
+interface SavedRefineSession {
+  seedText: string;
+  turns: DialogueTurn[];
+  draft: { text: string; angleLabel: string } | null;
+  step: Step;
+}
+
+function refineStorageKey(seed: RefineSeed) {
+  return `jobahn:refine:${seed.entryId}:${seed.achievementId}:${seed.variantIndex}`;
+}
+
+function loadRefineSession(seed: RefineSeed): SavedRefineSession | null {
+  try {
+    const raw = window.localStorage.getItem(refineStorageKey(seed));
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as SavedRefineSession;
+    // 這條的內容在那之後被改過，舊對話就不適用了。
+    return saved.seedText === seed.seedText && saved.turns.length > 0 ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveRefineSession(seed: RefineSeed, session: SavedRefineSession | null) {
+  try {
+    if (session) window.localStorage.setItem(refineStorageKey(seed), JSON.stringify(session));
+    else window.localStorage.removeItem(refineStorageKey(seed));
+  } catch {
+    // 無痕模式或儲存空間被擋：對話就只留在這次打開的面板裡，不影響功能。
+  }
 }
 
 interface CommittedInfo {
@@ -61,7 +98,12 @@ export function ElicitationPanel({
   onClose,
   onCommitted,
 }: ElicitationPanelProps) {
-  const [step, setStep] = useState<Step>(refineSeed ? "dialogue" : "picking_entry");
+  // 還沒有任何經歷（例如首次設定選「直接打字」）時，沒有東西可以挑，直接跳到填新經歷的基本資訊。
+  // 上次的潤飾對話（有的話）。面板只在使用者點了之後才掛上去，一定在瀏覽器裡，可以直接讀 localStorage。
+  const [restored] = useState(() => (refineSeed ? loadRefineSession(refineSeed) : null));
+  const [step, setStep] = useState<Step>(
+    restored?.step ?? (refineSeed ? "dialogue" : entries.length === 0 ? "picking_new_entry_fields" : "picking_entry"),
+  );
   const [filterText, setFilterText] = useState("");
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(refineSeed?.entryId ?? null);
   const [orgContext, setOrgContext] = useState<{ orgName: string; role: string }>(
@@ -75,10 +117,10 @@ export function ElicitationPanel({
     entryType: "work",
     language: defaultLanguage ?? "zh",
   });
-  const [turns, setTurns] = useState<DialogueTurn[]>([]);
+  const [turns, setTurns] = useState<DialogueTurn[]>(restored?.turns ?? []);
   const [composerText, setComposerText] = useState("");
   const [isPending, setIsPending] = useState(false);
-  const [draft, setDraft] = useState<{ text: string; angleLabel: string } | null>(null);
+  const [draft, setDraft] = useState<{ text: string; angleLabel: string } | null>(restored?.draft ?? null);
   const [vagueSuggestion, setVagueSuggestion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCompletion, setShowCompletion] = useState<string | null>(null);
@@ -90,11 +132,18 @@ export function ElicitationPanel({
   }, [turns, step, draft]);
 
   useEffect(() => {
+    if (restored) return;
     if (refineSeed) {
       void startDialogue({ seedText: refineSeed.seedText });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 潤飾對話每有新進展就存一次。
+  useEffect(() => {
+    if (!refineSeed || turns.length === 0 || showCompletion) return;
+    saveRefineSession(refineSeed, { seedText: refineSeed.seedText, turns, draft, step });
+  }, [refineSeed, turns, draft, step, showCompletion]);
 
   const filteredEntries = entries.filter((e) =>
     `${e.orgName} ${e.roleVariants[0]?.role ?? ""}`.toLowerCase().includes(filterText.toLowerCase()),
@@ -140,7 +189,12 @@ export function ElicitationPanel({
     setError(null);
     try {
       const result = await stepElicitationAction(
-        { orgName: orgContext.orgName || refineSeed?.orgName || "", role: orgContext.role || refineSeed?.role || "", seedText: opts?.seedText },
+        {
+          orgName: orgContext.orgName || refineSeed?.orgName || "",
+          role: orgContext.role || refineSeed?.role || "",
+          seedText: opts?.seedText,
+          issue: refineSeed?.issue,
+        },
         [],
         null,
       );
@@ -167,7 +221,7 @@ export function ElicitationPanel({
     setError(null);
     try {
       const result = await stepElicitationAction(
-        { orgName: orgContext.orgName, role: orgContext.role, seedText: refineSeed?.seedText },
+        { orgName: orgContext.orgName, role: orgContext.role, seedText: refineSeed?.seedText, issue: refineSeed?.issue },
         turns,
         reply,
       );
@@ -183,7 +237,7 @@ export function ElicitationPanel({
     }
   }
 
-  async function handleConfirm() {
+  async function handleConfirm(mode: "replace" | "append" = "replace") {
     if (!draft) return;
     setIsPending(true);
     setError(null);
@@ -192,6 +246,8 @@ export function ElicitationPanel({
         ? await commitRefinedVariantAction({
             entryId: refineSeed.entryId,
             achievementId: refineSeed.achievementId,
+            variantIndex: refineSeed.variantIndex,
+            mode,
             draftText: draft.text,
             angleLabel: draft.angleLabel || "手動調整寫法",
           })
@@ -214,6 +270,7 @@ export function ElicitationPanel({
       if (result.error) {
         setError(result.error);
       } else if (result.entryId && result.achievementId && result.variantIndex !== undefined) {
+        if (refineSeed) saveRefineSession(refineSeed, null);
         onCommitted({
           entryId: result.entryId,
           achievementId: result.achievementId,
@@ -233,7 +290,9 @@ export function ElicitationPanel({
     }
   }
 
-  return (
+  // 用 portal 掛到 <body>：首次設定頁的內容區有自己的圖層（z-index: 1，讓背景色塊墊在下面），
+  // 面板如果留在裡面會被關在那一層，蓋不過導覽列，標題跟關閉鈕就被遮住。
+  return createPortal(
     <div className="elicitation-overlay" onClick={onClose}>
       <div className="elicitation-panel" onClick={(e) => e.stopPropagation()}>
         <div className="elicitation-header">
@@ -425,10 +484,20 @@ export function ElicitationPanel({
                       type="button"
                       className="btn btn-primary"
                       disabled={isPending}
-                      onClick={handleConfirm}
+                      onClick={() => handleConfirm("replace")}
                     >
-                      確認新增
+                      {refineSeed ? "確認，取代原本這條" : "確認新增"}
                     </button>
+                    {refineSeed && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={isPending}
+                        onClick={() => handleConfirm("append")}
+                      >
+                        另存成新的寫法
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="btn btn-secondary"
@@ -466,7 +535,8 @@ export function ElicitationPanel({
       </div>
 
       {showCompletion && <CompletionPopup message={showCompletion} onClose={onClose} />}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
