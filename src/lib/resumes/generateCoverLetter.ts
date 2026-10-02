@@ -56,7 +56,7 @@ const LANGUAGE_INSTRUCTION: Record<string, string> = {
   en: `Write the entire letter in English, even if the resume material below is in Chinese. Rewrite naturally in English instead of translating word for word.
 英文額外規則：
 1. 自我介紹用自然的英文語序，例如 "I am Alex Chen"，不要用「姓, 名」的名單格式（"I am Chen, Alex"）。
-2. 專有名詞、認證縮寫、組織全名要用正確的大小寫跟單複數（例如 Apple MFi 不是 APPLE MFI）。`,
+2. 專有名詞、認證縮寫、組織全名要用正確的大小寫跟單複數（例如 iOS 不是 IOS、LinkedIn 不是 Linkedin）。`,
 };
 
 const SIGNATURE_MARK = "{{SIGNATURE}}";
