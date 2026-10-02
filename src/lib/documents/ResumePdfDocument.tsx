@@ -102,9 +102,25 @@ function wrapIfZh(text: string, language: string, fontSize: number, maxWidthPt: 
 
 // 每一行內容都包一個掛了 data-k 的 View，量 PDF 時才找得到它落在第幾頁（measureResumePdf.tsx）。
 // data-k 不在 react-pdf 的型別裡，但會原封不動留在排版結果的 props 上。
-function Keyed({ k, style, children }: { k: string; style?: ViewProps["style"]; children: ReactNode }) {
+// keepWithNext：區塊標題用，後面至少要跟著這麼高（pt）的內容才留在這一頁，不然整個標題一起換到下一頁，
+// 不會出現「EDUCATION」標題孤零零留在第一頁底部、內容全在第二頁的情況。
+// 只有 bullet 跟摘要這種多行段落可以被切到兩頁；標題、公司／職稱列、學校列都是一行，
+// 不能被切開（不然會在第一頁留下一小段空白碎片，量出來的分頁位置也會錯）。
+function Keyed({
+  k,
+  style,
+  keepWithNext,
+  splittable = false,
+  children,
+}: {
+  k: string;
+  style?: ViewProps["style"];
+  keepWithNext?: number;
+  splittable?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <View data-k={k} style={style}>
+    <View data-k={k} style={style} minPresenceAhead={keepWithNext} wrap={splittable}>
       {children}
     </View>
   );
@@ -136,7 +152,7 @@ function ExperienceBlocks({
             <Text style={[styles.italic, styles.rowRight]}>{exp.period}</Text>
           </Keyed>
           {exp.bullets.map((b, j) => (
-            <Keyed key={j} k={pdfKey.bullet(section, i, j)} style={styles.bullet}>
+            <Keyed key={j} k={pdfKey.bullet(section, i, j)} style={styles.bullet} splittable>
               <Text style={styles.bulletDot}>{"•"}</Text>
               <Text style={styles.bulletText}>{wrapIfZh(b, language, metrics.body, BULLET_WIDTH_PT)}</Text>
             </Keyed>
@@ -157,6 +173,8 @@ export function ResumePdfDocument({
   const labels = getLabels(language);
   const metrics = resolveMetrics(language, resume.layout);
   const styles = createStyles(metrics, language);
+  // 標題後面至少要放得下下一段的上方間距加兩行，標題才留在這一頁。
+  const keepWithNext = metrics.block + metrics.line * 2;
   const name = pickName(contact, language);
   const parts = contactParts(contact, language);
 
@@ -179,14 +197,14 @@ export function ResumePdfDocument({
           </Text>
         </Keyed>
 
-        <Keyed k={pdfKey.header("summary")}>
+        <Keyed keepWithNext={keepWithNext} k={pdfKey.header("summary")}>
           <Text style={styles.sectionHeader}>{labels.summary}</Text>
         </Keyed>
-        <Keyed k={pdfKey.summary()}>
+        <Keyed k={pdfKey.summary()} splittable>
           <Text style={styles.bodyText}>{wrapIfZh(resume.summary, language, metrics.body, BODY_WIDTH_PT)}</Text>
         </Keyed>
 
-        <Keyed k={pdfKey.header("experience")}>
+        <Keyed keepWithNext={keepWithNext} k={pdfKey.header("experience")}>
           <Text style={styles.sectionHeader}>{labels.experience}</Text>
         </Keyed>
         <ExperienceBlocks
@@ -199,7 +217,7 @@ export function ResumePdfDocument({
 
         {resume.leadership.length > 0 && (
           <>
-            <Keyed k={pdfKey.header("leadership")}>
+            <Keyed keepWithNext={keepWithNext} k={pdfKey.header("leadership")}>
               <Text style={styles.sectionHeader}>{labels.leadership}</Text>
             </Keyed>
             <ExperienceBlocks
@@ -212,7 +230,7 @@ export function ResumePdfDocument({
           </>
         )}
 
-        <Keyed k={pdfKey.header("education")}>
+        <Keyed keepWithNext={keepWithNext} k={pdfKey.header("education")}>
           <Text style={styles.sectionHeader}>{labels.education}</Text>
         </Keyed>
         {resume.education.map((edu, i) => (
@@ -230,10 +248,10 @@ export function ResumePdfDocument({
           </View>
         ))}
 
-        <Keyed k={pdfKey.header("skills")}>
+        <Keyed keepWithNext={keepWithNext} k={pdfKey.header("skills")}>
           <Text style={styles.sectionHeader}>{labels.skills}</Text>
         </Keyed>
-        <Keyed k={pdfKey.skills()}>
+        <Keyed k={pdfKey.skills()} splittable>
           <Text style={styles.bodyText}>
             <Text style={styles.bold}>{labels.computer} </Text>
             {/* 第一行前面有「技能：」標籤，一起算斷行位置，再把標籤切掉。 */}

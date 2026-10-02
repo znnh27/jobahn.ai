@@ -53,9 +53,17 @@ const ZH_TO_EN_RULES = `來源轉換規則（這次的經歷資料庫是中文�
 3. 例外：這次 "org" 欄位不用跟 org_name 一字不改，要轉成公司的英文名稱（有官方英文名就用官方的）；外國人不認識的公司，在英文名稱後加一句簡介（產業、規模或產品），例如：XX Bank, a Taiwanese commercial bank with 100+ branches。
 4. role、period、location、學歷、技能也都要轉成英文。`;
 
+// 反過來：使用者只有英文經歷（例如只上傳了英文履歷）時，中文版改從英文經歷重寫。
+// 以前只有中→英的退路，只有英文資料的人產出的中文履歷會整份沒有經歷。
+const EN_TO_ZH_RULES = `來源轉換規則（這次的經歷資料庫是英文，但要產出中文版履歷）：
+1. 不是逐句翻譯，而是依中文履歷慣例重寫，用台灣用語。事實和數字不能改，只改寫法。
+2. 避免翻譯腔，例如不要把 "Led" 一律翻成「帶領」、不要寫「透過……，成功地……」這種長串修飾。
+3. "org" 欄位跟 org_name 一字不改（外商、英文公司名在中文履歷裡本來就常保留英文）。
+4. role、period、location、學歷、技能轉成中文寫法；專有名詞、產品名、工具名保留英文。`;
+
 export const COVERAGE_RULES =`JD 符合度清單的判定標準（務必嚴格遵守，這是評分結果每次跑出來不一致的主要原因，要特別小心）：
 1. covered 只有在內容裡有「明確、具體、可以直接指認」的事實對應到這個 JD 項目時，才標記 true。單純「產業相關」、「性質類似」、「可以類推應該也做得到」都不算，一律標記 false。
-2. 領域/類型不同不能算通過。例如 JD 要求「數位/軟體產品的 0 到 1 經驗」，如果內容寫的是硬體或 IoT 產品的跨國協作，不算 covered，要在缺口說明清楚差在「產品類型不同」，不要含糊帶過。
+2. 領域/類型不同不能算通過。例如 JD 要求「數位/軟體產品的 0 到 1 經驗」，如果內容寫的是實體門市的展店專案，不算 covered，要在缺口說明清楚差在「產品類型不同」，不要含糊帶過。
 3. 每次判斷同一個項目，都要用同一套標準重新逐項檢查：先問「這句話有沒有字面上或近乎字面上支持這個要求」，不要憑整體印象覺得「這個人應該做得到」就標 true，也不要因為前一次判斷是 true 就傾向維持 true（或反過來），每次都要重新看內容本身。
 4. 如果只是職務相近、可以類推、但沒有具體事實佐證，一律標 false，並在缺口裡具體寫出缺的是什麼，不要寫模稜兩可的描述。`;
 
@@ -193,9 +201,11 @@ export async function generateResumeForApplication(
   for (const lang of languages) {
     let langEntries = (entries as ExperienceEntryRow[]).filter((e) => e.language === lang);
     let sourceLanguage = lang;
-    if (lang === "en" && langEntries.length === 0) {
-      langEntries = (entries as ExperienceEntryRow[]).filter((e) => e.language === "zh");
-      sourceLanguage = "zh";
+    // 這個語言沒有經歷資料時，改用另一個語言的經歷重寫（中→英、英→中都要有）。
+    if (langEntries.length === 0) {
+      const other = lang === "en" ? "zh" : "en";
+      langEntries = (entries as ExperienceEntryRow[]).filter((e) => e.language === other);
+      sourceLanguage = other;
     }
 
     const userPrompt = buildUserPrompt({
@@ -262,7 +272,7 @@ const SCORE_SYSTEM_PROMPT = `你是履歷跟 JD 的比對助手。使用者會�
    清單不是空的：item 文字跟 importance 一律照抄，不能改寫、新增、刪除、合併項目。舊清單如果沒有 importance，這次依 JD 補上，之後就固定。
 2. 每一項判斷 covered（有沒有寫到），source 有寫到填 "resume"，沒寫到填 null。
 3. 沒寫到的項目，gap 要寫得具體、可以照著做：缺的是什麼具體事實、使用者現有經驗跟這項要求差在哪（例如產品類型不同、年資不夠、只有協助沒有主導）、可以怎麼補（挖掘哪一類經驗寫進履歷，或留到求職信說明）。有寫到的 gap 是 null。gap 一律用繁體中文。
-   範例：item「2 年以上主導數位產品規劃經驗（AI、大數據相關尤佳）」→ gap「缺乏 2 年以上主導 AI、大數據或演算法相關數位產品的具體事實；現有經驗是銀行 App 改版與 IoT 硬體專案，產品類型不同，現職年資也還不到 2 年。如果有做過跟資料分析、推薦或自動化相關的功能，可以挖出來寫成一條；沒有的話在求職信說明轉換動機。」
+   範例：item「2 年以上主導數位產品規劃經驗（AI、大數據相關尤佳）」→ gap「缺乏 2 年以上主導 AI、大數據或演算法相關數位產品的具體事實；現有經驗是電商網站改版與實體活動企劃，產品類型不同，現職年資也還不到 2 年。如果有做過跟資料分析、推薦或自動化相關的功能，可以挖出來寫成一條；沒有的話在求職信說明轉換動機。」
 4. **判斷要穩定**：如果有給「上次的判斷」跟「這次履歷改了哪些地方」，只有跟改動內容直接相關的項目可以改變 covered；跟改動無關的項目，covered、source、gap 一律照抄上次的判斷，不要重新詮釋。
 
 ${COVERAGE_RULES}
@@ -470,7 +480,8 @@ function buildUserPrompt(params: {
 }): string {
   const languageRules = [
     params.language === "en" ? EN_RULES : params.language === "zh" ? ZH_RULES : null,
-    params.sourceLanguage !== params.language ? ZH_TO_EN_RULES : null,
+    params.sourceLanguage === "zh" && params.language === "en" ? ZH_TO_EN_RULES : null,
+    params.sourceLanguage === "en" && params.language === "zh" ? EN_TO_ZH_RULES : null,
   ].filter(Boolean);
 
   return [
