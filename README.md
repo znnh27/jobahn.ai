@@ -141,7 +141,7 @@ jobahn 跑在你自己的電腦上，用你自己的帳號，資料不會經過�
    - 建立專案，到 **SQL Editor** 依序執行 `supabase/migrations/` 裡的檔案（`0001` 到 `0007`）。
    - 到 **Authentication → Sign In / Providers → Email** 關掉 **Confirm email**。Supabase 內建的寄信服務每小時只能寄幾封，註冊驗證信不一定收得到。想保留信箱驗證的話，改到 **Authentication → Emails** 設定自己的 SMTP 寄信服務。
 3. **環境變數**：把 `.env.local.example` 複製成 `.env.local` 並填好，各欄位說明見上方英文版的表格。
-4. **啟動**：執行 `npm run dev`，打開 http://localhost:3000，註冊後上傳履歷（或直接打字輸入第一段經歷）就可以開始用。
+4. **啟動**：執行 `npm run dev`，打開 <http://localhost:3000>，註冊後上傳履歷（或直接打字輸入第一段經歷）就可以開始用。
 
 **部署（選用）**：這是一般的 Next.js 專案，可以部署到 Vercel 或任何 Node 主機。伺服器上沒有登入的 Claude Code CLI，所以要設 `AI_PROVIDER=api`。如果會讓其他人在你架的網站註冊，記得照第 2 步設定 SMTP，並到 Anthropic Console 設定每月花費上限，避免程式出錯時產生大筆費用。
 
