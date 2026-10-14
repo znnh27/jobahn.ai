@@ -26,7 +26,12 @@ export default async function HomePage() {
           <h1 className="landing-wordmark">
             jo<span className="landing-wordmark-accent">bahn</span>
           </h1>
-          <p className="landing-tagline">讓每個人都能把自己的經歷，講成專業履歷該有的樣子</p>
+          <div className="landing-tagline-group">
+            <p className="landing-tagline">一個故事，拆成精準對上每份職缺的履歷</p>
+            <p className="landing-subtagline">
+              從 AI 追問經歷、拆解職缺、撰寫履歷、ATS 評分到求職信，一條龍完成。
+            </p>
+          </div>
         </div>
         <div className="toolbar-inline">
           <Link href="/login" className="btn btn-primary btn--lg">

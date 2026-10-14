@@ -1907,6 +1907,18 @@
   border-radius: 0.25em;
 }
 
+.landing-tagline-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+  /* 中文只在標點（，、）處換行，不把「履歷」這種詞拆開；真的放不下才強制斷 */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
 .landing-tagline {
   position: relative;
   z-index: 1;
@@ -1914,6 +1926,16 @@
   font-size: var(--font-xl);
   color: var(--chrome-ink);
   max-width: 32rem;
+  margin: 0;
+}
+
+/* 主標語下方的功能一覽，比主標語小、顏色淡一階 */
+.landing-subtagline {
+  position: relative;
+  z-index: 1;
+  font-size: var(--font-base);
+  color: var(--chrome-muted);
+  max-width: 36rem;
   margin: 0;
 }
 
