@@ -11,6 +11,10 @@ drop policy if exists "original_resumes_storage_select_own" on storage.objects;
 drop policy if exists "original_resumes_storage_insert_own" on storage.objects;
 drop policy if exists "original_resumes_storage_delete_own" on storage.objects;
 
+-- Supabase 現在預設禁止直接用 SQL 刪 storage 資料表（就算沒有符合的資料也會報錯），
+-- 要先打開這個開關。值必須是小寫的 'true'。
+set storage.allow_delete_query = 'true';
+
 delete from storage.objects where bucket_id = 'original-resumes';
 delete from storage.buckets where id = 'original-resumes';
 

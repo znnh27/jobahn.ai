@@ -27,6 +27,8 @@ You tell jobahn about your experience once (upload old resumes, or just type a s
 
 jobahn runs on your own computer with your own accounts. Nothing is sent to the author's servers.
 
+> **Using an AI coding assistant?** Open this folder in Claude Code, Cursor or a similar tool and say "set up jobahn for me". [`AGENTS.md`](AGENTS.md) tells it what it can do on its own and which steps (creating the Supabase project, copying keys) it needs to walk you through.
+
 ### What you need
 
 | | Required? | Notes |
@@ -49,15 +51,25 @@ jobahn runs on your own computer with your own accounts. Nothing is sent to the 
    ```
 
 2. **Set up Supabase**
-   - Create a project, open **SQL Editor**, and run the files in `supabase/migrations/` in order (`0001` → `0007`).
+   - Create a project.
+   - Create the database tables. All the SQL lives in `supabase/migrations/` (`0001` → `0007`, run in that order). The easiest way is to copy all of it at once:
+
+     ```bash
+     cat supabase/migrations/*.sql | pbcopy                        # macOS
+     cat supabase/migrations/*.sql | xclip -selection clipboard    # Linux
+     Get-Content supabase\migrations\*.sql | Set-Clipboard          # Windows PowerShell
+     ```
+
+     Then open **SQL Editor** in the Supabase dashboard, paste, and click **Run**. If Supabase warns that the query contains destructive operations, confirm: migration `0006` removes a storage bucket that `0002` created and the app no longer uses. You should see "Success. No rows returned".
    - Go to **Authentication → Sign In / Providers → Email** and turn off **Confirm email**. Supabase's built-in email sending is limited to a few emails per hour, so sign-up confirmation emails won't arrive reliably. If you want email confirmation, configure your own SMTP provider under **Authentication → Emails** instead.
 
 3. **Environment variables**: copy `.env.local.example` to `.env.local` and fill it in.
 
    | Variable | Where to find it |
    |---|---|
-   | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Project Settings → API |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Same page. Server-only, never expose it to the browser. |
+   | `NEXT_PUBLIC_SUPABASE_URL` | Your project URL, `https://<project-id>.supabase.co`. The project ID is in the dashboard's address bar; the full URL is also under **Integrations → Data API**. |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | **Project Settings → API Keys → Publishable key** (`sb_publishable_...`). Older projects call it the `anon` key; either works. |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Same page, **Secret key** (`sb_secret_...`), or the legacy `service_role` key. Server-only, never expose it to the browser. |
    | `AI_PROVIDER` | `local-cli` or `api` |
    | `ANTHROPIC_API_KEY` | Only for `AI_PROVIDER=api` |
    | `FIRECRAWL_API_KEY` | Optional |
@@ -69,7 +81,7 @@ jobahn runs on your own computer with your own accounts. Nothing is sent to the 
    npm run dev
    ```
 
-   Open http://localhost:3000, sign up, and upload a resume (or type your first experience).
+   Open http://localhost:3000, sign up (you're logged in right away), and upload a resume (or type your first experience).
 
 ### Deploying (optional)
 
@@ -123,6 +135,8 @@ order by est_cost_usd desc;
 
 jobahn 跑在你自己的電腦上，用你自己的帳號，資料不會經過作者的伺服器。
 
+> **有在用 AI 寫程式工具嗎？** 用 Claude Code、Cursor 這類工具打開這個資料夾，跟它說「幫我把 jobahn 架起來」就好。[`AGENTS.md`](AGENTS.md) 寫好了哪些步驟 AI 可以自己做、哪些（建立 Supabase 專案、複製金鑰）要帶著你一起做。
+
 **需要準備**
 
 | | 必要嗎 | 說明 |
@@ -138,10 +152,11 @@ jobahn 跑在你自己的電腦上，用你自己的帳號，資料不會經過�
 
 1. **下載並安裝**：`git clone` 這個 repo，進到資料夾後執行 `npm install`。
 2. **設定 Supabase**
-   - 建立專案，到 **SQL Editor** 依序執行 `supabase/migrations/` 裡的檔案（`0001` 到 `0007`）。
+   - 建立專案。
+   - 建立資料表：SQL 都在 `supabase/migrations/`（`0001` 到 `0007`，要照順序執行）。最簡單的做法是用上方英文版的指令一次複製全部內容，貼到 Supabase 後台的 **SQL Editor**，按 **Run**。如果跳出「含有破壞性操作」的警告，按確認就好：那是 `0006` 在刪除一個 `0002` 建立、但 app 已經不再使用的 storage bucket。看到「Success. No rows returned」就代表完成。
    - 到 **Authentication → Sign In / Providers → Email** 關掉 **Confirm email**。Supabase 內建的寄信服務每小時只能寄幾封，註冊驗證信不一定收得到。想保留信箱驗證的話，改到 **Authentication → Emails** 設定自己的 SMTP 寄信服務。
-3. **環境變數**：把 `.env.local.example` 複製成 `.env.local` 並填好，各欄位說明見上方英文版的表格。
-4. **啟動**：執行 `npm run dev`，打開 <http://localhost:3000>，註冊後上傳履歷（或直接打字輸入第一段經歷）就可以開始用。
+3. **環境變數**：把 `.env.local.example` 複製成 `.env.local` 並填好，各欄位說明見上方英文版的表格。Supabase 的金鑰改過名字：`NEXT_PUBLIC_SUPABASE_ANON_KEY` 填 **Publishable key**（`sb_publishable_` 開頭），`SUPABASE_SERVICE_ROLE_KEY` 填 **Secret key**（`sb_secret_` 開頭），兩個都在 **Project Settings → API Keys**。比較舊的專案叫 `anon` 和 `service_role`，也可以用。
+4. **啟動**：執行 `npm run dev`，打開 <http://localhost:3000>，註冊後會直接登入，上傳履歷（或直接打字輸入第一段經歷）就可以開始用。
 
 **部署（選用）**：這是一般的 Next.js 專案，可以部署到 Vercel 或任何 Node 主機。伺服器上沒有登入的 Claude Code CLI，所以要設 `AI_PROVIDER=api`。如果會讓其他人在你架的網站註冊，記得照第 2 步設定 SMTP，並到 Anthropic Console 設定每月花費上限，避免程式出錯時產生大筆費用。
 
