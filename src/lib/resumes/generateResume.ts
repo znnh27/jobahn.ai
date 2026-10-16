@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 import { BULLET_RULES } from "@/lib/experience/bulletRules";
 import { computeAtsScore, type JdImportance } from "./atsScore";
+import { resolveJdItems, type JdBaseItem } from "./jdChecklist";
 import { readLayoutDefaults, type ResumeLayoutSettings } from "./typography";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { toTraditional } from "@/lib/text/toTraditional";
@@ -192,6 +193,15 @@ export async function generateResumeForApplication(
     .eq("user_id", userId)
     .maybeSingle();
 
+  // JD 條件清單只拆一次，各語言共用（見 jdChecklist.ts）。
+  const sharedItems = await resolveJdItems({
+    supabase,
+    userId,
+    applicationId,
+    jd: application.job_description,
+    stored: existingChecklists,
+  });
+
   const layoutDefaults = readLayoutDefaults(profile?.data);
   const resumeDraft: Record<string, GeneratedResume["resume"]> = {};
   const checklists: Record<string, GeneratedResume["jd_match_checklist"]> = {};
@@ -240,7 +250,8 @@ export async function generateResumeForApplication(
       jd: application.job_description,
       language: lang,
       resumeContent: resume,
-      existingItems: existingChecklists[lang] ?? [],
+      items: itemsForLanguage(existingChecklists[lang], sharedItems),
+      previousJudgments: [],
       // 整份重新生成，內容全換了，不拿上一版比對，每一項都重新判斷。
       previousResume: null,
     });
@@ -266,10 +277,9 @@ export async function generateResumeForApplication(
   if (updateError) throw new Error(`儲存生成結果失敗：${updateError.message}`);
 }
 
-const SCORE_SYSTEM_PROMPT = `你是履歷跟 JD 的比對助手。使用者會給你 JD、一份 JD 條件清單（可能是空的）、跟一份履歷內容。你不打分數（分數由系統照公式算），只負責判斷每一項條件有沒有寫到。
+const SCORE_SYSTEM_PROMPT = `你是履歷跟 JD 的比對助手。使用者會給你 JD、一份固定的 JD 條件清單、跟一份履歷內容。你不打分數（分數由系統照公式算），只負責判斷每一項條件有沒有寫到。
 
-1. 清單是空的：自己從 JD 列出關鍵條件（通常 6 到 10 項，一項一件事，用 JD 的語言寫），每一項標 importance：JD 寫成硬性要求的是 "required"，寫 preferred / nice to have / 加分的是 "preferred"。
-   清單不是空的：item 文字跟 importance 一律照抄，不能改寫、新增、刪除、合併項目。舊清單如果沒有 importance，這次依 JD 補上，之後就固定。
+1. 清單是固定的：item 文字跟 importance 一律照抄，不能改寫、新增、刪除、合併項目，每一項都要判斷。舊清單如果 importance 是 null，這次依 JD 補上（JD 寫成硬性要求的是 "required"，寫 preferred / nice to have / 加分的是 "preferred"），之後就固定。
 2. 每一項判斷 covered（有沒有寫到），source 有寫到填 "resume"，沒寫到填 null。
 3. 沒寫到的項目，gap 要寫得具體、可以照著做：缺的是什麼具體事實、使用者現有經驗跟這項要求差在哪（例如產品類型不同、年資不夠、只有協助沒有主導）、可以怎麼補（挖掘哪一類經驗寫進履歷，或留到求職信說明）。有寫到的 gap 是 null。gap 一律用繁體中文。
    範例：item「2 年以上主導數位產品規劃經驗（AI、大數據相關尤佳）」→ gap「缺乏 2 年以上主導 AI、大數據或演算法相關數位產品的具體事實；現有經驗是電商網站改版與實體活動企劃，產品類型不同，現職年資也還不到 2 年。如果有做過跟資料分析、推薦或自動化相關的功能，可以挖出來寫成一條；沒有的話在求職信說明轉換動機。」
@@ -321,29 +331,37 @@ async function scoreResumeAgainstJd(params: {
   jd: string;
   language: string;
   resumeContent: Resume;
-  existingItems: GeneratedResume["jd_match_checklist"];
+  /** 這次要判斷的 JD 條件（固定的題目，AI 不能改）。 */
+  items: JdBaseItem[];
+  /** 上次的判斷，只有在有 previousResume、要比對差異時才會用到。 */
+  previousJudgments: GeneratedResume["jd_match_checklist"];
   /** 上次評分時的履歷。跟這次一模一樣就不呼叫 AI；不一樣就只把差異告訴 AI。 */
   previousResume: Resume | null;
 }): Promise<Pick<GeneratedResume, "jd_match_checklist" | "ats_score" | "ats_gaps">> {
-  const existing = params.existingItems;
-  const hasImportance = existing.length > 0 && existing.every((i) => i.importance);
+  const previous = params.previousResume ? params.previousJudgments : [];
+  const previousByItem = new Map(previous.map((i) => [i.item.trim(), i]));
+  const hasAllJudgments =
+    params.items.length > 0 && params.items.every((i) => i.importance && previousByItem.has(i.item.trim()));
 
   let items: GeneratedResume["jd_match_checklist"];
-  if (params.previousResume && hasImportance && sameResume(params.previousResume, params.resumeContent)) {
+  if (params.previousResume && hasAllJudgments && sameResume(params.previousResume, params.resumeContent)) {
     // 內容完全沒改：直接沿用上次的判斷，分數一定一樣。
-    items = existing;
+    items = params.items.map((i) => previousByItem.get(i.item.trim())!);
   } else {
-    const diff = params.previousResume && existing.length > 0 ? diffLines(params.previousResume, params.resumeContent) : null;
+    const diff = previous.length > 0 ? diffLines(params.previousResume!, params.resumeContent) : null;
     const userPrompt = [
       `===== JD =====`,
       params.jd,
-      existing.length > 0
+      previous.length > 0
         ? `===== JD 條件清單跟上次的判斷（item、importance 照抄）=====\n${JSON.stringify(
-            existing.map(({ item, importance, covered, source, gap }) => ({ item, importance: importance ?? null, covered, source, gap: gap ?? null })),
+            params.items.map(({ item, importance }) => {
+              const p = previousByItem.get(item.trim());
+              return { item, importance, covered: p?.covered ?? false, source: p?.source ?? null, gap: p?.gap ?? null };
+            }),
             null,
             2,
           )}`
-        : "===== JD 條件清單 =====\n（目前是空的，請你從 JD 列出）",
+        : `===== JD 條件清單（item、importance 照抄）=====\n${JSON.stringify(params.items, null, 2)}`,
       diff
         ? `===== 這次履歷改了哪些地方（只有跟這些改動相關的項目可以改變判斷）=====\n新增：\n${diff.added.join("\n") || "（無）"}\n\n刪除：\n${diff.removed.join("\n") || "（無）"}`
         : "",
@@ -366,7 +384,7 @@ async function scoreResumeAgainstJd(params: {
     const parsed = JSON.parse(
       response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
     ) as Pick<GeneratedResume, "jd_match_checklist">;
-    items = lockItems(existing, parsed.jd_match_checklist);
+    items = lockItems(params.items, previousByItem, parsed.jd_match_checklist);
   }
 
   return {
@@ -383,11 +401,12 @@ function diffLines(before: Resume, after: Resume) {
 }
 
 /**
- * 清單已經存在時，條件文字跟必要/加分由程式鎖住（AI 偶爾會改寫條件文字或多列一項）：
- * 照舊清單的順序，用條件文字對回 AI 這次的判斷；對不到的項目沿用上次的判斷。
+ * 條件文字跟必要/加分由程式鎖住（AI 偶爾會改寫條件文字或多列一項）：
+ * 照固定清單的順序，用條件文字對回 AI 這次的判斷；AI 漏掉的項目沿用上次的判斷，沒有上次就當沒寫到。
  */
 function lockItems(
-  existing: GeneratedResume["jd_match_checklist"],
+  base: JdBaseItem[],
+  previousByItem: Map<string, JdChecklistItem>,
   fresh: GeneratedResume["jd_match_checklist"],
 ): GeneratedResume["jd_match_checklist"] {
   const normalize = (item: JdChecklistItem): JdChecklistItem => ({
@@ -397,18 +416,27 @@ function lockItems(
     source: item.covered ? "resume" : null,
     gap: item.covered ? null : (item.gap ?? null),
   });
-  if (existing.length === 0) return fresh.map(normalize);
   const byItem = new Map(fresh.map((i) => [i.item.trim(), i]));
-  return existing.map((old) => {
+  return base.map((b) => {
+    const key = b.item.trim();
     // AI 這次漏判或把條件文字改掉了，就沿用上次的判斷。
-    const judged = byItem.get(old.item.trim()) ?? old;
+    const judged = byItem.get(key) ?? previousByItem.get(key) ?? { item: b.item, covered: false, source: null, gap: null };
     return normalize({
       ...judged,
-      item: old.item,
-      // 舊清單已經有 importance 就固定用舊的；舊資料沒有才用這次 AI 補的。
-      importance: old.importance ?? judged.importance,
+      item: b.item,
+      // 清單已經有 importance 就固定用清單的；舊資料沒有才用這次 AI 補的。
+      importance: b.importance ?? judged.importance,
     });
   });
+}
+
+/** 這個語言已經有清單就沿用它（舊應徵的中英文清單可能不同，不去動）；沒有就用共用清單。 */
+function itemsForLanguage(
+  stored: GeneratedResume["jd_match_checklist"] | undefined,
+  shared: JdBaseItem[],
+): JdBaseItem[] {
+  if (stored && stored.length > 0) return stored.map((i) => ({ item: i.item, importance: i.importance ?? null }));
+  return shared;
 }
 
 export async function rescoreResumeForApplication(
@@ -435,10 +463,21 @@ export async function rescoreResumeForApplication(
   const checklists: Record<string, GeneratedResume["jd_match_checklist"]> = { ...existingChecklists };
   const atsScores: Record<string, number> = {};
   const atsGaps: Record<string, string[]> = {};
+  let sharedItems: JdBaseItem[] | null = null;
 
   for (const lang of languages) {
     const resumeContent = editedResumeDraft[lang];
     if (!resumeContent) continue;
+    // 正常情況生成時就有清單了；萬一沒有（例如舊資料），才去拆一次，各語言共用。
+    if (!existingChecklists[lang]?.length && !sharedItems) {
+      sharedItems = await resolveJdItems({
+        supabase,
+        userId,
+        applicationId,
+        jd: application.job_description,
+        stored: existingChecklists,
+      });
+    }
 
     const scored = await scoreResumeAgainstJd({
       supabase,
@@ -446,7 +485,8 @@ export async function rescoreResumeForApplication(
       jd: application.job_description,
       language: lang,
       resumeContent,
-      existingItems: existingChecklists[lang] ?? [],
+      items: itemsForLanguage(existingChecklists[lang], sharedItems ?? []),
+      previousJudgments: existingChecklists[lang] ?? [],
       previousResume: basis.resume[lang] ?? null,
     });
 
