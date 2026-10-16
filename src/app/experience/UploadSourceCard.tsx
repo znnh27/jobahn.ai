@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { EstimatedProgress } from "@/app/ProgressBar";
 import { uploadAndMergeResumeAction } from "./actions";
@@ -32,6 +33,8 @@ function CheckIcon() {
 export function UploadSourceCard() {
   const [items, setItems] = useState<UploadItemState[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
+
+  const hasSuccess = items.some((i) => i.status === "done");
 
   function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
@@ -123,6 +126,21 @@ export function UploadSourceCard() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 上傳完要給下一步，不然使用者停在這頁不知道要做什麼。 */}
+      {hasSuccess && (
+        <div className="mt-4">
+          <p className="text-success">已經合併進經歷資料庫了！可以回去看看更新的內容，或直接開始新增應徵。</p>
+          <div className="add-exp-done-actions">
+            <Link href="/applications/new" className="btn btn-secondary">
+              新增應徵
+            </Link>
+            <Link href="/experience" className="btn btn-primary">
+              回經歷資料庫
+            </Link>
+          </div>
         </div>
       )}
     </div>

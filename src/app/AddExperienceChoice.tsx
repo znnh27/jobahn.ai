@@ -16,11 +16,11 @@ type Path = "upload" | "type";
 const COPY = {
   onboarding: {
     upload: { title: "我有履歷，幫我優化", desc: "上傳現有的履歷檔，AI 會拆解整理進經歷資料庫，之後再一條一條幫你加強。" },
-    type: { title: "還沒有履歷，從零寫第一份", desc: "說說你做過的事，AI 會一步步追問，陪你寫出第一份履歷。" },
+    type: { title: "還沒有履歷，從零寫第一份", desc: "說說你做過的事，AI 會從公司和職稱開始一步步追問，陪你寫出第一份履歷。" },
   },
   experience: {
     upload: { title: "新增履歷來源", desc: "用其他軟體另外寫過履歷嗎？上傳之後會自動跟現有內容比對合併，不會重複。" },
-    type: { title: "跟 AI 聊，新增經歷", desc: "腦中有一段經歷還沒整理成文字？直接跟 AI 聊，它會問出細節、幫你寫成專業的履歷寫法。" },
+    type: { title: "跟 AI 聊，新增經歷", desc: "腦中有一段經歷還沒整理成文字？直接跟 AI 聊，它會從公司和職稱開始問出細節，幫你寫成專業的履歷寫法。" },
   },
 } as const;
 
@@ -69,7 +69,16 @@ export function AddExperienceChoice({
               已經新增 {typedCount} 段經歷到經歷資料庫了！
               {mode === "onboarding" ? "可以直接開始寫第一份履歷，或再多加幾段讓內容更完整。" : "可以再新增一段，或回經歷資料庫看看。"}
             </p>
-            <div className="toolbar-inline mt-3">
+            {/* 主按鈕放最右邊。 */}
+            <div className="add-exp-done-actions">
+              {mode === "onboarding" && (
+                <Link href="/experience" className="btn btn-secondary">
+                  查看經歷資料庫
+                </Link>
+              )}
+              <button type="button" className="btn btn-secondary" onClick={() => setPanelOpen(true)}>
+                再新增一段
+              </button>
               {mode === "onboarding" ? (
                 <Link href="/applications/new" className="btn btn-sunny">
                   開始寫第一份履歷
@@ -79,23 +88,12 @@ export function AddExperienceChoice({
                   回經歷資料庫
                 </Link>
               )}
-              <button type="button" className="btn btn-secondary" onClick={() => setPanelOpen(true)}>
-                再新增一段
-              </button>
-              {mode === "onboarding" && (
-                <Link href="/experience" className="link-muted">
-                  查看經歷資料庫
-                </Link>
-              )}
             </div>
           </div>
         )}
 
         {path === "type" && typedCount === 0 && (
           <>
-            <div className="add-exp-start-hint">
-              <p className="text-muted">準備好了就開始，AI 會先問這段經歷的公司和職稱。</p>
-            </div>
             <button type="button" className="btn btn-primary add-exp-start-btn" onClick={() => setPanelOpen(true)}>
               開始
             </button>

@@ -78,7 +78,7 @@ export default async function HomePage() {
             <h1 className="home-hero-greeting-title">
               <span className="home-hero-greeting-hi">Hi!</span> {displayName}
             </h1>
-            <p className="home-hero-greeting-sub">一起來打造一份專業的履歷吧！</p>
+            <p className="home-hero-greeting-sub">和九斑一起打造專業的履歷吧！</p>
           </div>
         </div>
 

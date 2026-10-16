@@ -33,6 +33,7 @@ import { ContactDialog } from "@/app/ContactForm";
 import { CloseIcon, UndoIcon } from "@/app/icons";
 import { computeAtsScore, coveredByResume } from "@/lib/resumes/atsScore";
 import { JdChecklist } from "./JdChecklist";
+import { InfoTip } from "@/app/InfoTip";
 import {
   CoverLetterOptionsFields,
   choiceInvalid,
@@ -97,20 +98,32 @@ function AtsScoreLegend({ score }: { score: number | null }) {
         <div className="ats-scale-bar-segment ats-scale-bar-segment--good" />
         <div className="ats-scale-bar-segment ats-scale-bar-segment--excellent" />
       </div>
-      <ul className="ats-scale-legend">
+      {/* 只攤開目前這一段的意思，四段的完整說明收在標題旁的 ⓘ。 */}
+      {currentBand && (
+        <p className={`ats-scale-legend-item ats-scale-legend-item--current ${currentBand.text}`}>
+          <span className={`ats-scale-dot ${currentBand.dot}`} />
+          <span>
+            {currentBand.min}–{currentBand.max} 分・{currentBand.label}：{currentBand.desc}
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** ATS 評分標題旁 ⓘ 的內容：怎麼算分、四段分數各代表什麼。 */
+function AtsScoreHelp() {
+  return (
+    <>
+      分數照固定公式算：必要條件每項 2 分、加分條件每項 1 分，看履歷寫到幾項。內容沒改，分數就不會變。
+      <ul>
         {ATS_BANDS.map((b) => (
-          <li
-            key={b.label}
-            className={`ats-scale-legend-item ${currentBand?.label === b.label ? `ats-scale-legend-item--current ${b.text}` : ""}`}
-          >
-            <span className={`ats-scale-dot ${b.dot}`} />
-            <span>
-              {b.min}–{b.max} 分・{b.label}：{b.desc}
-            </span>
+          <li key={b.label}>
+            {b.min}–{b.max} 分・{b.label}：{b.desc}
           </li>
         ))}
       </ul>
-    </div>
+    </>
   );
 }
 
@@ -385,7 +398,10 @@ export function Canvas({
         {stepBar}
         <div className="card text-center">
           <p className="text-body">
-            還沒有生成過履歷，按下面按鈕開始生成（會呼叫 AI，依語言版本數量可能要跑一陣子）。
+            還沒有生成過履歷
+            <InfoTip label="生成履歷的說明">
+              按下面的按鈕，AI 會依 JD 從經歷資料庫挑選內容、寫成履歷並評分。每個語言版本大約 1–2 分鐘。
+            </InfoTip>
           </p>
           {generateProgress !== null ? (
             <div className="mt-4">
@@ -570,7 +586,12 @@ export function Canvas({
 
       <div className="canvas-sidebar canvas-sidebar--match">
         <div className="card card--sm">
-          <h2 className="heading-card">ATS 評分（{LANG_LABEL[activeLang]}）</h2>
+          <h2 className="heading-card">
+            ATS 評分（{LANG_LABEL[activeLang]}）
+            <InfoTip label="ATS 評分怎麼算">
+              <AtsScoreHelp />
+            </InfoTip>
+          </h2>
           <p className="ats-score-value">
             {langScore ?? "—"}
             <span className="ats-score-max"> / 100</span>
@@ -580,7 +601,6 @@ export function Canvas({
               </span>
             )}
           </p>
-          <p className="ats-score-note">分數照固定公式算：必要條件每項 2 分、加分條件每項 1 分，看履歷寫到幾項。內容沒改，分數就不會變。</p>
           <AtsScoreLegend score={langScore} />
           <JdChecklist
             items={checklist[activeLang] ?? []}

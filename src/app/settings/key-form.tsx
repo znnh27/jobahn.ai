@@ -19,9 +19,7 @@ export function AnthropicKeyForm({ last4 }: { last4: string | null }) {
       <div className="stack-tight">
         <h2 className="heading-card">Anthropic API Key（選填）</h2>
         <p className="text-muted">
-          預設所有生成功能都會用共用的額度，不需要你另外做任何設定就能直接用。
-          如果你想改用自己的 Claude API Key（例如想自己掌控費用），可以在下面綁定，
-          綁定後你的生成會改用你自己的額度計費。
+          預設所有生成功能都會用共用的額度，不需要另外設定就能直接用。想自己掌控費用的話，可以綁定自己的 Claude API Key，之後生成會改用你的額度計費。
         </p>
       </div>
 

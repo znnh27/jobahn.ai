@@ -1,6 +1,7 @@
 "use client";
 
 import { WORD_LIMIT_MAX, isValidWordLimit, letterLengthUnit, wordLimitMin } from "@/lib/text/letterLength";
+import { InfoTip } from "@/app/InfoTip";
 
 // 生成求職信前要選的東西：語言、各語言的字數上限（選填）、要不要先上網研究這間公司。
 // 履歷頁的「寫求職信」視窗跟求職信頁的空白狀態共用這一組欄位。
@@ -107,9 +108,9 @@ export function CoverLetterOptionsFields({
           />
           <span>
             先上網研究這間公司
-            <span className="text-muted-xs cover-options-hint">
+            <InfoTip label="研究公司的說明">
               讓「為什麼想加入」這段寫得更具體。大約多等 15 秒，也會多用一點 AI 和 Firecrawl 額度。
-            </span>
+            </InfoTip>
           </span>
         </label>
       )}

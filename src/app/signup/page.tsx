@@ -20,7 +20,7 @@ export default async function SignupPage(props: PageProps<"/signup">) {
         </div>
         <div className="auth-card-header">
           <h1 className="heading-auth">註冊</h1>
-          <p className="text-muted">jobahn 你的找工作小助手</p>
+          <p className="text-muted">jobahn 九斑 你的找工作小助手</p>
         </div>
 
         {error && <div className="alert alert-error">{error}</div>}

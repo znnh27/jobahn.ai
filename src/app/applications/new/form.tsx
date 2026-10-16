@@ -5,6 +5,7 @@ import { createApplication, scrapeJobUrlAction } from "./actions";
 import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { companyMentionedInJd } from "@/lib/jobs/companyInJd";
+import { InfoTip } from "../../InfoTip";
 
 type CreateResult = { error?: string };
 
@@ -99,7 +100,10 @@ export function NewApplicationForm() {
 
       <div className="field">
         <label htmlFor="jobDescription" className="label">
-          JD 內容（貼上職缺頁面的文字，或用上面的連結自動抓取）
+          JD 內容
+          <InfoTip label="JD 內容的說明">
+            貼上職缺頁面的文字，或用上面的連結自動抓取。建立後就不能修改（之後只能查看），履歷跟求職信都會照這份內容寫；貼錯的話要刪掉這筆重新新增。
+          </InfoTip>
         </label>
         <textarea
           id="jobDescription"
@@ -109,15 +113,16 @@ export function NewApplicationForm() {
           value={jobDescription}
           onChange={(e) => setJobDescription(e.target.value)}
           className="textarea"
-          aria-describedby="jobDescription-hint"
         />
-        <p id="jobDescription-hint" className="hint-text">
-          ⚠ JD 內容建立後就不能修改（之後只能查看），履歷跟求職信都會照這份內容寫。貼錯的話要刪掉這筆重新新增。
-        </p>
       </div>
 
       <fieldset>
-        <legend className="label">要生成哪個語言版本</legend>
+        <legend className="label">
+          要生成哪個語言版本
+          <InfoTip label="語言版本的說明">
+            語言版本建立後不能再改。公司名稱跟職稱之後還可以在標題旁邊修改。
+          </InfoTip>
+        </legend>
         <div className="checkbox-row">
           <label className="checkbox-label">
             <input type="checkbox" name="language" value="en" />
@@ -128,7 +133,6 @@ export function NewApplicationForm() {
             中文
           </label>
         </div>
-        <p className="hint-text">⚠ 語言版本建立後也不能再改。公司名稱跟職稱之後還可以在標題旁邊修改。</p>
       </fieldset>
 
       {state.error && <p className="text-error">{state.error}</p>}

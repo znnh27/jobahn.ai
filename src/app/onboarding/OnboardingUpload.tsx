@@ -73,7 +73,6 @@ export function OnboardingUpload() {
   return (
     <div className="stack">
       <div>
-        <p className="label">選擇履歷檔案（可多選，docx / doc / pdf，單檔 3MB 以內）</p>
 
         {/* 用原生 <label> 包住選檔欄位，點擊由瀏覽器直接開選檔視窗。以前用程式代按 input.click()，
             但 input 的點擊會冒泡回拖放區再代按一次，Safari 遇到連開兩次會直接取消，視窗就跳不出來。 */}
@@ -139,15 +138,15 @@ export function OnboardingUpload() {
           <p className="text-success">
             經歷資料庫已經開始建立了！你可以直接開始寫第一份履歷，或繼續上傳更多版本讓內容更完整。
           </p>
-          <div className="toolbar-inline mt-3">
-            <Link href="/applications/new" className="btn btn-sunny">
-              開始寫第一份履歷
+          <div className="add-exp-done-actions">
+            <Link href="/" className="btn btn-secondary">
+              回首頁
             </Link>
             <Link href="/experience" className="btn btn-secondary">
               查看經歷資料庫
             </Link>
-            <Link href="/" className="link-muted">
-              回首頁
+            <Link href="/applications/new" className="btn btn-sunny">
+              開始寫第一份履歷
             </Link>
           </div>
         </div>

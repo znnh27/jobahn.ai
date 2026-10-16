@@ -88,3 +88,13 @@ export function ArrowLeftIcon() {
     </svg>
   );
 }
+
+export function InfoIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9.5" />
+      <path d="M12 11v6" />
+      <path d="M12 7.5h.01" />
+    </svg>
+  );
+}

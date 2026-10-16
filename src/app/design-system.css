@@ -901,6 +901,12 @@
   display: flex;
   align-items: flex-start;
   gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-xs);
+}
+
+.ats-scale-legend .ats-scale-legend-item {
+  margin: 0;
 }
 
 .ats-scale-legend-item--current {
@@ -1047,6 +1053,21 @@
 }
 .add-exp-start-btn {
   width: 100%;
+}
+/* 新增經歷完成後的下一步：幾顆按鈕排成一列、平分卡片寬度。
+   主按鈕一律放最後（最右邊）；窄螢幕改直排時反過來，主按鈕在最上面。 */
+.add-exp-done-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.add-exp-done-actions > .btn {
+  flex: 1 1 0;
+}
+@media (max-width: 640px) {
+  .add-exp-done-actions {
+    flex-direction: column-reverse;
+  }
 }
 
 /* 從經歷資料庫進來的「新增經歷」頁左上角：回經歷資料庫。 */
@@ -3279,4 +3300,75 @@ button.step-bar-link:focus-visible {
   font-size: var(--font-xs);
   font-weight: 600;
   color: var(--chrome-muted);
+}
+
+/* ============================================================
+   ⓘ 說明提示（InfoTip.tsx）：標題或欄位旁的小圖示，滑過／鍵盤選到／手機點一下才顯示說明。
+   ============================================================ */
+.info-tip {
+  position: relative;
+  display: inline-flex;
+  margin-left: var(--space-1);
+}
+/* 放了 ⓘ 的標題、標籤：文字跟 ⓘ 上下置中（任何元素只要直接包著 .info-tip 就套用）。 */
+:where(div, p, h1, h2, h3, label, legend):has(> .info-tip) {
+  display: flex;
+  align-items: center;
+}
+span:has(> .info-tip) {
+  display: inline-flex;
+  align-items: center;
+}
+.text-center :has(> .info-tip) {
+  justify-content: center;
+}
+.info-tip-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--chrome-muted-light);
+  cursor: help;
+  transition: color 0.15s ease;
+}
+.info-tip-btn:hover,
+.info-tip-btn:focus-visible,
+.info-tip-btn--open {
+  color: var(--chrome-secondary-text);
+}
+/* 提示框掛在 body 上（InfoTip.tsx 用 fixed 定位），位置算好才顯示。 */
+.info-tip-bubble {
+  position: fixed;
+  z-index: 1000;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-ink);
+  color: var(--chrome-bg);
+  font-family: var(--font-heading);
+  font-size: var(--font-sm);
+  font-weight: 400;
+  line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 8px 24px rgba(15, 36, 48, 0.18);
+  pointer-events: none;
+  visibility: hidden;
+}
+.info-tip-bubble--shown {
+  visibility: visible;
+  animation: info-tip-in 0.15s ease-out;
+}
+@keyframes info-tip-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+/* 提示裡的條列（例如 ATS 分數區間）。 */
+.info-tip-bubble ul {
+  margin: var(--space-1) 0 0;
+  padding-left: 1.1em;
 }
