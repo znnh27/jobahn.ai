@@ -1413,14 +1413,9 @@
    這裡另外補的是「同一件事的不同寫法」需要的分組/標籤/刪除樣式
    ============================================================ */
 
+/* 畫布要跟正式履歷長得一樣：段落之間只用 .resume-block 的間距，不加分隔線。 */
 .exp-entry {
-  margin-bottom: var(--space-6);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--chrome-border);
-}
-
-.exp-entry:last-child {
-  border-bottom: none;
+  margin-bottom: 0;
 }
 
 .exp-role-row {
@@ -1483,6 +1478,25 @@
   font-size: var(--font-xs);
   color: var(--chrome-muted-light);
   cursor: pointer;
+}
+/* 「刪除」不是履歷內容，平常藏起來，滑到那一行（或用鍵盤選到）才出現，跟 Google Docs 一樣。 */
+.exp-variant-remove,
+.exp-role-row-remove {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.exp-variant:hover .exp-variant-remove,
+.exp-role-row:hover .exp-role-row-remove,
+.exp-variant-remove:focus-visible,
+.exp-role-row-remove:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  /* 手機沒有滑鼠，一直顯示。 */
+  .exp-variant-remove,
+  .exp-role-row-remove {
+    opacity: 1;
+  }
 }
 .exp-variant-remove:hover {
   color: var(--color-danger-text-strong);
@@ -1718,6 +1732,8 @@
      完全不套用這組，維持原本的中性色，不要拿掉 --color-neutral-*。 */
   --chrome-bg: #fffcf4;
   --chrome-surface-tint: #fff6d9;
+  /* 比 surface-tint 更淡的米色，用在不能搶過畫布的輔助區塊（例如經歷資料庫右欄的註解欄）。 */
+  --chrome-surface-soft: #fffaeb;
   /* 外框用淡黃，黃色本尊只留給主要按鈕和「目前所在位置」，層級才拉得開。 */
   --chrome-border: #f5e9b8;
   --chrome-border-strong: #f5e9b8;
@@ -3075,6 +3091,12 @@ button.step-bar-link:focus-visible {
   color: var(--chrome-muted);
 }
 
+.scan-note {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-sm);
+  color: var(--color-success-text);
+}
+
 .flag-rail-empty {
   margin: 0;
   padding: var(--space-4);
@@ -3175,6 +3197,65 @@ button.step-bar-link:focus-visible {
     left: 0;
     right: 0;
   }
+}
+
+/* 右欄的寫法標籤（TagRail.tsx）：對齊畫布上那一條。只在寬螢幕兩欄時顯示，單欄時沒地方對齊就不顯示。 */
+.tag-rail {
+  display: none;
+  position: relative;
+}
+@media (min-width: 1240px) {
+  .tag-rail {
+    display: block;
+    animation: tag-rail-in 0.35s ease-out;
+  }
+}
+@keyframes tag-rail-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 每段經歷一個淺色底塊（對齊畫布上那段經歷），裡面是公司名稱跟每條寫法的標籤。 */
+.tag-rail-block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--radius-lg);
+  background: var(--chrome-surface-soft);
+}
+.tag-rail-org {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  margin: 0;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--chrome-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 標籤：左邊一條短色條＋文字，對齊畫布上那一條。 */
+.tag-rail-tag {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  padding: 1px 0 1px 10px;
+  border-left: 3px solid var(--chrome-accent);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  color: var(--chrome-text);
+  cursor: default;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.tag-rail-tag--hover {
+  background: color-mix(in srgb, var(--chrome-accent) 40%, transparent);
+  color: var(--chrome-ink);
+}
+/* 滑過標籤時，畫布上對應的那一條淡淡標亮。 */
+/* 跟右欄底塊同一個米黃色，看得出是同一組。 */
+.exp-variant--tag-hover {
+  background: var(--chrome-surface-soft);
 }
 
 /* 畫布上有建議的 bullet：左邊一條琥珀色細線；對應的卡片被點選時整條標亮。 */

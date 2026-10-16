@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { ExperienceCanvas, type ExperienceEntry, type HighlightTarget } from "./ExperienceCanvas";
 import Link from "next/link";
 import { FlagRail } from "./FlagRail";
+import { TagRail } from "./TagRail";
+import { InfoTip } from "@/app/InfoTip";
+import { activeStoredFlag } from "@/lib/experience/storedFlag";
 import { ElicitationPanel } from "./ElicitationPanel";
 import { LangSwitch } from "@/app/LangSwitch";
 import { LayoutMenu } from "@/app/LayoutMenu";
@@ -32,6 +35,20 @@ type PanelState = { mode: "refine"; seed: RefineSeed } | null;
 
 type LayoutMap = Partial<Record<"zh" | "en", ResumeLayoutSettings>>;
 
+/** 上次檢查存下來、還沒處理的建議（重新整理頁面後也要在）。 */
+function storedFlags(entries: ExperienceEntry[]): ScanFlag[] {
+  return entries.flatMap((entry) =>
+    entry.achievements.flatMap((ach) =>
+      ach.variants.flatMap((v, variantIndex) => {
+        const f = activeStoredFlag(v);
+        return f
+          ? [{ entryId: entry.id, achievementId: ach.id, variantIndex, text: v.text, suggestion: f.suggestion, rewrite: f.rewrite }]
+          : [];
+      }),
+    ),
+  );
+}
+
 export function ExperiencePageClient({
   entries,
   initialLayouts,
@@ -46,11 +63,18 @@ export function ExperiencePageClient({
   const [activeFlagKey, setActiveFlagKey] = useState<string | null>(null);
   const [activeLanguage, setActiveLanguage] = useState<"zh" | "en">("zh");
   const [highlight, setHighlight] = useState<HighlightTarget | null>(null);
-  const [flags, setFlags] = useState<ScanFlag[]>([]);
+  const [flags, setFlags] = useState<ScanFlag[]>(() => storedFlags(entries));
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   // 檢查完沒有任何建議時的說明（例如「全部都通過了」），有建議時不顯示。
   const [scanNote, setScanNote] = useState<string | null>(null);
+
+  // 檢查結果的說明顯示幾秒就收起來。
+  useEffect(() => {
+    if (!scanNote) return;
+    const timer = setTimeout(() => setScanNote(null), 6000);
+    return () => clearTimeout(timer);
+  }, [scanNote]);
   // done：跑完幾批；batches：總共幾批（第一批回來前不知道總數，先當 1 批）；creep：目前這批跑到幾成（0–0.9）。
   const [scan, setScan] = useState<{ done: number; batches: number } | null>(null);
   const [creep, setCreep] = useState(0);
@@ -234,6 +258,7 @@ export function ExperiencePageClient({
               }
             />
           )}
+          {scanNote && scanProgress === null && <p className="scan-note">{scanNote}</p>}
           <ExperienceCanvas
             entries={entries}
             language={activeLanguage}
@@ -245,11 +270,19 @@ export function ExperiencePageClient({
           />
         </div>
 
-        {/* 右欄：檢查建議的註解卡片，每張對齊畫布上對應的那一條（像 Google Docs 的註解）。 */}
+        {/* 右欄有兩種狀態：
+            - 有檢查建議（審閱模式）：只放建議卡片，每張對齊畫布上對應的那一條（像 Google Docs 的註解）。
+            - 建議都處理完（套用或 ✕ 忽略）：換成每條寫法的角度標籤，一樣對齊那一條。
+            兩種一起放會互相推擠、對不齊，所以一次只顯示一種。 */}
         <div className="canvas-sidebar canvas-sidebar--rail">
           {visibleFlags.length > 0 ? (
             <>
-              <p className="flag-rail-summary">找到 {visibleFlags.length} 條建議加強</p>
+              <p className="flag-rail-summary">
+                還有 {visibleFlags.length} 條建議
+                <InfoTip label="建議的說明">
+                  每條按 ✓ 套用改寫、按 ✕ 忽略，或點「跟 AI 聊」補資訊。全部處理完，右欄會換回每條寫法的角度標籤。
+                </InfoTip>
+              </p>
               <FlagRail
                 flags={visibleFlags}
                 entries={entries}
@@ -260,12 +293,8 @@ export function ExperiencePageClient({
                 onRefine={openRefine}
               />
             </>
-          ) : scanNote ? (
-            <p className="flag-rail-empty">{scanNote}</p>
           ) : (
-            <p className="flag-rail-empty">
-              按「檢查整份經歷資料庫」，AI 會照履歷寫作規則逐條檢查錯字、太籠統、流水帳的寫法，建議會出現在這裡，對齊對應的那一條。之前通過、之後沒改過的不會重複檢查。
-            </p>
+            <TagRail entries={entries.filter((e) => e.language === activeLanguage)} />
           )}
         </div>
       </div>

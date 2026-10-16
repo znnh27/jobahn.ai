@@ -4,6 +4,8 @@ import { useState } from "react";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { ResumePaper } from "@/app/ResumePaper";
 import type { ResumeLayoutSettings } from "@/lib/resumes/typography";
+import { getSectionLabels } from "@/lib/resumes/sectionLabels";
+import type { StoredFlag } from "@/lib/experience/storedFlag";
 import {
   updateEntryFieldAction,
   updatePeriodAction,
@@ -24,8 +26,9 @@ export interface ExperienceEntry {
   periodVariants: { period: string; source: string[] }[];
   achievements: {
     id: string;
-    /** reviewedText：上次通過檢查（或使用者按 ✕ 不改）時的文字；跟 text 不一樣就代表之後改過，要重新檢查。 */
-    variants: { text: string; angleLabel: string; source: string; reviewedText?: string }[];
+    /** reviewedText：上次通過檢查（或使用者按 ✕ 不改）時的文字；跟 text 不一樣就代表之後改過，要重新檢查。
+     *  flag：上次檢查給的建議（見 lib/experience/storedFlag.ts）。 */
+    variants: { text: string; angleLabel: string; source: string; reviewedText?: string; flag?: StoredFlag }[];
   }[];
 }
 
@@ -84,6 +87,7 @@ export function ExperienceCanvas({
     );
   }
 
+  const labels = getSectionLabels(language);
   const workEntries = langEntries.filter((e) => e.entryType === "work");
   const leadershipEntries = langEntries.filter((e) => e.entryType !== "work");
 
@@ -91,7 +95,7 @@ export function ExperienceCanvas({
     <ResumePaper language={language} layout={layout}>
       {workEntries.length > 0 && (
         <>
-          <div className="resume-section-header">工作經歷</div>
+          <div className="resume-section-header">{labels.experience}</div>
           {workEntries.map((entry) => (
             <EntryBlock
               key={entry.id}
@@ -107,7 +111,7 @@ export function ExperienceCanvas({
 
       {leadershipEntries.length > 0 && (
         <>
-          <div className="resume-section-header">領導經驗／專案</div>
+          <div className="resume-section-header">{labels.leadership}</div>
           {leadershipEntries.map((entry) => (
             <EntryBlock
               key={entry.id}
@@ -155,7 +159,8 @@ function EntryBlock({
   const period = entry.periodVariants[0]?.period ?? "";
 
   return (
-    <div className="exp-entry resume-block">
+    // 右欄的註解欄（TagRail）用 data-entry-key 對齊到這段經歷。
+    <div className="exp-entry resume-block" data-entry-key={entry.id}>
       <div className="resume-row">
         <EditableSpan
           className="resume-row-left"
@@ -224,6 +229,8 @@ function EntryBlock({
                     key={vi}
                     className={`exp-variant ${highlightClass} ${flagClass}`}
                     data-flag-key={flag ? key : undefined}
+                    // 右欄的寫法標籤（TagRail）用這個對齊到這一條。
+                    data-variant-key={key}
                     // 點有標記的這一條，右欄對應的卡片會亮起來並對齊過來（反過來點卡片也會捲到這一條）。
                     onClick={
                       flag
@@ -241,7 +248,6 @@ function EntryBlock({
                         value={v.text}
                         onCommit={(text) => updateAchievementVariantAction(entry.id, ach.id, vi, text)}
                       />
-                      <span className="exp-variant-tag">{v.angleLabel}</span>
                     </div>
                     <button
                       type="button"

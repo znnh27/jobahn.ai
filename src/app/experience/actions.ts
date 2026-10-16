@@ -1,5 +1,6 @@
 "use server";
 
+import { activeStoredFlag, type StoredFlag } from "@/lib/experience/storedFlag";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { readLayoutSettings, type ResumeLayoutSettings } from "@/lib/resumes/typography";
@@ -545,7 +546,7 @@ export interface ReviewedVariant {
   text: string;
 }
 
-type StoredVariant = { text: string; angleLabel?: string; source?: string; reviewedText?: string };
+type StoredVariant = { text: string; angleLabel?: string; source?: string; reviewedText?: string; flag?: StoredFlag };
 
 /** 已經通過檢查、之後沒再改過的寫法：reviewedText 跟目前文字一樣。這種不用再檢查一次。 */
 function isReviewed(v: StoredVariant) {
@@ -583,15 +584,30 @@ export async function scanExperienceDbAction(
         variantIndex,
         text: v.text,
         reviewed: isReviewed(v),
+        stored: activeStoredFlag(v),
       })),
     ),
   );
-  const flat = all.filter((f) => !f.reviewed);
+  // 上次檢查過、文字沒改的建議直接沿用（只在第一批回傳一次），不再送給 AI。
+  const storedFlags: ScanFlag[] =
+    offset === 0
+      ? all
+          .filter((f) => !f.reviewed && f.stored)
+          .map((f) => ({
+            entryId: f.entryId,
+            achievementId: f.achievementId,
+            variantIndex: f.variantIndex,
+            text: f.text,
+            suggestion: f.stored!.suggestion,
+            rewrite: f.stored!.rewrite,
+          }))
+      : [];
+  const flat = all.filter((f) => !f.reviewed && !f.stored);
 
   const total = flat.length;
   const reviewedCount = all.length - flat.length;
   const batch = flat.slice(offset, offset + limit);
-  if (batch.length === 0) return { flags: [], passed: [], total, reviewedCount };
+  if (batch.length === 0) return { flags: storedFlags, passed: [], total, reviewedCount };
 
   const { askClaude } = await import("@/lib/ai/askClaude");
   const { BULLET_RULES } = await import("@/lib/experience/bulletRules");
@@ -653,7 +669,37 @@ ${BULLET_RULES}
     .filter((_, i) => !flaggedIndexes.has(i))
     .map(({ entryId, achievementId, variantIndex, text }) => ({ entryId, achievementId, variantIndex, text }));
 
-  return { flags, passed, total, reviewedCount };
+  // 建議存回那一條（只加欄位，不動文字跟順序，後面幾批的編號不受影響）。
+  await saveFlags(supabase, user.id, flags);
+
+  return { flags: [...storedFlags, ...flags], passed, total, reviewedCount };
+}
+
+async function saveFlags(supabase: Awaited<ReturnType<typeof createClient>>, userId: string, flags: ScanFlag[]) {
+  const byEntry = new Map<string, ScanFlag[]>();
+  for (const f of flags) byEntry.set(f.entryId, [...(byEntry.get(f.entryId) ?? []), f]);
+  for (const [entryId, list] of byEntry) {
+    const { data: row } = await supabase
+      .from("experience_entries")
+      .select("achievements")
+      .eq("id", entryId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!row) continue;
+    const achievements = Array.isArray(row.achievements) ? row.achievements : [];
+    let changed = false;
+    for (const f of list) {
+      const ach = achievements.find((a: { id: string }) => a.id === f.achievementId);
+      const v: StoredVariant | undefined = ach?.variants?.[f.variantIndex];
+      if (v && v.text === f.text) {
+        v.flag = { text: f.text, suggestion: f.suggestion, rewrite: f.rewrite };
+        changed = true;
+      }
+    }
+    if (changed) {
+      await supabase.from("experience_entries").update({ achievements }).eq("id", entryId).eq("user_id", userId);
+    }
+  }
 }
 
 /** 把這幾條標成「已經檢查過」（通過、或使用者按 ✕ 決定不改）。只在文字還跟當時一樣時才標，

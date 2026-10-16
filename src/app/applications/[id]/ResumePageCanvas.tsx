@@ -5,31 +5,14 @@ import { ResumePaper } from "@/app/ResumePaper";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { contactParts, hasRequiredContact, pickName, type ResumeContact } from "@/lib/resumes/contact";
 import { pdfKey, ptToPx, resolveMetrics, type PdfFit, type ResumeSectionKey } from "@/lib/resumes/typography";
+import { getSectionLabels } from "@/lib/resumes/sectionLabels";
 
 type Resume = GeneratedResume["resume"];
 type ExperienceEntry = Resume["work_experience"][number];
 
-const LABELS: Record<string, Record<string, string>> = {
-  en: {
-    summary: "PROFESSIONAL SUMMARY",
-    experience: "PROFESSIONAL EXPERIENCE",
-    leadership: "LEADERSHIP EXPERIENCE / PROJECTS",
-    education: "EDUCATION",
-    skills: "ADDITIONAL INFORMATION",
-    computer: "Computer:",
-  },
-  zh: {
-    summary: "專業摘要",
-    experience: "工作經歷",
-    leadership: "領導經驗／專案",
-    education: "學歷",
-    skills: "其他資訊",
-    computer: "技能：",
-  },
-};
 
 function getLabels(language: string) {
-  return LABELS[language] ?? LABELS.en;
+  return getSectionLabels(language);
 }
 
 /** 畫布寬 794px 對應 A4 寬（96 dpi），紙本身見 ResumePaper。 */
