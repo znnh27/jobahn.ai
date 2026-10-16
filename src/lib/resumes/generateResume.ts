@@ -4,6 +4,8 @@ import { askClaude } from "@/lib/ai/askClaude";
 import { BULLET_RULES } from "@/lib/experience/bulletRules";
 import { computeAtsScore, type JdImportance } from "./atsScore";
 import { resolveJdItems, type JdBaseItem } from "./jdChecklist";
+import { readContact, type ResumeContact } from "./contact";
+import { resolveMetrics } from "./typography";
 import { readLayoutDefaults, type ResumeLayoutSettings } from "./typography";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { toTraditional } from "@/lib/text/toTraditional";
@@ -22,8 +24,8 @@ const WRITING_RULES = `${BULLET_RULES}
 
 排履歷的規則（一定要遵守）：
 1. 規則 6 的「依目標 JD 決定留不留」：這次的目標 JD 就是下面給的 JD。
-2. 每段工作經歷最多 4 條 bullet，只放對這個職缺有幫助的內容，其餘略過不用全部塞進去。每段經歷裡的 bullet 依跟這份 JD 的相關度排序，最相關的放最前面。
-3. 履歷內容要能一頁 A4 呈現，不要塞得過多過滿。放不下時，優先拿掉跟這份 JD 關聯度最低的內容（通常是最舊、或最不相關的經歷），不要每一句都砍幾個字讓全部內容都變得倉促。
+2. 每段經歷的 bullet 依跟這份 JD 的相關度排序，最相關的放最前面。跟 JD 最相關的那段經歷最多 6 條，其他每段最多 4 條。
+3. 目標是剛好一頁 A4：內容不夠時，依跟 JD 的相關度補上更多經歷和 bullet（包含跟 JD 沒那麼直接、但能展現能力的經歷），不要留下大片空白。真的放不下才取捨，優先拿掉跟這份 JD 關聯度最低的內容（通常是最舊、或最不相關的經歷），不要每一句都砍幾個字讓全部內容都變得倉促。
 4. JD 原文用字要盡量真的出現在履歷裡（不是只有意思接近），但要放在具體案例的敘述裡（見規則 7），前提是使用者真的有對應的真實經歷可以支撐，不能為了關鍵字硬掰。
 5. 同一段經歷可以依這份 JD 換敘事角度（例如投系統規劃職缺強調規劃，投行銷職缺強調成長數據），但底層事實跟程度不能變。`;
 
@@ -240,7 +242,16 @@ export async function generateResumeForApplication(
     // 經歷資料庫調過字級／上下間距的話，新履歷直接用那個設定。
     const defaultLayout = layoutDefaults[lang as "zh" | "en"];
     if (defaultLayout) resume.layout = defaultLayout;
-    resumeDraft[lang] = resume;
+    // 用下載時同一套排版量，調到剛好一頁：沒填滿就補內容、超出就拿掉最不相關的。
+    resumeDraft[lang] = await fitOnePage({
+      supabase,
+      userId,
+      lang,
+      resume,
+      contact: readContact(profile?.data),
+      basePrompt: userPrompt,
+    });
+    const filled = resumeDraft[lang];
 
     // 檢查清單／評分一律走同一個評分函式（跟 rescore 共用），不要讓生成當下的評分
     // 跟之後 rescore 用不同的 prompt 各自判斷，否則同一份內容兩次評分結果會兜不起來。
@@ -249,7 +260,7 @@ export async function generateResumeForApplication(
       userId,
       jd: application.job_description,
       language: lang,
-      resumeContent: resume,
+      resumeContent: filled,
       items: itemsForLanguage(existingChecklists[lang], sharedItems),
       previousJudgments: [],
       // 整份重新生成，內容全換了，不拿上一版比對，每一項都重新判斷。
@@ -258,7 +269,7 @@ export async function generateResumeForApplication(
     checklists[lang] = scored.jd_match_checklist;
     atsScores[lang] = scored.ats_score;
     atsGaps[lang] = scored.ats_gaps;
-    basis.resume[lang] = resume;
+    basis.resume[lang] = filled;
   }
 
   const { error: updateError } = await supabase
@@ -509,6 +520,103 @@ export async function rescoreResumeForApplication(
     .eq("user_id", userId);
 
   if (updateError) throw new Error(`儲存評分結果失敗：${updateError.message}`);
+}
+
+/** 一頁填不到這個比例就補內容。 */
+const MIN_FILL_RATIO = 0.85;
+
+/**
+ * 生成完用下載時同一套程式排 PDF 量版面，調到剛好一頁：
+ * - 第一頁用不到 85%：請 AI 從經歷資料庫補內容，告訴它大約還剩幾行（最多補一次）。
+ *   補完超出一頁、或沒有變多，就用原本的版本。
+ * - 超出一頁：請 AI 拿掉跟 JD 最不相關的內容，告訴它要拿掉幾行（最多兩輪）。
+ *   還是超出就留超出最少的那版，畫布上會照常顯示超出一頁的提示。
+ */
+async function fitOnePage(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  lang: string;
+  resume: Resume;
+  contact: ResumeContact;
+  /** 生成時的完整 prompt（JD、經歷資料庫、個人資料），調整時沿用。 */
+  basePrompt: string;
+}): Promise<Resume> {
+  const { measureResumePdf } = await import("@/lib/documents/measureResumePdf");
+  const { BODY_WIDTH_PT } = await import("@/lib/documents/ResumePdfDocument");
+  const measure = (r: Resume) => measureResumePdf({ contact: params.contact, resume: r, language: params.lang });
+  const metrics = resolveMetrics(params.lang, params.resume.layout);
+  const contentHeight = 841.89 - 36 * 2;
+  const charsPerLine =
+    params.lang === "zh"
+      ? `中文大約 ${Math.floor(BODY_WIDTH_PT / metrics.body)} 個字`
+      : `英文大約 ${Math.floor(BODY_WIDTH_PT / (metrics.body * 0.5))} 個字元`;
+
+  const ask = async (resume: Resume, task: string[]): Promise<Resume | null> => {
+    const response = await askClaude({
+      userId: params.userId,
+      feature: "resume_fit_page",
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: [
+        params.basePrompt,
+        `===== 目前的履歷 =====`,
+        JSON.stringify({ ...resume, layout: undefined }, null, 2),
+        `===== 這次要做的事 =====`,
+        ...task,
+        `- 不能編造經歷資料庫裡沒有的事實。`,
+        `- 輸出整份履歷（格式跟原本完全一樣），不是只輸出改動的部分。`,
+      ].join("\n\n"),
+      maxTokens: 8000,
+      supabase: params.supabase,
+    });
+    try {
+      const next = parseJsonResponse<Resume>(response.text);
+      if (params.lang === "zh") polishChinese(next);
+      next.layout = resume.layout;
+      return next;
+    } catch {
+      return null;
+    }
+  };
+
+  let current = params.resume;
+  let fit;
+  try {
+    fit = await measure(current);
+  } catch {
+    return current; // 量不到版面就不調，不影響生成。
+  }
+
+  // 超出一頁：拿掉最不相關的內容。
+  for (let round = 0; fit.pages > 1 && round < 2; round++) {
+    const cutLines = Math.ceil(fit.overflowPt / metrics.line) + 1;
+    const next = await ask(current, [
+      `這份履歷超出一頁 A4 大約 ${cutLines} 行（每行${charsPerLine}）。請拿掉至少 ${cutLines} 行的內容，讓它剛好一頁：`,
+      `- 優先整條拿掉跟 JD 最不相關的 bullet；還不夠再拿掉最舊、最不相關的經歷。`,
+      `- 不要把每一句都砍幾個字，剩下的內容原則上不要改寫。`,
+    ]);
+    if (!next) break;
+    const nextFit = await measure(next).catch(() => null);
+    if (!nextFit) break;
+    if (nextFit.pages < fit.pages || nextFit.overflowPt < fit.overflowPt) {
+      current = next;
+      fit = nextFit;
+    } else {
+      break;
+    }
+  }
+  if (fit.pages > 1 || fit.fillRatio >= MIN_FILL_RATIO) return current;
+
+  // 一頁沒填滿：從經歷資料庫補內容（留 2 行緩衝，避免剛好擠到第二頁）。
+  const spareLines = Math.max(0, Math.floor(((1 - fit.fillRatio) * contentHeight) / metrics.line) - 2);
+  const expanded = await ask(current, [
+    `這份履歷只用了一頁 A4 的 ${Math.round(fit.fillRatio * 100)}%，下面還空著大約 ${spareLines} 行（每行${charsPerLine}）。請從經歷資料庫補上內容，把這些空間用掉，但不能超過 ${spareLines} 行：`,
+    `- 優先補回被略過、但跟 JD 有關的經歷或 bullet；其次是能展現能力的其他經歷。`,
+    `- 已經寫好的內容原則上不要改，只新增。`,
+  ]);
+  if (!expanded) return current;
+  const after = await measure(expanded).catch(() => null);
+  if (!after || after.pages > 1 || after.fillRatio <= fit.fillRatio) return current;
+  return expanded;
 }
 
 function buildUserPrompt(params: {

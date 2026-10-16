@@ -152,4 +152,6 @@ export interface PdfFit {
   overflowPt: number;
   /** 第一個（或第一個被切開的）落到第二頁的內容。 */
   breakAt: { key: string; linesBefore: number } | null;
+  /** 第一頁內容區用了幾成（0–1，超出一頁就是 1）。生成履歷時用來判斷要不要補內容。 */
+  fillRatio: number;
 }

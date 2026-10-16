@@ -1,6 +1,9 @@
 import "server-only";
 import { pdf } from "@react-pdf/renderer";
 import { PAGE_PADDING_PT, ResumePdfDocument } from "./ResumePdfDocument";
+
+/** A4 高度（pt）。 */
+const PAGE_HEIGHT_PT = 841.89;
 import type { ResumeDocInput } from "./resumeDocContent";
 import { resolveMetrics, type PdfFit } from "@/lib/resumes/typography";
 
@@ -52,7 +55,12 @@ export async function measureResumePdf(input: ResumeDocInput): Promise<PdfFit> {
     collectKeyed(page, placed);
     return placed;
   });
-  if (pages.length <= 1) return { pages: pages.length, overflowPt: 0, breakAt: null };
+  if (pages.length <= 1) {
+    // 第一頁用了多高：最下面那一行的底部，扣掉上方留白，除以內容區高度。
+    const bottom = Math.max(PAGE_PADDING_PT, ...(pages[0] ?? []).map((p) => p.bottom));
+    const fillRatio = (bottom - PAGE_PADDING_PT) / (PAGE_HEIGHT_PT - PAGE_PADDING_PT * 2);
+    return { pages: pages.length, overflowPt: 0, breakAt: null, fillRatio: Math.min(1, Math.max(0, fillRatio)) };
+  }
 
   const overflowPt = pages
     .slice(1)
@@ -69,5 +77,5 @@ export async function measureResumePdf(input: ResumeDocInput): Promise<PdfFit> {
       linesBefore: onFirstPage ? Math.round((onFirstPage.bottom - onFirstPage.top) / line) : 0,
     };
   }
-  return { pages: pages.length, overflowPt: Math.round(overflowPt), breakAt };
+  return { pages: pages.length, overflowPt: Math.round(overflowPt), breakAt, fillRatio: 1 };
 }
