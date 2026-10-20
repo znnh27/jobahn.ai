@@ -1,6 +1,7 @@
 "use server";
 
 import { activeStoredFlag, type StoredFlag } from "@/lib/experience/storedFlag";
+import { readRuleTags, stripRuleRefs } from "@/lib/experience/bulletRules";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { readLayoutSettings, type ResumeLayoutSettings } from "@/lib/resumes/typography";
@@ -541,6 +542,8 @@ export interface ScanFlag {
   suggestion: string;
   /** AI 直接給的改寫版本（按 ✓ 就套用）。沒辦法只靠現有內容改好（例如缺數字）時可能是 null。 */
   rewrite: string | null;
+  /** 違反了哪幾類規則（BULLET_RULE_TAGS 的代號），卡片上顯示成標籤。舊的建議沒有。 */
+  rules?: string[];
 }
 
 export interface ReviewedVariant {
@@ -580,6 +583,10 @@ export async function scanExperienceDbAction(
   if (error) return { error: error.message };
   if (!entries || entries.length === 0) return { flags: [], passed: [], total: 0, reviewedCount: 0 };
 
+  // 使用者關掉的提醒類別：AI 不用檢查這幾類，回來的建議也濾掉。
+  const muted = await loadMutedRules(supabase, user.id);
+  const unmuted = (rules: string[] | undefined) => (rules ?? []).filter((r) => !muted.has(r));
+
   const all = entries.flatMap((entry) =>
     (entry.achievements ?? []).flatMap((ach: { id: string; variants: StoredVariant[] }) =>
       ach.variants.map((v, variantIndex: number) => ({
@@ -596,14 +603,16 @@ export async function scanExperienceDbAction(
   const storedFlags: ScanFlag[] =
     offset === 0
       ? all
-          .filter((f) => !f.reviewed && f.stored)
+          // 有標籤、而且標籤全被關掉的建議不顯示（之後打開又會出現）。
+          .filter((f) => !f.reviewed && f.stored && !(f.stored.rules?.length && unmuted(f.stored.rules).length === 0))
           .map((f) => ({
             entryId: f.entryId,
             achievementId: f.achievementId,
             variantIndex: f.variantIndex,
             text: f.text,
-            suggestion: f.stored!.suggestion,
+            suggestion: stripRuleRefs(f.stored!.suggestion),
             rewrite: f.stored!.rewrite,
+            rules: unmuted(f.stored!.rules),
           }))
       : [];
   const flat = all.filter((f) => !f.reviewed && !f.stored);
@@ -614,20 +623,24 @@ export async function scanExperienceDbAction(
   if (batch.length === 0) return { flags: storedFlags, passed: [], total, reviewedCount };
 
   const { askClaude } = await import("@/lib/ai/askClaude");
-  const { BULLET_RULES } = await import("@/lib/experience/bulletRules");
+  const { BULLET_RULES, RULE_TAG_INSTRUCTIONS, BULLET_RULE_TAGS } = await import("@/lib/experience/bulletRules");
+  const mutedNames = BULLET_RULE_TAGS.filter((t) => muted.has(t.id)).map((t) => `${t.id}（${t.name}）`);
   const { toTraditional } = await import("@/lib/text/toTraditional");
+  const { toFullWidthPunctuation } = await import("@/lib/text/fullWidthPunctuation");
   const systemPrompt = `你是履歷內容品質檢查助手。使用者會給你經歷資料庫裡一批 bullet 的清單（每條有編號），照下面的規則逐條檢查。這是經歷資料庫，還沒有目標 JD。
 
 ${BULLET_RULES}
 
 另外也要抓錯字：不管中文英文，明顯的錯字、漏字、重複字都要標記，suggestion 直接指出錯在哪個字、應該是什麼。
 
+${RULE_TAG_INSTRUCTIONS}
+${mutedNames.length > 0 ? `\n使用者已經關掉這幾類提醒，這幾類的問題不用標記，也不用在 suggestion 提到：${mutedNames.join("、")}。\n` : ""}
 每條都用同一套標準，不要因為前後文放寬或收緊。全部符合就是通過，不用列出來；有任何一條不符合就要列出：
-- suggestion：用繁體中文一兩句話講清楚問題在哪（同一條有好幾個問題都要提到）。
+- suggestion：用繁體中文一兩句話講清楚問題在哪（同一條有好幾個問題都要提到）。清單的 [0]、[1] 編號只是給你對照用，使用者看不到，提到別條時引用那條開頭幾個字（例如「跟「Rebuilt the corporate…」那條重複」），不要寫「第 6 條」。中文句子用全形標點。
 - rewrite：直接給一個照規則改好的版本，語言跟原文相同，中文一律繁體。只能用原文裡已經有的事實跟數字，不要編造；如果問題是缺數字、光靠原文改不好，rewrite 還是先把結構改對，並在 suggestion 提醒「補上數字會更好，可以點『跟 AI 聊』補」。只有錯字的話，rewrite 就是改好錯字的原文。
 
 只輸出 JSON，不要其他文字：
-{ "flags": [{ "index": number, "suggestion": string, "rewrite": string | null }] }`;
+{ "flags": [{ "index": number, "rules": string[], "suggestion": string, "rewrite": string | null }] }`;
 
   const userPrompt = batch.map((f, i) => `[${i}] ${f.text}`).join("\n");
 
@@ -646,7 +659,7 @@ ${BULLET_RULES}
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/```\s*$/i, "");
 
-  let parsed: { flags: { index: number; suggestion: string; rewrite?: string | null }[] };
+  let parsed: { flags: { index: number; rules?: unknown; suggestion: string; rewrite?: string | null }[] };
   try {
     parsed = JSON.parse(cleaned) as typeof parsed;
   } catch {
@@ -658,6 +671,10 @@ ${BULLET_RULES}
   for (const f of parsed.flags ?? []) {
     const item = batch[f.index];
     if (!item) continue;
+    const tagged = readRuleTags(f.rules);
+    const rules = unmuted(tagged);
+    // 只違反了被關掉的類別：當成通過。
+    if (tagged.length > 0 && rules.length === 0) continue;
     flaggedIndexes.add(f.index);
     const rewrite = f.rewrite?.trim() ? toTraditional(f.rewrite.trim()) : null;
     flags.push({
@@ -665,8 +682,9 @@ ${BULLET_RULES}
       achievementId: item.achievementId,
       variantIndex: item.variantIndex,
       text: item.text,
-      suggestion: toTraditional(f.suggestion),
+      suggestion: toFullWidthPunctuation(stripRuleRefs(toTraditional(f.suggestion))),
       rewrite: rewrite && rewrite !== item.text ? rewrite : null,
+      rules,
     });
   }
   const passed: ReviewedVariant[] = batch
@@ -696,7 +714,7 @@ async function saveFlags(supabase: Awaited<ReturnType<typeof createClient>>, use
       const ach = achievements.find((a: { id: string }) => a.id === f.achievementId);
       const v: StoredVariant | undefined = ach?.variants?.[f.variantIndex];
       if (v && v.text === f.text) {
-        v.flag = { text: f.text, suggestion: f.suggestion, rewrite: f.rewrite };
+        v.flag = { text: f.text, suggestion: f.suggestion, rewrite: f.rewrite, rules: f.rules };
         changed = true;
       }
     }
@@ -971,4 +989,30 @@ export async function saveBackgroundInterviewAction(
   } catch (e) {
     return { error: e instanceof Error ? e.message : "整理失敗" };
   }
+}
+
+/** 使用者關掉的提醒類別（profile_data.data.muted_rules），只影響「檢查」，不影響生成履歷。 */
+async function loadMutedRules(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<Set<string>> {
+  const { data } = await supabase.from("profile_data").select("data").eq("user_id", userId).maybeSingle();
+  return new Set(readRuleTags(data?.data?.muted_rules));
+}
+
+/** 建議卡片的「這類不用再提醒」，以及經歷資料庫上的「恢復提醒」。 */
+export async function setRuleMutedAction(ruleId: string, muted: boolean): Promise<{ error?: string; mutedRules?: string[] }> {
+  if (readRuleTags([ruleId]).length === 0) return { error: "不認得的提醒類別" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const { data: existing } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
+  const data = existing?.data ?? {};
+  const current = new Set(readRuleTags(data.muted_rules));
+  if (muted) current.add(ruleId);
+  else current.delete(ruleId);
+  const mutedRules = [...current];
+  const { error } = await supabase.from("profile_data").upsert({ user_id: user.id, data: { ...data, muted_rules: mutedRules } });
+  if (error) return { error: error.message };
+  return { mutedRules };
 }

@@ -7,6 +7,7 @@ import { FlagRail } from "./FlagRail";
 import { TagRail } from "./TagRail";
 import { InfoTip } from "@/app/InfoTip";
 import { activeStoredFlag } from "@/lib/experience/storedFlag";
+import { BULLET_RULE_TAGS, stripRuleRefs } from "@/lib/experience/bulletRules";
 import { ElicitationPanel } from "./ElicitationPanel";
 import { LangSwitch } from "@/app/LangSwitch";
 import { LayoutMenu } from "@/app/LayoutMenu";
@@ -18,6 +19,7 @@ import {
   markVariantsReviewedAction,
   saveDefaultLayoutAction,
   scanExperienceDbAction,
+  setRuleMutedAction,
   type ReviewedVariant,
   type ScanFlag,
 } from "./actions";
@@ -43,31 +45,54 @@ function storedFlags(entries: ExperienceEntry[]): ScanFlag[] {
       ach.variants.flatMap((v, variantIndex) => {
         const f = activeStoredFlag(v);
         return f
-          ? [{ entryId: entry.id, achievementId: ach.id, variantIndex, text: v.text, suggestion: f.suggestion, rewrite: f.rewrite }]
+          ? [
+              {
+                entryId: entry.id,
+                achievementId: ach.id,
+                variantIndex,
+                text: v.text,
+                suggestion: stripRuleRefs(f.suggestion),
+                rewrite: f.rewrite,
+                rules: f.rules,
+              },
+            ]
           : [];
       }),
     ),
   );
 }
 
+/** 建議只剩被關掉的類別就不顯示；舊的建議沒有標籤，照常顯示。 */
+function withoutMuted(flags: ScanFlag[], muted: string[]): ScanFlag[] {
+  return flags.flatMap((f) => {
+    if (!f.rules?.length) return [f];
+    const rules = f.rules.filter((r) => !muted.includes(r));
+    return rules.length > 0 ? [{ ...f, rules }] : [];
+  });
+}
+
 export function ExperiencePageClient({
   entries,
   background,
   initialLayouts,
+  initialMutedRules,
 }: {
   entries: ExperienceEntry[];
   /** 經歷以外的 Summary、學歷、技能、語言（每個語言各一份）。 */
   background: ProfileBackground;
   /** 使用者調過的字級／上下間距（存在帳號裡，也是新履歷的預設排版）。 */
   initialLayouts: LayoutMap;
+  /** 使用者關掉的提醒類別（只影響檢查）。 */
+  initialMutedRules: string[];
 }) {
+  const [mutedRules, setMutedRules] = useState<string[]>(initialMutedRules);
   const [layouts, setLayouts] = useState<LayoutMap>(initialLayouts);
   const layoutSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [panel, setPanel] = useState<PanelState>(null);
   const [activeFlagKey, setActiveFlagKey] = useState<string | null>(null);
   const [activeLanguage, setActiveLanguage] = useState<"zh" | "en">("zh");
   const [highlight, setHighlight] = useState<HighlightTarget | null>(null);
-  const [flags, setFlags] = useState<ScanFlag[]>(() => storedFlags(entries));
+  const [flags, setFlags] = useState<ScanFlag[]>(() => withoutMuted(storedFlags(entries), initialMutedRules));
   const [isScanning, setIsScanning] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   // 檢查完沒有任何建議時的說明（例如「全部都通過了」），有建議時不顯示。
@@ -192,6 +217,15 @@ export function ExperiencePageClient({
     ]);
   }
 
+  // 「這類不用再提醒」／「恢復提醒」：畫面先改，背景存到帳號。恢復的那一類要重新檢查才會再出現。
+  async function setRuleMuted(ruleId: string, muted: boolean) {
+    const next = muted ? [...new Set([...mutedRules, ruleId])] : mutedRules.filter((r) => r !== ruleId);
+    setMutedRules(next);
+    if (muted) setFlags((prev) => withoutMuted(prev, next));
+    const result = await setRuleMutedAction(ruleId, muted);
+    if (result.error) setScanError(`提醒設定沒有存到（${result.error}）`);
+  }
+
   function openRefine(seed: RefineSeed) {
     setHighlight({
       entryId: seed.entryId,
@@ -263,6 +297,24 @@ export function ExperiencePageClient({
             />
           )}
           {scanNote && scanProgress === null && <p className="scan-note">{scanNote}</p>}
+          {mutedRules.length > 0 && (
+            <div className="muted-rules">
+              <span>
+                已關閉的提醒
+                <InfoTip label="已關閉提醒的說明">
+                  關掉的類別，檢查時不會再標記，生成履歷時一樣會照規則寫。恢復之後重新檢查就會再出現。
+                </InfoTip>
+              </span>
+              {mutedRules.map((id) => (
+                <span key={id} className="muted-rule-chip">
+                  {BULLET_RULE_TAGS.find((t) => t.id === id)?.name ?? id}
+                  <button type="button" className="btn-link" onClick={() => void setRuleMuted(id, false)}>
+                    恢復
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <ExperienceCanvas
             entries={entries}
             background={background[activeLanguage]}
@@ -297,6 +349,7 @@ export function ExperiencePageClient({
                 onAccept={handleAccept}
                 onDismiss={handleDismiss}
                 onRefine={openRefine}
+                onMute={(ruleId) => void setRuleMuted(ruleId, true)}
               />
             </>
           ) : (

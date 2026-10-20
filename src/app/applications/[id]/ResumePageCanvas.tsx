@@ -32,6 +32,7 @@ interface ResumePageCanvasProps {
   onChangeSkills: (text: string) => void;
   onChangeLanguages: (text: string) => void;
   onChangeBullets: (section: ResumeSectionKey, index: number, bullets: string[]) => void;
+  onChangeEntryField: (section: ResumeSectionKey, index: number, field: EntryField, value: string) => void;
 }
 
 export function ResumePageCanvas({
@@ -45,6 +46,7 @@ export function ResumePageCanvas({
   onChangeSkills,
   onChangeLanguages,
   onChangeBullets,
+  onChangeEntryField,
 }: ResumePageCanvasProps) {
   const labels = getLabels(language);
   const name = pickName(contact, language);
@@ -131,6 +133,7 @@ export function ResumePageCanvas({
             entry={exp}
             editable={editable}
             onChangeBullets={(bullets) => onChangeBullets("work_experience", i, bullets)}
+            onChangeField={(field, value) => onChangeEntryField("work_experience", i, field, value)}
           />
         ))}
 
@@ -145,6 +148,7 @@ export function ResumePageCanvas({
                 entry={exp}
                 editable={editable}
                 onChangeBullets={(bullets) => onChangeBullets("leadership", i, bullets)}
+                onChangeField={(field, value) => onChangeEntryField("leadership", i, field, value)}
               />
             ))}
           </>
@@ -212,23 +216,46 @@ function Row({
   );
 }
 
+/** 公司、地點、職稱、期間都可以直接點擊修改（例如公司名後面的說明太長，自己刪短）。 */
+export type EntryField = "org" | "location" | "role" | "period";
+
 function ExperienceBlock({
   section,
   index,
   entry,
   editable,
   onChangeBullets,
+  onChangeField,
 }: {
   section: ResumeSectionKey;
   index: number;
   entry: ExperienceEntry;
   editable: boolean;
   onChangeBullets: (bullets: string[]) => void;
+  onChangeField: (field: EntryField, value: string) => void;
 }) {
   return (
     <div className="resume-block">
-      <Row pdfKeyValue={pdfKey.org(section, index)} left={entry.org} right={entry.location} />
-      <Row pdfKeyValue={pdfKey.role(section, index)} left={entry.role} right={entry.period} variant="role" />
+      <div className="resume-row" data-pdf-key={pdfKey.org(section, index)}>
+        <EditableSpan className="resume-row-left" value={entry.org} editable={editable} onCommit={(v) => onChangeField("org", v)} />
+        {(entry.location || editable) && (
+          <EditableSpan
+            className="resume-row-right"
+            value={entry.location ?? ""}
+            editable={editable}
+            onCommit={(v) => onChangeField("location", v)}
+          />
+        )}
+      </div>
+      <div className="resume-row resume-row--role" data-pdf-key={pdfKey.role(section, index)}>
+        <EditableSpan className="resume-row-left" value={entry.role} editable={editable} onCommit={(v) => onChangeField("role", v)} />
+        <EditableSpan
+          className="resume-row-right"
+          value={entry.period}
+          editable={editable}
+          onCommit={(v) => onChangeField("period", v)}
+        />
+      </div>
       <EditableBulletList
         bulletKey={(j) => pdfKey.bullet(section, index, j)}
         bullets={entry.bullets}
@@ -267,17 +294,19 @@ function EditableSpan({
   value,
   editable,
   onCommit,
+  className = "",
 }: {
   value: string;
   editable: boolean;
   onCommit: (text: string) => void;
+  className?: string;
 }) {
   return (
     <span
       contentEditable={editable}
       suppressContentEditableWarning
       onBlur={(e) => onCommit(e.currentTarget.textContent ?? "")}
-      className={`resume-editable ${editable ? "resume-editable--editable" : ""}`}
+      className={`resume-editable ${editable ? "resume-editable--editable" : ""} ${className}`}
     >
       {value}
     </span>

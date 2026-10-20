@@ -869,6 +869,60 @@
   padding-top: var(--space-3);
 }
 
+/* 色條＋分數標記＋刻度。--ats-score 是分數的百分比位置（0–100%）。 */
+.ats-scale-track {
+  position: relative;
+  padding-top: 1.5rem;
+}
+.ats-scale-marker {
+  position: absolute;
+  top: 0;
+  /* 分數在最兩端時不要超出卡片邊緣。 */
+  left: clamp(0.75rem, var(--ats-score, 0%), calc(100% - 0.75rem));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+  font-size: var(--font-xs);
+  font-weight: 700;
+  color: var(--chrome-ink);
+}
+.ats-scale-marker-arrow {
+  font-size: 0.5rem;
+  margin-top: 1px;
+}
+.ats-scale-ticks {
+  position: relative;
+  height: 1rem;
+  margin-top: 2px;
+  font-size: 0.625rem;
+  color: var(--chrome-muted);
+}
+.ats-scale-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+}
+.ats-scale-tick--0 { left: 0; transform: none; }
+.ats-scale-tick--50 { left: 50%; }
+.ats-scale-tick--70 { left: 70%; }
+.ats-scale-tick--85 { left: 85%; }
+.ats-scale-tick--100 { left: 100%; transform: translateX(-100%); }
+
+.ats-score-help .ats-band-list {
+  list-style: none;
+  padding-left: 0;
+}
+.ats-band-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+}
+.ats-band-list-item--current {
+  font-weight: 700;
+}
+
 .ats-scale-bar {
   display: flex;
   height: 0.375rem;
@@ -1366,16 +1420,16 @@
   font-weight: 700;
 }
 
+/* 科系那一列：一般字重、正體、黑色（使用者不要斜體跟灰字）。 */
 .resume-row--muted .resume-row-left,
 .resume-row--muted .resume-row-right {
   font-weight: 400;
-  font-style: italic;
-  color: var(--color-neutral-500);
 }
 
+/* 職稱那一列：不用斜體、一般字重，跟粗體的公司名分開。 */
 .resume-row--role .resume-row-left,
 .resume-row--role .resume-row-right {
-  font-style: italic;
+  font-weight: 400;
 }
 
 .resume-block {
@@ -1584,6 +1638,143 @@
   display: flex;
   justify-content: flex-end;
   margin-top: var(--space-4);
+}
+
+/* 履歷頁「跟 AI 聊」：浮在右下角，不擋住履歷。 */
+.resume-chat {
+  position: fixed;
+  right: var(--space-6);
+  bottom: var(--space-6);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(70vh, 640px);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-white);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+.resume-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.resume-chat-messages {
+  flex: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.resume-chat-examples {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+@media (max-width: 640px) {
+  .resume-chat {
+    right: var(--space-4);
+    bottom: var(--space-4);
+  }
+}
+
+/* ATS 評分卡：公式跟分數區間直接顯示在分數下面。 */
+.ats-score-help {
+  margin-top: var(--space-2);
+  font-size: var(--font-xs);
+  line-height: 1.6;
+  color: var(--chrome-muted);
+}
+.ats-score-help ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+}
+
+/* 建議卡片上的規則標籤（白話名稱＋ⓘ），以及「這類不用再提醒」。 */
+.flag-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+}
+.flag-rule-tag-wrap {
+  position: relative;
+}
+.flag-rule-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--chrome-border);
+  border-radius: 999px;
+  background: var(--chrome-surface-soft);
+  font-size: var(--font-xs);
+  color: var(--chrome-ink);
+  cursor: pointer;
+}
+.flag-rule-tag:hover,
+.flag-rule-tag[aria-expanded="true"] {
+  border-color: var(--chrome-muted-light);
+}
+/* 點標籤跳出的小卡：規則定義＋「這類不用再提醒」。 */
+.flag-rule-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 240px;
+  padding: var(--space-3);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-white);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-size: var(--font-xs);
+  line-height: 1.6;
+  color: var(--chrome-ink);
+}
+.flag-rule-popover-title {
+  font-weight: 700;
+  font-size: var(--font-sm);
+}
+.flag-rule-popover-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-1);
+}
+
+/* 經歷資料庫上方：已關閉的提醒類別，可以恢復。 */
+.muted-rules {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
+}
+.muted-rules > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.muted-rule-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--chrome-surface-soft);
+  color: var(--chrome-ink);
+}
+.muted-rule-chip .btn-link {
+  font-size: var(--font-xs);
 }
 
 .exp-background-translate {

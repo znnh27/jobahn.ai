@@ -56,8 +56,8 @@ function roleLine(role: string, period: string): Paragraph {
   return new Paragraph({
     tabStops: [{ type: TabStopType.RIGHT, position: RIGHT_TAB_POS }],
     children: [
-      new TextRun({ text: role, bold: true, italics: true, font: FONT }),
-      new TextRun({ text: `\t${period}`, italics: true, font: FONT }),
+      new TextRun({ text: role, font: FONT }),
+      new TextRun({ text: `\t${period}`, font: FONT }),
     ],
   });
 }
@@ -142,8 +142,8 @@ export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
           new Paragraph({
             tabStops: [{ type: TabStopType.RIGHT, position: RIGHT_TAB_POS }],
             children: [
-              new TextRun({ text: edu.detail ?? "", italics: true, font: FONT }),
-              new TextRun({ text: `\t${edu.period ?? ""}`, italics: true, font: FONT }),
+              new TextRun({ text: edu.detail ?? "", font: FONT }),
+              new TextRun({ text: `\t${edu.period ?? ""}`, font: FONT }),
             ],
           }),
         );

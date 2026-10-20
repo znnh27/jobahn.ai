@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
-import { BULLET_RULES } from "@/lib/experience/bulletRules";
+import { BULLET_RULES, stripRuleRefs } from "@/lib/experience/bulletRules";
 import { computeAtsScore, type JdImportance } from "./atsScore";
 import { resolveJdItems, type JdBaseItem } from "./jdChecklist";
 import { readContact, type ResumeContact } from "./contact";
@@ -33,7 +33,8 @@ const WRITING_RULES = `${BULLET_RULES}
 
 排履歷的規則（一定要遵守）：
 1. 規則 6 的「依目標 JD 決定留不留」：這次的目標 JD 就是下面給的 JD。
-2. 先依這份 JD 把經歷資料庫裡的經歷分成「主要經歷」（跟 JD 直接相關）和「次要經歷」（跟 JD 沒那麼直接、但能展現能力）。每段經歷的 bullet 依跟 JD 的相關度排序，最相關的放最前面。
+2. 最近一份工作一定要寫滿：經歷資料庫裡這段有幾件事就寫幾件（至少 3 條，資料庫不到 3 件就全寫，最多 6 條），不能因為跟 JD 關聯比較低就只寫一兩條。
+   接著依這份 JD 把經歷資料庫裡的經歷分成「主要經歷」（跟 JD 直接相關）和「次要經歷」（跟 JD 沒那麼直接、但能展現能力）。每段經歷的 bullet 依跟 JD 的相關度排序，最相關的放最前面。
 3. 履歷一定要剛好填滿一頁 A4，少於一頁會讓人覺得經歷太少：主要經歷優先放、bullet 放好放滿；主要經歷都放完了還不滿一頁，就接著放次要經歷。真的放不下才取捨，優先拿掉跟這份 JD 關聯度最低的內容（通常是最舊、或最不相關的次要經歷），不要每一句都砍幾個字讓全部內容都變得倉促。
 4. JD 原文用字要盡量真的出現在履歷裡（不是只有意思接近），但要放在具體案例的敘述裡（見規則 7），前提是使用者真的有對應的真實經歷可以支撐，不能為了關鍵字硬掰。
 5. 同一段經歷可以依這份 JD 換敘事角度（例如投系統規劃職缺強調規劃，投行銷職缺強調成長數據），但底層事實跟程度不能變。`;
@@ -785,4 +786,89 @@ function parseJsonResponse<T>(text: string): T {
   } catch {
     throw new Error("AI 回傳的內容不是有效的 JSON，解析失敗");
   }
+}
+
+export interface ResumeChatTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+/**
+ * 履歷頁的「跟 AI 聊」：使用者用一句話說要怎麼改（例如「Northwind 那段多加兩條」「摘要改短一點」），
+ * AI 照經歷資料庫的事實改這一個語言版本，回傳改好的整份履歷跟一句說明。不存檔、不重新評分，
+ * 改完放進畫布草稿（可以復原），使用者按「儲存」才存。
+ */
+export async function reviseResumeWithChat(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  applicationId: string;
+  language: string;
+  resume: Resume;
+  history: ResumeChatTurn[];
+  instruction: string;
+}): Promise<{ reply: string; resume: Resume }> {
+  const { supabase, userId, applicationId, language, resume, history, instruction } = params;
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("job_description")
+    .eq("id", applicationId)
+    .eq("user_id", userId)
+    .single();
+  if (!application) throw new Error("找不到這筆應徵紀錄");
+
+  const { data: entries } = await supabase
+    .from("experience_entries")
+    .select("language, entry_type, org_name, location, role_variants, period_variants, achievements")
+    .eq("user_id", userId);
+  let langEntries = ((entries ?? []) as ExperienceEntryRow[]).filter((e) => e.language === language);
+  let sourceLanguage = language;
+  if (langEntries.length === 0) {
+    sourceLanguage = language === "en" ? "zh" : "en";
+    langEntries = ((entries ?? []) as ExperienceEntryRow[]).filter((e) => e.language === sourceLanguage);
+  }
+
+  const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", userId).maybeSingle();
+  const background = readBackground(profile?.data)[language === "zh" ? "zh" : "en"];
+
+  const basePrompt = buildUserPrompt({
+    jd: application.job_description,
+    language,
+    sourceLanguage,
+    entries: langEntries,
+    profile: profile?.data ?? {},
+    background: withReferenceSummaries(background, profile?.data),
+  });
+
+  const response = await askClaude({
+    userId,
+    feature: "resume_chat",
+    systemPrompt: SYSTEM_PROMPT,
+    userPrompt: [
+      basePrompt,
+      `===== 目前的履歷 =====`,
+      JSON.stringify({ ...resume, layout: undefined }, null, 2),
+      history.length > 0
+        ? `===== 之前的對話 =====\n${history.map((t) => `${t.role === "user" ? "使用者" : "AI"}：${t.text}`).join("\n")}`
+        : "",
+      `===== 使用者這次的要求 =====`,
+      instruction,
+      `===== 這次要做的事 =====`,
+      `- 照使用者的要求修改目前的履歷，沒被要求的地方原則上不要動。`,
+      `- 要新增內容時，只能用經歷資料庫裡有的事實（可以照寫作規則改寫）；資料庫裡沒有對應的事，就不要編，在 reply 說明缺什麼、建議到經歷資料庫補。`,
+      `- 這次的輸出格式改成：{ "reply": string, "resume": 整份履歷（格式跟上面的履歷完全一樣） }。reply 用繁體中文一兩句話說明改了哪裡，不要提「規則 N」這類編號。`,
+      `- 只輸出 JSON，不要有其他文字。`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    maxTokens: 8000,
+    supabase,
+  });
+
+  const parsed = parseJsonResponse<{ reply?: string; resume?: Resume }>(response.text);
+  if (!parsed.resume) throw new Error("AI 沒有回傳改好的履歷，請換個說法再試一次");
+  const next = pinBackground(parsed.resume, background);
+  if (language === "zh") polishChinese(next);
+  next.layout = resume.layout;
+  return { reply: stripRuleRefs(toTraditional(parsed.reply ?? "改好了。")), resume: next };
 }

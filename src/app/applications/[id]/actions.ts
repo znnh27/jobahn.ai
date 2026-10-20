@@ -5,7 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import {
   generateResumeForApplication,
   rescoreResumeForApplication,
+  reviseResumeWithChat,
   type GeneratedResume,
+  type ResumeChatTurn,
 } from "@/lib/resumes/generateResume";
 import {
   generateCoverLetterForApplication,
@@ -103,6 +105,36 @@ export async function generateAction(applicationId: string): Promise<GenerateRes
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "生成失敗" };
+  }
+}
+
+/** 履歷頁「跟 AI 聊」：照使用者的一句話改這個語言版本，回傳改好的履歷（不存檔，畫布按儲存才存）。 */
+export async function reviseResumeAction(
+  applicationId: string,
+  language: string,
+  resume: GeneratedResume["resume"],
+  history: ResumeChatTurn[],
+  instruction: string,
+): Promise<{ error?: string; reply?: string; resume?: GeneratedResume["resume"] }> {
+  if (!instruction.trim()) return { error: "請輸入想怎麼改" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    return await reviseResumeWithChat({
+      supabase,
+      userId: user.id,
+      applicationId,
+      language,
+      resume,
+      history: history.slice(-10),
+      instruction: instruction.trim(),
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "修改失敗，請再試一次" };
   }
 }
 

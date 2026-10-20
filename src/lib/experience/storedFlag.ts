@@ -3,7 +3,8 @@
 // 文字改過、或已經通過／被忽略（reviewedText 等於目前文字）就不算數。
 // 伺服器（檢查時跳過）跟畫面（載入時顯示）共用。
 
-export type StoredFlag = { text: string; suggestion: string; rewrite: string | null };
+/** rules：違反了哪幾類規則（lib/experience/bulletRules.ts 的 BULLET_RULE_TAGS 代號）。舊資料沒有這個欄位。 */
+export type StoredFlag = { text: string; suggestion: string; rewrite: string | null; rules?: string[] };
 
 export function activeStoredFlag(v: { text: string; reviewedText?: string; flag?: StoredFlag }): StoredFlag | null {
   if (!v.flag || v.flag.text !== v.text) return null;

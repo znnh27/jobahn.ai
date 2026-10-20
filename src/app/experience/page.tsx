@@ -5,6 +5,7 @@ import { loadExperienceEntries } from "./loadEntries";
 import { ExperiencePageClient } from "./ExperiencePageClient";
 import { readLayoutDefaults } from "@/lib/resumes/typography";
 import { readBackground } from "@/lib/resumes/background";
+import { readRuleTags } from "@/lib/experience/bulletRules";
 
 export default async function ExperiencePage() {
   const supabase = await createClient();
@@ -35,6 +36,7 @@ export default async function ExperiencePage() {
         <ExperiencePageClient
           entries={entries}
           background={readBackground(profile?.data)}
+          initialMutedRules={readRuleTags(profile?.data?.muted_rules)}
           initialLayouts={readLayoutDefaults(profile?.data)} />
       </div>
     </div>

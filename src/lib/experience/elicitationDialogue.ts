@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 import { toTraditional } from "@/lib/text/toTraditional";
-import { BULLET_EXAMPLE, BULLET_RULES } from "./bulletRules";
+import { BULLET_EXAMPLE, BULLET_RULES, stripRuleRefs } from "./bulletRules";
 
 // Phase 2.5：AI 問答挖掘的共用對話引擎。使用者可能只有一段很籠統的描述，這個引擎透過
 // 多輪對話把內容問成符合 bulletRules.ts 的專業寫法，最多問 10 輪，
@@ -53,7 +53,8 @@ ${BULLET_EXAMPLE}
 5. status 是 "ready" 時，draftText 必須逐條符合上面的寫作規則，寫完先自己檢查一遍；angleLabel 是一句話描述這個寫法強調的重點（例如「強調數據分析成果」），給使用者自己參考挑選用，不會出現在正式履歷裡。
 6. message 一律用繁體中文（台灣用語），絕對不要出現簡體字。draftText 的語言跟既有內容相同；全新經歷則依使用者回覆的語言，中文一律繁體。
 7. 不要編造使用者沒提過的具體數字或事實；真的問不到數字，用範圍/頻率/規模代替。
-8. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
+8. 使用者看不到上面的寫作規則清單，message 裡不要提「規則 1」「規則 10」這類編號，直接用白話講。
+9. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
 
 輸出格式：
 { "status": "asking" | "ready", "message": string, "draftText": string | null, "angleLabel": string | null }`;
@@ -101,7 +102,7 @@ export async function stepElicitation(params: {
   const parsed = parseJsonResponse(response.text);
 
   return {
-    turns: [...updatedTurns, { role: "assistant", text: toTraditional(parsed.message) }],
+    turns: [...updatedTurns, { role: "assistant", text: stripRuleRefs(toTraditional(parsed.message)) }],
     status: parsed.status,
     draftText: toTraditional(parsed.draftText),
     angleLabel: toTraditional(parsed.angleLabel),
@@ -142,7 +143,7 @@ ${BULLET_RULES}
 
 全部符合就是合格；只要有一條不符合就算 isVague。只輸出 JSON，不要其他文字：
 { "isVague": boolean, "suggestion": string | null }
-suggestion 只在 isVague 為 true 時給，用繁體中文一句話講清楚問題在哪、可以怎麼改（例如「這條把好幾個階段串在一起了，先只留最值得講的那個成果就好」），不要落落長。`;
+suggestion 只在 isVague 為 true 時給，用繁體中文一句話講清楚問題在哪；使用者看不到規則清單，不要提「規則 1」這類編號、可以怎麼改（例如「這條把好幾個階段串在一起了，先只留最值得講的那個成果就好」），不要落落長。`;
 
   const userPrompt = `${params.orgName} / ${params.role}\n\n使用者寫的內容：\n${params.text}`;
 
@@ -161,5 +162,6 @@ suggestion 只在 isVague 為 true 時給，用繁體中文一句話講清楚問
     .replace(/```\s*$/i, "");
 
   const parsed = JSON.parse(cleaned) as { isVague: boolean; suggestion: string | null };
-  return { ...parsed, suggestion: toTraditional(parsed.suggestion) };
+  const suggestion = toTraditional(parsed.suggestion);
+  return { ...parsed, suggestion: suggestion === null ? null : stripRuleRefs(suggestion) };
 }

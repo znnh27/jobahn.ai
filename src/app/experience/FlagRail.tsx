@@ -1,9 +1,12 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ScanFlag } from "./actions";
 import type { ExperienceEntry, RefineRequest } from "./ExperienceCanvas";
 import { CheckIcon, CloseIcon } from "@/app/icons";
+import { BULLET_RULE_TAGS, type BulletRuleTag } from "@/lib/experience/bulletRules";
+
+const TAG_BY_ID = new Map(BULLET_RULE_TAGS.map((t) => [t.id, t]));
 
 // 「檢查整份經歷資料庫」的建議，像 Google Docs 註解一樣放在右欄：
 // - 每張卡片盡量對齊畫布上對應的那一條；被點選的那張一定對齊，其他的往上下讓開。
@@ -25,6 +28,7 @@ export function FlagRail({
   onAccept,
   onDismiss,
   onRefine,
+  onMute,
 }: {
   flags: ScanFlag[];
   entries: ExperienceEntry[];
@@ -33,7 +37,10 @@ export function FlagRail({
   onAccept: (flag: ScanFlag) => void;
   onDismiss: (flag: ScanFlag) => void;
   onRefine: (seed: RefineRequest) => void;
+  /** 「這類不用再提醒」：之後檢查不再標記這一類。 */
+  onMute: (ruleId: string) => void;
 }) {
+
   const railRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [tops, setTops] = useState<Record<string, number>>({});
@@ -188,6 +195,14 @@ export function FlagRail({
                 </button>
               </div>
             </div>
+            {(f.rules ?? []).length > 0 && (
+              <div className="flag-card-tags">
+                {(f.rules ?? []).map((id) => {
+                  const tag = TAG_BY_ID.get(id);
+                  return tag ? <RuleTagButton key={id} tag={tag} onMute={() => onMute(id)} /> : null;
+                })}
+              </div>
+            )}
             <p className="flag-card-text">{f.suggestion}</p>
             {f.rewrite && (
               <p className="flag-card-rewrite">
@@ -219,5 +234,50 @@ export function FlagRail({
         );
       })}
     </div>
+  );
+}
+
+/** 卡片上的規則標籤：點一下跳出這類規則的定義，可以選「這類不用再提醒」。點外面或按 Esc 關閉。 */
+function RuleTagButton({ tag, onMute }: { tag: BulletRuleTag; onMute: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function close(e: Event) {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+
+  return (
+    <span className="flag-rule-tag-wrap" ref={ref} onClick={(e) => e.stopPropagation()}>
+      <button type="button" className="flag-rule-tag" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {tag.name}
+      </button>
+      {open && (
+        <span className="flag-rule-popover" role="dialog" aria-label={tag.name}>
+          <span className="flag-rule-popover-title">{tag.name}</span>
+          <span className="flag-rule-popover-text">{tag.description}</span>
+          <span className="flag-rule-popover-actions">
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setOpen(false);
+                onMute();
+              }}
+            >
+              這類不用再提醒
+            </button>
+          </span>
+        </span>
+      )}
+    </span>
   );
 }

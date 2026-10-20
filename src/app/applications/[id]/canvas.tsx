@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -34,6 +34,7 @@ import { CloseIcon, UndoIcon } from "@/app/icons";
 import { computeAtsScore, coveredByResume } from "@/lib/resumes/atsScore";
 import { JdChecklist } from "./JdChecklist";
 import { InfoTip } from "@/app/InfoTip";
+import { ResumeChatPanel } from "./ResumeChatPanel";
 import { splitList } from "@/lib/resumes/background";
 import {
   CoverLetterOptionsFields,
@@ -90,36 +91,44 @@ function getAtsBand(score: number) {
 }
 
 function AtsScoreLegend({ score }: { score: number | null }) {
-  const currentBand = score !== null ? getAtsBand(score) : null;
   return (
     <div className="ats-scale">
-      <div className="ats-scale-bar">
-        <div className="ats-scale-bar-segment ats-scale-bar-segment--weak" />
-        <div className="ats-scale-bar-segment ats-scale-bar-segment--borderline" />
-        <div className="ats-scale-bar-segment ats-scale-bar-segment--good" />
-        <div className="ats-scale-bar-segment ats-scale-bar-segment--excellent" />
-      </div>
-      {/* 只攤開目前這一段的意思，四段的完整說明收在標題旁的 ⓘ。 */}
-      {currentBand && (
-        <p className={`ats-scale-legend-item ats-scale-legend-item--current ${currentBand.text}`}>
-          <span className={`ats-scale-dot ${currentBand.dot}`} />
-          <span>
-            {currentBand.min}–{currentBand.max} 分・{currentBand.label}：{currentBand.desc}
+      {/* 色條上的 ▼ 標出這份履歷的分數落在哪一段；下面的刻度是各段的起點。 */}
+      <div className="ats-scale-track" style={score !== null ? ({ "--ats-score": `${score}%` } as CSSProperties) : undefined}>
+        {score !== null && (
+          <span className="ats-scale-marker" aria-hidden="true">
+            <span className="ats-scale-marker-value">{score}</span>
+            <span className="ats-scale-marker-arrow">▼</span>
           </span>
-        </p>
-      )}
+        )}
+        <div className="ats-scale-bar">
+          <div className="ats-scale-bar-segment ats-scale-bar-segment--weak" />
+          <div className="ats-scale-bar-segment ats-scale-bar-segment--borderline" />
+          <div className="ats-scale-bar-segment ats-scale-bar-segment--good" />
+          <div className="ats-scale-bar-segment ats-scale-bar-segment--excellent" />
+        </div>
+        <div className="ats-scale-ticks" aria-hidden="true">
+          <span className="ats-scale-tick ats-scale-tick--0">0</span>
+          <span className="ats-scale-tick ats-scale-tick--50">50</span>
+          <span className="ats-scale-tick ats-scale-tick--70">70</span>
+          <span className="ats-scale-tick ats-scale-tick--85">85</span>
+          <span className="ats-scale-tick ats-scale-tick--100">100</span>
+        </div>
+      </div>
     </div>
   );
 }
 
-/** ATS 評分標題旁 ⓘ 的內容：怎麼算分、四段分數各代表什麼。 */
-function AtsScoreHelp() {
+/** ATS 評分怎麼算、四段分數各代表什麼，直接顯示在分數下面；目前落在的那一段加粗、上色。 */
+function AtsScoreHelp({ score }: { score: number | null }) {
+  const current = score !== null ? getAtsBand(score) : null;
   return (
     <>
       分數照固定公式算：必要條件每項 2 分、加分條件每項 1 分，看履歷寫到幾項。內容沒改，分數就不會變。
-      <ul>
+      <ul className="ats-band-list">
         {ATS_BANDS.map((b) => (
-          <li key={b.label}>
+          <li key={b.label} className={b === current ? `ats-band-list-item--current ${b.text}` : undefined}>
+            <span className={`ats-scale-dot ${b.dot}`} />
             {b.min}–{b.max} 分・{b.label}：{b.desc}
           </li>
         ))}
@@ -182,6 +191,8 @@ export function Canvas({
   const [canvasVersion, setCanvasVersion] = useState(0);
   // 這筆已經有求職信時，按「寫求職信」先問要沿用還是依新履歷重新生成。
   const [coverChoiceDialog, setCoverChoiceDialog] = useState(false);
+  // 「跟 AI 聊」面板：浮在右下角，邊聊邊看畫布。
+  const [chatOpen, setChatOpen] = useState(false);
   const [coverChoice, setCoverChoice] = useState<CoverLetterChoice>(() =>
     initialChoice(initialCoverLetterLanguages.length > 0 ? initialCoverLetterLanguages : languages, researchAvailable),
   );
@@ -337,6 +348,15 @@ export function Canvas({
     if (JSON.stringify(next[lang]) === JSON.stringify(draft[lang])) return;
     setPast((p) => [...p.slice(-(UNDO_LIMIT - 1)), draft]);
     setDraft(next);
+  }
+
+  // 「跟 AI 聊」改好的整份履歷換進草稿：記進復原紀錄、畫布重新掛載才看得到新內容。字級間距維持現在的設定。
+  function applyChatRevision(lang: string, next: Resume) {
+    if (!draft) return;
+    setPast((p) => [...p.slice(-(UNDO_LIMIT - 1)), draft]);
+    setDraft({ ...draft, [lang]: { ...next, layout: draft[lang]?.layout ?? next.layout } });
+    setCanvasVersion((v) => v + 1);
+    setMessage("AI 改好了，記得按「儲存」；不滿意可以按「復原」");
   }
 
   function handleRescore() {
@@ -496,6 +516,14 @@ export function Canvas({
               </>
             ) : (
               <>
+                <button
+                  type="button"
+                  onClick={() => setChatOpen((v) => !v)}
+                  disabled={isPending && !chatOpen}
+                  className="btn btn-secondary"
+                >
+                  跟 AI 聊
+                </button>
                 {past.length > 0 && (
                   <button type="button" onClick={handleUndo} disabled={isPending} className="btn btn-secondary" title="回到上一步的內容">
                     <UndoIcon />
@@ -569,6 +597,14 @@ export function Canvas({
             }))
           }
           onChangeLanguages={(text) => updateResume(activeLang, (r) => ({ ...r, languages: splitList(text) }))}
+          onChangeEntryField={(section, index, field, value) =>
+            updateResume(activeLang, (r) => {
+              const items = [...r[section]];
+              const text = value.trim();
+              items[index] = { ...items[index], [field]: field === "location" ? text || null : text };
+              return { ...r, [section]: items };
+            })
+          }
           onChangeBullets={(section, index, bullets) =>
             updateResume(activeLang, (r) => {
               const items = [...r[section]];
@@ -593,9 +629,6 @@ export function Canvas({
         <div className="card card--sm">
           <h2 className="heading-card">
             ATS 評分（{LANG_LABEL[activeLang]}）
-            <InfoTip label="ATS 評分怎麼算">
-              <AtsScoreHelp />
-            </InfoTip>
           </h2>
           <p className="ats-score-value">
             {langScore ?? "—"}
@@ -607,6 +640,10 @@ export function Canvas({
             )}
           </p>
           <AtsScoreLegend score={langScore} />
+          {/* 分數怎麼算直接攤開（使用者要求不要藏在 ⓘ 裡）。 */}
+          <div className="ats-score-help">
+            <AtsScoreHelp score={langScore} />
+          </div>
           <JdChecklist
             items={checklist[activeLang] ?? []}
             isCovered={coveredByResume}
@@ -616,6 +653,17 @@ export function Canvas({
           />
         </div>
       </div>
+
+      {chatOpen && !finalized && activeResume && (
+        <ResumeChatPanel
+          key={activeLang}
+          applicationId={applicationId}
+          language={activeLang}
+          resume={activeResume}
+          onApply={(next) => applyChatRevision(activeLang, next)}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
 
       {confirmReopen && (
         <ConfirmDialog

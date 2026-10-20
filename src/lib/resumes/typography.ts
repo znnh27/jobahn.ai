@@ -13,9 +13,11 @@ export interface ResumeTypography {
   line: number;
 }
 
+// 區塊標題（PROFESSIONAL EXPERIENCE 等）比內文大 2pt、上方留比較多空間，跟公司名（粗體）、職稱（一般字重）
+// 分成三個層次；以前標題只大 1pt，看起來跟公司名、職稱混在一起（Z 2026-10-20）。
 export const RESUME_TYPOGRAPHY: Record<"en" | "zh", ResumeTypography> = {
-  en: { name: 18, contact: 10, header: 12, body: 11, line: 14 },
-  zh: { name: 18, contact: 10, header: 11, body: 10, line: 16 },
+  en: { name: 18, contact: 10, header: 13, body: 11, line: 14 },
+  zh: { name: 18, contact: 10, header: 12, body: 10, line: 16 },
 };
 
 export function getTypography(language: string): ResumeTypography {
@@ -66,8 +68,8 @@ const BASE_GAPS = {
   contactBefore: 2,
   contactAfter: 6,
   /** 區塊標題（PROFESSIONAL EXPERIENCE 等）上方、底線下方。 */
-  sectionBefore: 8,
-  sectionAfter: 3,
+  sectionBefore: 11,
+  sectionAfter: 4,
   /** 每段經歷／學歷之間。 */
   block: 5,
 };

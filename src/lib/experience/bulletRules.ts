@@ -18,3 +18,50 @@ export const BULLET_RULES = `履歷 bullet 寫作規則（中英共用）：
 /** 同一件事改寫前後的示範，給改寫用的 prompt 參考。 */
 export const BULLET_EXAMPLE = `反面範例（流水帳）：「負責電商網站結帳流程的改版規劃，歷時四個月完成，期間與工程師、行銷部門跨部門協作，改版後結帳轉換率由 2.8% 提升至 3.6%，之後也持續追蹤使用者回饋並修正問題。」
 正面範例（同一件事，一句話、成果放最後）：「重新設計電商網站的結帳流程，將結帳轉換率由 2.8% 提升至 3.6%。」`;
+
+// ---------- 給使用者看的規則標籤 ----------
+// 上面的規則是給 AI 看的（有編號），使用者看不到。檢查建議改成回傳下面的標籤代號，
+// 畫面上顯示白話名稱，滑過 ⓘ 看說明；使用者也可以把某一類關掉，之後檢查不再標記（只影響檢查，不影響生成履歷）。
+
+export interface BulletRuleTag {
+  id: string;
+  /** 卡片上的標籤文字。 */
+  name: string;
+  /** ⓘ 裡的說明。 */
+  description: string;
+}
+
+export const BULLET_RULE_TAGS: BulletRuleTag[] = [
+  { id: "structure", name: "句子結構", description: "動詞開頭，接著寫做了什麼，最後放成果。不要用空泛的說法開頭。" },
+  { id: "length", name: "太長", description: "一條控制在 1–2 行：中文約 60–70 字、英文約 30 個字以內。" },
+  { id: "one-thing", name: "一條一件事", description: "一條只講一個主要成果。好幾個階段就拆開，或只留最強的那個。" },
+  { id: "evidence", name: "缺數字或成果", description: "加上數字（%、金額、人數、時間）或具體結果；真的沒有數字就寫規模或頻率。" },
+  { id: "honesty", name: "誇大或不精確", description: "每一句都要有事實根據；「參與、協助」不能寫成「主導」，還沒正式上線的不要寫「上線」。" },
+  { id: "process", name: "流水帳", description: "不寫一步一步的過程，刪掉空泛的形容詞；不用「負責、參與、協助」開頭。" },
+  { id: "keywords", name: "關鍵字太刻意", description: "關鍵字要自然出現在具體案例裡，不要放在句首當標籤，也不要用太技術的詞。" },
+  { id: "verb-variety", name: "動詞重複", description: "整份履歷每條換一個動詞，不要一直用同一個。" },
+  { id: "punctuation", name: "標點句型", description: "不用破折號、不用三項並列湊字數；中文用全形標點。" },
+  { id: "ai-tone", name: "AI 腔", description: "避開「賦能、串聯、橋樑」、spearheaded、leveraged 這類 AI 常用詞，寫成一般人會說的話。" },
+  { id: "typo", name: "錯字", description: "錯字、漏字、重複字。" },
+];
+
+const TAG_IDS = new Set(BULLET_RULE_TAGS.map((t) => t.id));
+
+/** 只留認得的標籤代號。 */
+export function readRuleTags(raw: unknown): string[] {
+  return Array.isArray(raw) ? [...new Set(raw.filter((id): id is string => typeof id === "string" && TAG_IDS.has(id)))] : [];
+}
+
+/** 給 AI 看的標籤對照（規則編號 → 代號），要求它回傳代號、不要在建議裡提編號。 */
+export const RULE_TAG_INSTRUCTIONS = `每條建議都要附上 rules：這條違反了哪幾類，用下面的代號（不是規則編號）：
+structure＝規則 1 結構、length＝規則 2 長度、one-thing＝規則 3 一條一件事、evidence＝規則 4 證據、honesty＝規則 5 誠實、process＝規則 6 取捨（流水帳、弱動詞開頭）、keywords＝規則 7 關鍵字、verb-variety＝規則 8 動詞多樣性、punctuation＝規則 9 標點與句型、ai-tone＝規則 10 用詞、typo＝錯字。
+使用者看不到上面的規則清單，所以建議文字裡絕對不要出現「規則 1」「規則 10」「rule 3」這類編號或代號，直接用白話講問題在哪。`;
+
+/** 保險：AI 還是寫了「規則 1 與規則 10」「（規則 3、4）」這類編號時，從文字裡拿掉。 */
+export function stripRuleRefs(text: string): string {
+  return text
+    .replace(/[（(]\s*(?:違反)?\s*(?:規則|rule)\s*\d+(?:\s*[、,，與和及&]\s*(?:規則|rule)?\s*\d+)*\s*[）)]/gi, "")
+    .replace(/(?:依照|依|根據|按照)?\s*(?:違反|不符合|符合)?\s*(?:規則|rule)\s*\d+(?:\s*[、,，與和及&]\s*(?:規則|rule)?\s*\d+)*\s*(?:的要求|要求)?\s*[：:，,]?\s*/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}

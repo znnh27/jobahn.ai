@@ -34,6 +34,12 @@ export interface AskClaudeParams {
   temperature?: number;
   /** 使用者自己的已登入 Supabase client，api 模式會用它查詢使用者是否綁定了自己的 Key */
   supabase?: SupabaseClient;
+  /**
+   * 只有 local-cli 模式用：CLI 的思考強度。沒指定就用 medium。
+   * 一定要明確指定，不然 CLI 會沿用使用者自己 Claude Code 的設定（例如 high），
+   * 生成一份履歷會多想好幾倍的時間（實測 high 106 秒、medium 41 秒，結果幾乎一樣；low 會出現時態錯誤）。
+   */
+  effort?: "low" | "medium" | "high";
 }
 
 export interface AskClaudeResult {
@@ -47,8 +53,17 @@ export interface AskClaudeResult {
 export async function askClaude(params: AskClaudeParams): Promise<AskClaudeResult> {
   const provider = process.env.AI_PROVIDER === "api" ? "api" : "local-cli";
 
+  const startedAt = Date.now();
   const result =
     provider === "local-cli" ? await callLocalCli(params) : await callApi(params);
+
+  // 開發時看每一步 AI 花多少時間（生成履歷會連續呼叫好幾次，慢的時候從這裡找是哪一步）。
+  if (process.env.NODE_ENV !== "production") {
+    console.info(
+      `[askClaude] ${params.feature} ${((Date.now() - startedAt) / 1000).toFixed(1)}s` +
+        ` in=${result.inputTokens} out=${result.outputTokens}`,
+    );
+  }
 
   await logUsage(params.userId, params.feature, result);
 
@@ -71,6 +86,8 @@ async function callLocalCli(params: AskClaudeParams): Promise<AskClaudeResult> {
     params.systemPrompt,
     "--max-budget-usd",
     "2",
+    "--effort",
+    params.effort ?? "medium",
   ];
 
   const stdout = await new Promise<string>((resolve, reject) => {

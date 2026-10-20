@@ -54,10 +54,8 @@ function registerFontOnce() {
   fontRegistered = true;
 }
 
-function createStyles(m: ResumeMetrics, language: string) {
+function createStyles(m: ResumeMetrics) {
   const lineHeight = m.line / m.body;
-  // 中文沒有斜體字形，職稱／期間改用灰色區分；英文用 Carlito 真正的斜體，跟 Word 一樣。
-  const italic = language === "zh" ? { color: "#404040" } : { fontStyle: "italic" as const };
   return StyleSheet.create({
     page: {
       fontFamily: FONT_FAMILY,
@@ -89,8 +87,6 @@ function createStyles(m: ResumeMetrics, language: string) {
     rowLeft: { flex: 1, paddingRight: 8 },
     rowRight: { flexShrink: 0 },
     bold: { fontWeight: "bold" },
-    italic,
-    boldItalic: { fontWeight: "bold", ...italic },
     bullet: { flexDirection: "row", paddingLeft: BULLET_INDENT_PT },
     bulletDot: { width: BULLET_DOT_PT, fontSize: m.body },
     bulletText: { fontSize: m.body, flex: 1 },
@@ -151,8 +147,8 @@ function ExperienceBlocks({
             {exp.location && <Text style={[styles.bold, styles.rowRight]}>{exp.location}</Text>}
           </Keyed>
           <Keyed k={pdfKey.role(section, i)} style={styles.row}>
-            <Text style={[styles.boldItalic, styles.rowLeft]}>{exp.role}</Text>
-            <Text style={[styles.italic, styles.rowRight]}>{exp.period}</Text>
+            <Text style={styles.rowLeft}>{exp.role}</Text>
+            <Text style={styles.rowRight}>{exp.period}</Text>
           </Keyed>
           {exp.bullets.map((b, j) => (
             <Keyed key={j} k={pdfKey.bullet(section, i, j)} style={styles.bullet} splittable>
@@ -175,7 +171,7 @@ export function ResumePdfDocument({
   registerFontOnce();
   const labels = getLabels(language);
   const metrics = resolveMetrics(language, resume.layout);
-  const styles = createStyles(metrics, language);
+  const styles = createStyles(metrics);
   // 標題後面至少要放得下下一段的上方間距加兩行，標題才留在這一頁。
   const keepWithNext = metrics.block + metrics.line * 2;
   const name = pickName(contact, language);
@@ -247,8 +243,8 @@ export function ResumePdfDocument({
             </Keyed>
             {(edu.detail || edu.period) && (
               <Keyed k={pdfKey.eduDetail(i)} style={styles.row}>
-                <Text style={[styles.italic, styles.rowLeft]}>{edu.detail ?? ""}</Text>
-                <Text style={[styles.italic, styles.rowRight]}>{edu.period ?? ""}</Text>
+                <Text style={styles.rowLeft}>{edu.detail ?? ""}</Text>
+                <Text style={styles.rowRight}>{edu.period ?? ""}</Text>
               </Keyed>
             )}
           </View>
