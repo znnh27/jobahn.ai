@@ -1,4 +1,5 @@
 import "server-only";
+import { markdownToText } from "./markdownToText";
 
 interface FirecrawlScrapeResponse {
   success: boolean;
@@ -42,5 +43,6 @@ export async function scrapeJobPosting(url: string): Promise<string> {
     throw new Error("抓取成功，但頁面沒有可用的文字內容");
   }
 
-  return markdown;
+  // Markdown 符號（####、**、連結網址）轉成純文字再給使用者看、存進 JD 欄位。
+  return markdownToText(markdown);
 }
