@@ -114,7 +114,7 @@ const SYSTEM_PROMPT = `你是履歷經歷資料庫的合併助手。使用者已
 9. 經歷以外的內容（background）：把新內容裡的 Professional Summary／自我介紹、學歷、技能、語言能力抽出來，依內容的語言放進 "zh" 或 "en"（跟規則 6 一樣不要互相翻譯）。**這幾項有出現就一定要抽**，不要因為新內容沒有聯絡資訊或缺了其中一項就整個略過；只有新內容完全沒有的項目才給空陣列。
    - summaries：Summary 整段原文照抄，一段一個字串。
    - education：每間學校一筆，school 只放校名（城市、國家放 location，不要接在校名後面），detail 放學位、科系、輔修、交換、GPA 等補充（沒有就 null），period、location 沒寫就 null。
-   - skills：工具、軟體、專業技能，一項一個字串，例如 "Figma"、"SQL"、"A/B Testing"。不要把語言能力放進來。
+   - skills：工具、軟體、專業技能，一項一個字串，例如 "Figma"、"SQL"、"A/B Testing"。不要把語言能力放進來，也不要放「領導力、溝通能力、團隊合作」這類軟實力。
    - languages：一個語言一個字串，程度寫在括號裡，例如 "English (Fluent, TOEIC 945)"、"German (B2)"、「日文（N2）」。
    - 跟使用者目前已經存的 background 是同一件事的（同一間學校、同一個技能、同一個語言），用跟既有資料一字不差的寫法輸出，系統才會認出是重複；只有新的資訊（例如新的檢定分數）才用新寫法。
 10. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
