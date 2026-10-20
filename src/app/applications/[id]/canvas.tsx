@@ -34,6 +34,7 @@ import { CloseIcon, UndoIcon } from "@/app/icons";
 import { computeAtsScore, coveredByResume } from "@/lib/resumes/atsScore";
 import { JdChecklist } from "./JdChecklist";
 import { InfoTip } from "@/app/InfoTip";
+import { splitList } from "@/lib/resumes/background";
 import {
   CoverLetterOptionsFields,
   choiceInvalid,
@@ -187,7 +188,8 @@ export function Canvas({
 
   // AI 動作的預估時間（毫秒），依平常實際跑的時間抓，語言版本越多越久。
   const langCount = Math.max(1, languages.length);
-  const generateProgress = useEstimatedProgress(busy === "generate", 45000 * langCount);
+  // 生成會跑好幾輪（生成、補內容填滿一頁、評分），每個語言大約 3 分鐘。
+  const generateProgress = useEstimatedProgress(busy === "generate", 180000 * langCount);
   const rescoreProgress = useEstimatedProgress(busy === "rescore", 20000 * langCount);
   const finalizeProgress = useEstimatedProgress(busy === "finalize", 20000);
   const trimProgress = useEstimatedProgress(busy === "trim", 20000);
@@ -396,11 +398,11 @@ export function Canvas({
     return (
       <div className="canvas-main">
         {stepBar}
-        <div className="card text-center">
+        <div className="card canvas-empty-card">
           <p className="text-body">
             還沒有生成過履歷
             <InfoTip label="生成履歷的說明">
-              按下面的按鈕，AI 會依 JD 從經歷資料庫挑選內容、寫成履歷並評分。每個語言版本大約 1–2 分鐘。
+              按下面的按鈕，AI 會依 JD 從經歷資料庫挑選內容、寫成履歷並評分。每個語言版本大約 3–5 分鐘（會一直補內容到剛好一頁）。
             </InfoTip>
           </p>
           {generateProgress !== null ? (
@@ -408,9 +410,11 @@ export function Canvas({
               <ProgressBar value={generateProgress} label="AI 正在依 JD 挑選經歷、生成履歷…" />
             </div>
           ) : (
-            <button onClick={requestGenerate} disabled={isPending} className="btn btn-primary mt-4">
-              生成履歷
-            </button>
+            <div className="canvas-empty-actions">
+              <button onClick={requestGenerate} disabled={isPending} className="btn btn-primary">
+                生成履歷
+              </button>
+            </div>
           )}
           {message && <p className="text-error mt-3">{message}</p>}
           {contactDialog && (
@@ -449,7 +453,7 @@ export function Canvas({
               value={activeLang}
               onChange={setActiveLang}
             />
-            <LayoutMenu layout={layout} onChange={changeLayout} fit={fit} measuring={measuring} />
+            <LayoutMenu language={activeLang} layout={layout} onChange={changeLayout} fit={fit} measuring={measuring} />
           </div>
           {/* 提示訊息用小字塞在按鈕左邊的剩餘空間，最多兩行，不把按鈕擠到下一行。 */}
           {message && (
@@ -561,9 +565,10 @@ export function Canvas({
           onChangeSkills={(text) =>
             updateResume(activeLang, (r) => ({
               ...r,
-              skills: text.split(",").map((s) => s.trim()).filter(Boolean),
+              skills: splitList(text),
             }))
           }
+          onChangeLanguages={(text) => updateResume(activeLang, (r) => ({ ...r, languages: splitList(text) }))}
           onChangeBullets={(section, index, bullets) =>
             updateResume(activeLang, (r) => {
               const items = [...r[section]];

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppNav, getDisplayName } from "../AppNav";
 import { AddExperienceChoice } from "../AddExperienceChoice";
 import { BlobScene } from "../BlobScene";
+import { lacksBackground } from "@/lib/resumes/background";
 
 export default async function OnboardingPage() {
   const supabase = await createClient();
@@ -19,6 +20,9 @@ export default async function OnboardingPage() {
   // 這裡加自我阻擋反而會有個副作用：上傳成功那一刻 Server Action 觸發的自動刷新，
   // 會讓這個頁面重新判斷「現在已經有資料了」而立刻把使用者導回首頁，導致完成訊息跟
   // CTA 按鈕根本來不及顯示就被導走。
+
+  const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
+  const needsBackground = lacksBackground(profile?.data);
 
   // 版面跟首頁一致：色塊滿版鋪在整頁後面，中間是大 logo，兩張入口卡片疊在色塊上面。
   return (
@@ -37,7 +41,7 @@ export default async function OnboardingPage() {
           </div>
         </div>
 
-        <AddExperienceChoice mode="onboarding" />
+        <AddExperienceChoice mode="onboarding" needsBackground={needsBackground} />
       </div>
     </div>
   );

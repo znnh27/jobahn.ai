@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ElicitationPanel } from "./experience/ElicitationPanel";
 import type { ExperienceEntry } from "./experience/ExperienceCanvas";
 import { UploadSourceCard } from "./experience/UploadSourceCard";
+import { BackgroundInterviewPanel } from "./experience/BackgroundInterviewPanel";
 import { OnboardingUpload } from "./onboarding/OnboardingUpload";
 
 type Path = "upload" | "type";
@@ -28,16 +29,21 @@ export function AddExperienceChoice({
   mode,
   entries = [],
   language = "zh",
+  needsBackground = false,
 }: {
   mode: "onboarding" | "experience";
   /** 經歷資料庫模式：AI 問答可以選擇加到既有的經歷底下。 */
   entries?: ExperienceEntry[];
   language?: "zh" | "en";
+  /** 經歷資料庫還沒有學歷、技能、語言：AI 問答寫完經歷後提醒補上。 */
+  needsBackground?: boolean;
 }) {
   const copy = COPY[mode];
   const [path, setPath] = useState<Path>("upload");
   const [panelOpen, setPanelOpen] = useState(false);
   const [typedCount, setTypedCount] = useState(0);
+  const [interviewOpen, setInterviewOpen] = useState(false);
+  const [backgroundDone, setBackgroundDone] = useState(false);
 
   return (
     <div className="card add-exp-card">
@@ -69,6 +75,14 @@ export function AddExperienceChoice({
               已經新增 {typedCount} 段經歷到經歷資料庫了！
               {mode === "onboarding" ? "可以直接開始寫第一份履歷，或再多加幾段讓內容更完整。" : "可以再新增一段，或回經歷資料庫看看。"}
             </p>
+            {needsBackground && !backgroundDone && (
+              <div className="add-exp-background-prompt">
+                <span>履歷還缺學歷、技能、語言，回答 3 個問題就能補上。</span>
+                <button type="button" className="btn btn-sunny" onClick={() => setInterviewOpen(true)}>
+                  補上學歷與技能
+                </button>
+              </div>
+            )}
             {/* 主按鈕放最右邊。 */}
             <div className="add-exp-done-actions">
               {mode === "onboarding" && (
@@ -100,6 +114,10 @@ export function AddExperienceChoice({
           </>
         )}
       </div>
+
+      {interviewOpen && (
+        <BackgroundInterviewPanel onClose={() => setInterviewOpen(false)} onSaved={() => setBackgroundDone(true)} />
+      )}
 
       {panelOpen && (
         <ElicitationPanel

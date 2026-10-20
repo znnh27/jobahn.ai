@@ -53,7 +53,7 @@ export function OnboardingUpload() {
                 ? {
                     ...item,
                     status: "done",
-                    message: `新增 ${result.newEntriesCreated} 段全新經歷、${result.newAchievementsCreated} 個新成就`,
+                    message: `新增 ${result.newEntriesCreated} 段全新經歷、${result.newAchievementsCreated} 個新成就${result.backgroundItemsAdded ? `、${result.backgroundItemsAdded} 項 Summary／學歷／技能／語言` : ""}`,
                   }
                 : { ...item, status: "error", message: result.error }
               : item,

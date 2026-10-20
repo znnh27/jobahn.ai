@@ -1332,6 +1332,12 @@
   line-height: var(--resume-contact-line);
   color: var(--color-neutral-500);
 }
+/* 一組「標籤: 內容」不拆到兩行；單一組比一行還長（超長網址）時才在組內斷行。 */
+.resume-contact-item {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 
 /* 經歷資料庫頁也用這幾個 class，那邊沒有 --resume-* 變數，用後面的預設值。 */
 .resume-section-header {
@@ -1506,6 +1512,105 @@
   text-align: center;
   padding: var(--space-10) var(--space-4);
   color: var(--chrome-muted);
+}
+
+/* Summary、學歷：一筆一行，滑過去才出現「刪除」（跟經歷的寫法一樣）。
+   「刪除」放在紙的右邊界外，不佔內容寬度，右欄的地點／期間才會跟經歷對齊。 */
+.exp-background-item {
+  position: relative;
+}
+.exp-background-item > .exp-variant-remove {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  margin-left: var(--space-2);
+  white-space: nowrap;
+}
+.exp-background-item + .exp-background-item:not(.resume-block) {
+  margin-top: var(--space-2);
+}
+.exp-background-item:hover .exp-variant-remove {
+  opacity: 1;
+}
+
+.exp-background-add {
+  margin-top: var(--space-1);
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--font-xs);
+  color: var(--chrome-muted-light);
+  cursor: pointer;
+}
+.exp-background-add:hover {
+  color: var(--chrome-muted);
+}
+
+/* 補學歷、技能、語言的問答：輸入框下面右側放「跳過這題」。 */
+.background-interview-input {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+}
+.background-interview-input > :first-child {
+  align-self: stretch;
+}
+
+.background-interview-done {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* AI 問答寫完經歷後，提醒補學歷、技能、語言的那一塊。 */
+.add-exp-background-prompt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--chrome-surface-soft);
+  color: var(--chrome-ink);
+}
+
+/* 履歷頁還沒生成時的卡片：說明文字靠左，「生成履歷」按鈕靠右。 */
+.canvas-empty-card {
+  text-align: left;
+}
+.canvas-empty-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-4);
+}
+
+.exp-background-translate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--resume-section-before, var(--space-3));
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--chrome-surface-soft);
+  font-size: var(--font-sm);
+  color: var(--chrome-ink);
+}
+
+.exp-background-error {
+  margin-top: var(--space-1);
+  font-size: var(--font-xs);
+  color: var(--color-danger-text-strong);
+}
+
+/* 空白欄位顯示提示文字，不然 contentEditable 沒有內容時點不到。 */
+.resume-editable[data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--chrome-muted-light);
+  font-style: italic;
+  font-weight: 400;
 }
 
 /* ============================================================
@@ -2864,6 +2969,9 @@ button.step-bar-link:focus-visible {
   gap: var(--space-3);
 }
 .layout-menu-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   font-family: var(--font-heading);
   font-size: var(--font-sm);
   font-weight: 500;
@@ -2885,12 +2993,6 @@ button.step-bar-link:focus-visible {
   font-size: var(--font-sm);
   font-variant-numeric: tabular-nums;
   color: var(--chrome-ink);
-}
-.layout-menu-hint {
-  margin: 0 0 var(--space-3);
-  font-size: var(--font-xs);
-  line-height: 1.5;
-  color: var(--chrome-muted);
 }
 .layout-menu-status {
   display: flex;

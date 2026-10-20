@@ -4,6 +4,9 @@ import { activeStoredFlag, type StoredFlag } from "@/lib/experience/storedFlag";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { readLayoutSettings, type ResumeLayoutSettings } from "@/lib/resumes/typography";
+import { readBackground, splitList, type EducationItem } from "@/lib/resumes/background";
+import { ensureBackgroundLanguage } from "@/lib/resumes/translateBackground";
+import { saveBackgroundAnswers, type BackgroundAnswers } from "@/lib/resumes/backgroundInterview";
 import { extractResumeText } from "@/lib/resumes/extractText";
 import { mergeContentIntoExperienceDb } from "@/lib/experience/mergeIntoExperienceDb";
 import {
@@ -27,6 +30,7 @@ type UploadResult = {
   newEntriesCreated?: number;
   newAchievementsCreated?: number;
   variantsAppended?: number;
+  backgroundItemsAdded?: number;
   conflicts?: string[];
 };
 
@@ -860,4 +864,111 @@ export async function saveDefaultLayoutAction(
   });
   if (error) return { error: error.message };
   return { success: true };
+}
+
+export type BackgroundEdit =
+  | { kind: "summary"; index: number; text: string }
+  | { kind: "removeSummary"; index: number }
+  | { kind: "education"; index: number; field: keyof EducationItem; value: string }
+  | { kind: "addEducation"; school: string }
+  | { kind: "removeEducation"; index: number }
+  | { kind: "skills"; text: string }
+  | { kind: "languages"; text: string };
+
+/**
+ * 經歷資料庫頁直接編輯 Summary、學歷、技能、語言（profile_data.data.background）。
+ * 每次只送一個改動、在這裡套到最新的資料上，連續改好幾格時才不會互相蓋掉。
+ */
+export async function updateBackgroundAction(
+  language: string,
+  edit: BackgroundEdit,
+): Promise<{ error?: string; success?: boolean }> {
+  if (language !== "zh" && language !== "en") return { error: "不支援的語言" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const { data: existing } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
+  const data = existing?.data ?? {};
+  const all = readBackground(data);
+  const b = all[language];
+
+  switch (edit.kind) {
+    case "summary":
+      if (edit.text.trim()) b.summaries[edit.index] = edit.text.trim();
+      else b.summaries.splice(edit.index, 1);
+      break;
+    case "removeSummary":
+      b.summaries.splice(edit.index, 1);
+      break;
+    case "education": {
+      const item = b.education[edit.index];
+      if (!item) break;
+      const value = edit.value.trim();
+      // 校名清空等於刪掉這筆學歷。
+      if (edit.field === "school") {
+        if (value) item.school = value;
+        else b.education.splice(edit.index, 1);
+      } else {
+        item[edit.field] = value || null;
+      }
+      break;
+    }
+    case "addEducation":
+      b.education.push({ school: edit.school, detail: null, period: null, location: null });
+      break;
+    case "removeEducation":
+      b.education.splice(edit.index, 1);
+      break;
+    case "skills":
+      b.skills = splitList(edit.text);
+      break;
+    case "languages":
+      b.languages = splitList(edit.text);
+      break;
+  }
+
+  const { error } = await supabase.from("profile_data").upsert({ user_id: user.id, data: { ...data, background: all } });
+  if (error) return { error: error.message };
+  revalidatePath("/experience");
+  return { success: true };
+}
+
+/** 經歷資料庫「從英文版翻成中文」（或反過來）：這個語言沒有的學歷、技能、語言，從另一個語言翻過來存好。 */
+export async function translateBackgroundAction(language: string): Promise<{ error?: string; success?: boolean }> {
+  if (language !== "zh" && language !== "en") return { error: "不支援的語言" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    await ensureBackgroundLanguage({ supabase, userId: user.id, language });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "翻譯失敗" };
+  }
+  revalidatePath("/experience");
+  return { success: true };
+}
+
+/** AI 問答寫第一份履歷的人：回答學歷、技能、語言三個問題，整理後存進經歷資料庫。 */
+export async function saveBackgroundInterviewAction(
+  answers: BackgroundAnswers,
+): Promise<{ error?: string; added?: number }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    const added = await saveBackgroundAnswers({ supabase, userId: user.id, answers });
+    revalidatePath("/experience");
+    return { added };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "整理失敗" };
+  }
 }

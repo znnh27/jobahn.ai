@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ResumePaper } from "@/app/ResumePaper";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { contactParts, hasRequiredContact, pickName, type ResumeContact } from "@/lib/resumes/contact";
 import { pdfKey, ptToPx, resolveMetrics, type PdfFit, type ResumeSectionKey } from "@/lib/resumes/typography";
 import { getSectionLabels } from "@/lib/resumes/sectionLabels";
+import { joinList } from "@/lib/resumes/background";
 
 type Resume = GeneratedResume["resume"];
 type ExperienceEntry = Resume["work_experience"][number];
@@ -29,6 +30,7 @@ interface ResumePageCanvasProps {
   onEditContact: () => void;
   onChangeSummary: (text: string) => void;
   onChangeSkills: (text: string) => void;
+  onChangeLanguages: (text: string) => void;
   onChangeBullets: (section: ResumeSectionKey, index: number, bullets: string[]) => void;
 }
 
@@ -41,6 +43,7 @@ export function ResumePageCanvas({
   onEditContact,
   onChangeSummary,
   onChangeSkills,
+  onChangeLanguages,
   onChangeBullets,
 }: ResumePageCanvasProps) {
   const labels = getLabels(language);
@@ -92,11 +95,15 @@ export function ResumePageCanvas({
               {name}
             </div>
             <div className="resume-contact" data-pdf-key={pdfKey.contact()}>
+              {/* 一組「標籤: 內容」是 inline-block，放不下時整組換行，跟 PDF／Word 一樣只在「 / 」斷行。
+                  「/」前面用不換行空白，換行時「/」留在上一行尾端。 */}
               {parts.map((p, i) => (
-                <span key={i}>
-                  {i > 0 && " / "}
-                  <strong>{p.label}:</strong> {p.value}
-                </span>
+                <Fragment key={i}>
+                  {i > 0 && "\u00a0/ "}
+                  <span className="resume-contact-item">
+                    <strong>{p.label}:</strong> {p.value}
+                  </span>
+                </Fragment>
               ))}
             </div>
           </div>
@@ -161,8 +168,18 @@ export function ResumePageCanvas({
         <SectionHeader id="skills">{labels.skills}</SectionHeader>
         <div data-pdf-key={pdfKey.skills()}>
           <span className="resume-skills-label">{labels.computer} </span>
-          <EditableSpan value={resume.skills.join(", ")} editable={editable} onCommit={onChangeSkills} />
+          <EditableSpan value={joinList(resume.skills, language)} editable={editable} onCommit={onChangeSkills} />
         </div>
+        {(resume.languages ?? []).length > 0 && (
+          <div data-pdf-key={pdfKey.languages()}>
+            <span className="resume-skills-label">{labels.languages} </span>
+            <EditableSpan
+              value={joinList(resume.languages ?? [], language)}
+              editable={editable}
+              onCommit={onChangeLanguages}
+            />
+          </div>
+        )}
       </div>
     </ResumePaper>
   );

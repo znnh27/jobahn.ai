@@ -1,6 +1,13 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { readContact, type ResumeContact } from "@/lib/resumes/contact";
+import {
+  mergeLanguageBackground,
+  readBackground,
+  readLanguageBackground,
+  type LanguageBackground,
+} from "@/lib/resumes/background";
 
 // Phase 1（經歷資料庫重新設計）的核心：把「新內容」（一份履歷檔案的原文，或一次應徵定案
 // 用到的內容）併進使用者既有的經歷資料庫，只會新增、絕對不會刪除既有資料。
@@ -70,7 +77,8 @@ type MergeAction =
   | NewEntryAction;
 
 interface MergePlanResponse {
-  profile: Record<string, unknown> | null;
+  contact: Partial<ResumeContact> | null;
+  background: Record<string, unknown> | null;
   conflicts_needing_confirmation: string[];
   actions: MergeAction[];
 }
@@ -80,6 +88,8 @@ export interface MergeResult {
   newAchievementsCreated: number;
   variantsAppended: number;
   roleVariantsAppended: number;
+  /** 新增的 Summary、學歷、技能、語言總共幾項。 */
+  backgroundItemsAdded: number;
   conflicts: string[];
 }
 
@@ -100,12 +110,22 @@ const SYSTEM_PROMPT = `你是履歷經歷資料庫的合併助手。使用者已
 5. 職稱也要比照 bullet 累積不同寫法：如果新內容對某個既有 entry 的職稱寫法（跟資料庫裡列出的 roles 比對）不完全一樣（例如「PM」vs「Project Manager」、中英文不同語言下的職稱說法），輸出 append_role_variant 把新寫法加進去；如果新內容的職稱只是大小寫、標點差異，跟既有寫法本質相同，就不用輸出這個動作，避免重複累積幾乎一樣的字串。**任職期間（period）不用做這個處理**，維持原本第一次寫入的版本就好，不管新內容怎麼描述期間都不用理它。
 6. 中文和英文內容分開處理，不要互相翻譯，language 欄位一律用 "zh" 或 "en"。
 7. 不要編造任何內容。
-8. 同時比對這份新內容裡的聯絡資訊、學歷、技能、Professional Summary，跟使用者目前已經存的 profile 資料合併：同一個真實值只是格式不同就直接正規化輸出（電話號碼一律 +886-9XXXXXXXX 格式），真的兜不起來、無法判斷哪個正確的欄位維持原本值、把說明放進 conflicts_needing_confirmation，不要把衝突文字塞進欄位本身。如果這份新內容沒有提供某個 profile 欄位的資訊，profile 就回傳 null 代表不用更新。
-9. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
+8. 聯絡資訊（contact）：跟使用者目前已經存的 contact 合併。同一個真實值只是格式不同就直接正規化輸出（電話號碼一律 +886-9XXXXXXXX 格式）；真的兜不起來、無法判斷哪個正確的欄位維持原本值，把說明放進 conflicts_needing_confirmation，不要把衝突文字塞進欄位本身。新內容裡沒有聯絡資訊就回傳 null。
+9. 經歷以外的內容（background）：把新內容裡的 Professional Summary／自我介紹、學歷、技能、語言能力抽出來，依內容的語言放進 "zh" 或 "en"（跟規則 6 一樣不要互相翻譯）。**這幾項有出現就一定要抽**，不要因為新內容沒有聯絡資訊或缺了其中一項就整個略過；只有新內容完全沒有的項目才給空陣列。
+   - summaries：Summary 整段原文照抄，一段一個字串。
+   - education：每間學校一筆，school 只放校名（城市、國家放 location，不要接在校名後面），detail 放學位、科系、輔修、交換、GPA 等補充（沒有就 null），period、location 沒寫就 null。
+   - skills：工具、軟體、專業技能，一項一個字串，例如 "Figma"、"SQL"、"A/B Testing"。不要把語言能力放進來。
+   - languages：一個語言一個字串，程度寫在括號裡，例如 "English (Fluent, TOEIC 945)"、"German (B2)"、「日文（N2）」。
+   - 跟使用者目前已經存的 background 是同一件事的（同一間學校、同一個技能、同一個語言），用跟既有資料一字不差的寫法輸出，系統才會認出是重複；只有新的資訊（例如新的檢定分數）才用新寫法。
+10. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
 
 輸出格式（嚴格遵守）：
 {
-  "profile": { ... } | null,
+  "contact": { "name_zh": string|null, "name_en": string|null, "email": string|null, "phone": string|null, "linkedin": string|null, "portfolio": string|null } | null,
+  "background": {
+    "zh": { "summaries": string[], "education": [{ "school": string, "detail": string|null, "period": string|null, "location": string|null }], "skills": string[], "languages": string[] },
+    "en": { 同上 }
+  },
   "conflicts_needing_confirmation": string[],
   "actions": [
     { "action": "append_variant", "entryId": string, "achievementId": string, "text": string, "angleLabel": string },
@@ -134,8 +154,11 @@ export async function mergeContentIntoExperienceDb(params: {
   const userPrompt = `===== 使用者目前的經歷資料庫（摘要，每個 achievement 列出目前全部的寫法）=====
 ${JSON.stringify(existingSummary, null, 2)}
 
-===== 使用者目前的 profile 資料 =====
-${JSON.stringify(existingProfile?.data ?? {}, null, 2)}
+===== 使用者目前的聯絡資訊（contact）=====
+${JSON.stringify(readContact(existingProfile?.data), null, 2)}
+
+===== 使用者目前的 background =====
+${JSON.stringify(readBackground(existingProfile?.data), null, 2)}
 
 ===== 新內容（來源：${sourceLabel}）=====
 ${rawContent}`;
@@ -151,26 +174,14 @@ ${rawContent}`;
 
   const plan = parseJsonResponse(response.text);
 
-  if (plan.profile) {
-    const existingData = existingProfile?.data ?? {};
-    await supabase.from("profile_data").upsert({
-      user_id: userId,
-      data: {
-        ...existingData,
-        ...plan.profile,
-        // 使用者自己填過履歷抬頭（姓名、聯絡資訊）就以使用者填的為準，上傳解析出來的不能蓋掉。
-        ...(existingData.contact_confirmed ? { contact: existingData.contact, contact_confirmed: true } : {}),
-        // 排版設定是使用者調的，AI 回傳的 profile 不能動到。
-        ...(existingData.resume_layout ? { resume_layout: existingData.resume_layout } : {}),
-      },
-    });
-  }
+  const backgroundItemsAdded = await mergeProfile(supabase, userId, existingProfile?.data ?? {}, plan);
 
   const result: MergeResult = {
     newEntriesCreated: 0,
     newAchievementsCreated: 0,
     variantsAppended: 0,
     roleVariantsAppended: 0,
+    backgroundItemsAdded,
     conflicts: plan.conflicts_needing_confirmation ?? [],
   };
 
@@ -386,4 +397,43 @@ function parseJsonResponse(text: string): MergePlanResponse {
   } catch {
     throw new Error("AI 回傳的合併計畫不是有效的 JSON，解析失敗");
   }
+}
+
+/**
+ * 聯絡資訊、Summary、學歷、技能、語言併進 profile_data。只會新增，不會刪掉已經有的內容；
+ * 使用者自己填過的履歷抬頭（contact_confirmed）以使用者填的為準，排版設定等其他欄位原樣保留。
+ */
+async function mergeProfile(
+  supabase: SupabaseClient,
+  userId: string,
+  existingData: Record<string, unknown>,
+  plan: MergePlanResponse,
+): Promise<number> {
+  const data = { ...existingData };
+  let added = 0;
+
+  if (plan.contact && !existingData.contact_confirmed) {
+    const incoming = Object.fromEntries(
+      Object.entries(plan.contact).filter(([, v]) => typeof v === "string" && v.trim()),
+    );
+    data.contact = { ...readContact(existingData), ...incoming };
+  }
+
+  if (plan.background) {
+    const existing = readBackground(existingData);
+    const merged = {
+      zh: mergeLanguageBackground(existing.zh, readLanguageBackground(plan.background.zh)),
+      en: mergeLanguageBackground(existing.en, readLanguageBackground(plan.background.en)),
+    };
+    added = countItems(merged.zh) + countItems(merged.en) - countItems(existing.zh) - countItems(existing.en);
+    data.background = merged;
+  }
+
+  const { error } = await supabase.from("profile_data").upsert({ user_id: userId, data });
+  if (error) throw new Error(`儲存個人資料失敗：${error.message}`);
+  return added;
+}
+
+function countItems(b: LanguageBackground): number {
+  return b.summaries.length + b.education.length + b.skills.length + b.languages.length;
 }

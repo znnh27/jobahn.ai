@@ -13,18 +13,26 @@ const CJK_OR_WHITESPACE_TOKEN = /[一-鿿　-〿＀-￯]|\s+|[^一-鿿　-〿＀
 
 const fontsDir = () => path.join(process.cwd(), "public", "fonts");
 let noto: Font | null = null;
+let notoBold: Font | null = null;
 let carlito: Font | null = null;
+let carlitoBold: Font | null = null;
 
-function fonts(): { noto: Font; carlito: Font } {
+function fonts(bold: boolean): { noto: Font; carlito: Font } {
   // 單一字型檔一定回傳 Font（不是給 .ttc 合集用的 FontCollection）
+  if (bold) {
+    notoBold ??= openSync(path.join(fontsDir(), "NotoSansTC-Bold.otf")) as Font;
+    carlitoBold ??= openSync(path.join(fontsDir(), "carlito", "Carlito-Bold.ttf")) as Font;
+    return { noto: notoBold, carlito: carlitoBold };
+  }
   noto ??= openSync(path.join(fontsDir(), "NotoSansTC-Regular.otf")) as Font;
   carlito ??= openSync(path.join(fontsDir(), "carlito", "Carlito-Regular.ttf")) as Font;
   return { noto, carlito };
 }
 
-function measureWidth(text: string, fontSize: number): number {
+/** 用 PDF 實際的字型量一段文字的寬度（pt）。抬頭聯絡資訊排行也用這個（contactLines.ts）。 */
+export function measureWidth(text: string, fontSize: number, bold = false): number {
   if (!text) return 0;
-  const f = fonts();
+  const f = fonts(bold);
   let width = 0;
   for (const ch of text) {
     const font = f.carlito.hasGlyphForCodePoint(ch.codePointAt(0) ?? 0) ? f.carlito : f.noto;

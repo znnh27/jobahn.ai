@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 import { Document, Font, Page, StyleSheet, Text, View, type DocumentProps, type ViewProps } from "@react-pdf/renderer";
 import { CONTACT_SEPARATOR, contactParts, getLabels, pickName, type ResumeDocInput } from "./resumeDocContent";
 import { wrapCjkText } from "./wrapCjkText";
+import { groupContactLines } from "./contactLines";
+import { joinList } from "@/lib/resumes/background";
 import { pdfKey, resolveMetrics, type ResumeMetrics, type ResumeSectionKey } from "@/lib/resumes/typography";
 
 export const PAGE_WIDTH_PT = 595.28; // A4
@@ -67,7 +69,8 @@ function createStyles(m: ResumeMetrics, language: string) {
       paddingRight: PAGE_PADDING_PT,
     },
     name: { fontSize: m.name, fontWeight: "bold", textAlign: "center", lineHeight: 1.2 },
-    contact: { fontSize: m.contact, textAlign: "center", marginTop: m.contactBefore, marginBottom: m.contactAfter },
+    contact: { marginTop: m.contactBefore, marginBottom: m.contactAfter },
+    contactLine: { fontSize: m.contact, lineHeight: m.line / m.body, textAlign: "center" },
     sectionHeader: {
       fontSize: m.header,
       fontWeight: "bold",
@@ -176,7 +179,7 @@ export function ResumePdfDocument({
   // 標題後面至少要放得下下一段的上方間距加兩行，標題才留在這一頁。
   const keepWithNext = metrics.block + metrics.line * 2;
   const name = pickName(contact, language);
-  const parts = contactParts(contact, language);
+  const contactLines = groupContactLines(contactParts(contact, language), metrics.contact, BODY_WIDTH_PT);
 
   return (
     <Document onRender={onRender}>
@@ -184,17 +187,20 @@ export function ResumePdfDocument({
         <Keyed k={pdfKey.name()}>
           <Text style={styles.name}>{name}</Text>
         </Keyed>
-        {/* 聯絡資訊一行：標籤粗體、內容一般字重，用「 / 」隔開。 */}
-        <Keyed k={pdfKey.contact()}>
-          <Text style={styles.contact}>
-            {parts.map((p, i) => (
-              <Text key={i}>
-                {i > 0 ? CONTACT_SEPARATOR : ""}
-                <Text style={styles.bold}>{p.label}: </Text>
-                {p.value}
-              </Text>
-            ))}
-          </Text>
+        {/* 聯絡資訊：標籤粗體、內容一般字重，用「 / 」隔開；放不下時整組換到下一行（contactLines.ts）。 */}
+        <Keyed k={pdfKey.contact()} style={styles.contact}>
+          {contactLines.map((line, li) => (
+            <Text key={li} style={styles.contactLine}>
+              {line.map((p, i) => (
+                <Text key={i}>
+                  {i > 0 ? CONTACT_SEPARATOR : ""}
+                  <Text style={styles.bold}>{p.label}: </Text>
+                  {p.value}
+                </Text>
+              ))}
+              {li < contactLines.length - 1 ? CONTACT_SEPARATOR.trimEnd() : ""}
+            </Text>
+          ))}
         </Keyed>
 
         <Keyed keepWithNext={keepWithNext} k={pdfKey.header("summary")}>
@@ -255,11 +261,24 @@ export function ResumePdfDocument({
           <Text style={styles.bodyText}>
             <Text style={styles.bold}>{labels.computer} </Text>
             {/* 第一行前面有「技能：」標籤，一起算斷行位置，再把標籤切掉。 */}
-            {wrapIfZh(`${labels.computer} ${resume.skills.join(", ")}`, language, metrics.body, BODY_WIDTH_PT).slice(
+            {wrapIfZh(`${labels.computer} ${joinList(resume.skills, language)}`, language, metrics.body, BODY_WIDTH_PT).slice(
               labels.computer.length + 1,
             )}
           </Text>
         </Keyed>
+        {(resume.languages ?? []).length > 0 && (
+          <Keyed k={pdfKey.languages()} splittable>
+            <Text style={styles.bodyText}>
+              <Text style={styles.bold}>{labels.languages} </Text>
+              {wrapIfZh(
+                `${labels.languages} ${joinList(resume.languages ?? [], language)}`,
+                language,
+                metrics.body,
+                BODY_WIDTH_PT,
+              ).slice(labels.languages.length + 1)}
+            </Text>
+          </Keyed>
+        )}
       </Page>
     </Document>
   );

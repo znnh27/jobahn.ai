@@ -6,6 +6,8 @@ import { ResumePaper } from "@/app/ResumePaper";
 import type { ResumeLayoutSettings } from "@/lib/resumes/typography";
 import { getSectionLabels } from "@/lib/resumes/sectionLabels";
 import type { StoredFlag } from "@/lib/experience/storedFlag";
+import type { LanguageBackground } from "@/lib/resumes/background";
+import { EducationSkillsSection, SummarySection } from "./BackgroundSections";
 import {
   updateEntryFieldAction,
   updatePeriodAction,
@@ -52,6 +54,8 @@ export interface HighlightTarget {
 
 export function ExperienceCanvas({
   entries,
+  background,
+  otherBackground,
   language,
   layout,
   onActivateFlag,
@@ -60,6 +64,10 @@ export function ExperienceCanvas({
   activeFlagKey,
 }: {
   entries: ExperienceEntry[];
+  /** 這個語言的 Summary、學歷、技能、語言。 */
+  background: LanguageBackground;
+  /** 另一個語言的，用來判斷要不要顯示「翻過來」的按鈕。 */
+  otherBackground: LanguageBackground;
   language: "zh" | "en";
   /** 字級／上下間距，跟履歷畫布同一套（typography.ts）。 */
   layout: ResumeLayoutSettings;
@@ -78,53 +86,64 @@ export function ExperienceCanvas({
     );
   }
 
-  if (langEntries.length === 0) {
-    return (
+  // 還沒有經歷時一樣顯示紙張：學歷、技能、語言區塊可以先填。
+  const emptyNote =
+    langEntries.length === 0 ? (
       <div className="card exp-empty-state">
         {language === "zh" ? "還沒有中文版的經歷資料。" : "還沒有英文版的經歷資料。"}
         按上面的「新增經歷」上傳一份履歷或跟 AI 聊，或等你完成第一次應徵，內容就會自動記錄在這裡。
       </div>
-    );
-  }
+    ) : null;
 
   const labels = getSectionLabels(language);
   const workEntries = langEntries.filter((e) => e.entryType === "work");
   const leadershipEntries = langEntries.filter((e) => e.entryType !== "work");
 
   return (
-    <ResumePaper language={language} layout={layout}>
-      {workEntries.length > 0 && (
-        <>
-          <div className="resume-section-header">{labels.experience}</div>
-          {workEntries.map((entry) => (
-            <EntryBlock
-              key={entry.id}
-              entry={entry}
-              flagFor={flagFor}
-              onActivateFlag={onActivateFlag}
-              highlight={highlight}
-              activeFlagKey={activeFlagKey}
-            />
-          ))}
-        </>
-      )}
+    <>
+      {emptyNote}
+      <ResumePaper language={language} layout={layout}>
+        <SummarySection background={background} language={language} />
 
-      {leadershipEntries.length > 0 && (
-        <>
-          <div className="resume-section-header">{labels.leadership}</div>
-          {leadershipEntries.map((entry) => (
-            <EntryBlock
-              key={entry.id}
-              entry={entry}
-              flagFor={flagFor}
-              onActivateFlag={onActivateFlag}
-              highlight={highlight}
-              activeFlagKey={activeFlagKey}
-            />
-          ))}
-        </>
-      )}
-    </ResumePaper>
+        {workEntries.length > 0 && (
+          <>
+            <div className="resume-section-header">{labels.experience}</div>
+            {workEntries.map((entry) => (
+              <EntryBlock
+                key={entry.id}
+                entry={entry}
+                flagFor={flagFor}
+                onActivateFlag={onActivateFlag}
+                highlight={highlight}
+                activeFlagKey={activeFlagKey}
+              />
+            ))}
+          </>
+        )}
+
+        {leadershipEntries.length > 0 && (
+          <>
+            <div className="resume-section-header">{labels.leadership}</div>
+            {leadershipEntries.map((entry) => (
+              <EntryBlock
+                key={entry.id}
+                entry={entry}
+                flagFor={flagFor}
+                onActivateFlag={onActivateFlag}
+                highlight={highlight}
+                activeFlagKey={activeFlagKey}
+              />
+            ))}
+          </>
+        )}
+
+        <EducationSkillsSection
+          background={background}
+          otherBackground={otherBackground}
+          language={language}
+        />
+      </ResumePaper>
+    </>
   );
 }
 

@@ -36,11 +36,15 @@ export interface ResumeLayoutSettings {
   /** 內文（bullet）字級，其他字級跟著等比縮放。 */
   bodyPt: number;
   spacing: ResumeSpacing;
+  /** 抬頭聯絡資訊的字級。沒設就跟著內文等比縮放；網址很長、斷行難看時使用者可以單獨調小。 */
+  contactPt?: number;
 }
 
 export const BODY_PT_MIN = 9;
 export const BODY_PT_MAX = 12;
 export const BODY_PT_STEP = 0.5;
+export const CONTACT_PT_MIN = 7;
+export const CONTACT_PT_MAX = 12;
 
 export const SPACING_OPTIONS: { value: ResumeSpacing; label: string }[] = [
   { value: "tight", label: "緊湊" },
@@ -81,7 +85,11 @@ export function readLayoutSettings(raw: unknown, language: string): ResumeLayout
       ? Math.min(BODY_PT_MAX, Math.max(BODY_PT_MIN, Math.round(r.bodyPt / BODY_PT_STEP) * BODY_PT_STEP))
       : fallback.bodyPt;
   const spacing = r.spacing && r.spacing in SPACING_FACTORS ? r.spacing : fallback.spacing;
-  return { bodyPt, spacing };
+  const contactPt =
+    typeof r.contactPt === "number" && Number.isFinite(r.contactPt)
+      ? Math.min(CONTACT_PT_MAX, Math.max(CONTACT_PT_MIN, Math.round(r.contactPt / BODY_PT_STEP) * BODY_PT_STEP))
+      : undefined;
+  return contactPt === undefined ? { bodyPt, spacing } : { bodyPt, spacing, contactPt };
 }
 
 /**
@@ -114,7 +122,8 @@ export function resolveMetrics(language: string, raw?: unknown): ResumeMetrics {
   const round = (n: number) => Math.round(n * 100) / 100;
   return {
     name: round(base.name * scale),
-    contact: round(base.contact * scale),
+    // 抬頭字級取到 0.5pt，排版選單上顯示、加減才會是整齊的數字。
+    contact: settings.contactPt ?? Math.round(base.contact * scale * 2) / 2,
     header: round(base.header * scale),
     body: settings.bodyPt,
     line: round(base.line * scale * f.line),
@@ -143,6 +152,7 @@ export const pdfKey = {
   school: (i: number) => `education:${i}:school`,
   eduDetail: (i: number) => `education:${i}:detail`,
   skills: () => "skills",
+  languages: () => "languages",
 };
 
 /** 量 PDF 的結果。 */

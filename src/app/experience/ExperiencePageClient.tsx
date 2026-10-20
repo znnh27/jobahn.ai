@@ -11,6 +11,7 @@ import { ElicitationPanel } from "./ElicitationPanel";
 import { LangSwitch } from "@/app/LangSwitch";
 import { LayoutMenu } from "@/app/LayoutMenu";
 import { readLayoutSettings, type ResumeLayoutSettings } from "@/lib/resumes/typography";
+import type { ProfileBackground } from "@/lib/resumes/background";
 import { ProgressBar } from "@/app/ProgressBar";
 import {
   applyFlagRewriteAction,
@@ -51,9 +52,12 @@ function storedFlags(entries: ExperienceEntry[]): ScanFlag[] {
 
 export function ExperiencePageClient({
   entries,
+  background,
   initialLayouts,
 }: {
   entries: ExperienceEntry[];
+  /** 經歷以外的 Summary、學歷、技能、語言（每個語言各一份）。 */
+  background: ProfileBackground;
   /** 使用者調過的字級／上下間距（存在帳號裡，也是新履歷的預設排版）。 */
   initialLayouts: LayoutMap;
 }) {
@@ -236,7 +240,7 @@ export function ExperiencePageClient({
                 value={activeLanguage}
                 onChange={setActiveLanguage}
               />
-              <LayoutMenu layout={layout} onChange={changeLayout} />
+              <LayoutMenu language={activeLanguage} layout={layout} onChange={changeLayout} />
             </div>
             <div className="canvas-bar-actions">
               {scanError && <span className="text-error">{scanError}</span>}
@@ -261,6 +265,8 @@ export function ExperiencePageClient({
           {scanNote && scanProgress === null && <p className="scan-note">{scanNote}</p>}
           <ExperienceCanvas
             entries={entries}
+            background={background[activeLanguage]}
+            otherBackground={background[activeLanguage === "zh" ? "en" : "zh"]}
             language={activeLanguage}
             layout={layout}
             onActivateFlag={setActiveFlagKey}

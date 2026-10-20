@@ -4,6 +4,7 @@ import { AppNav, getDisplayName } from "../AppNav";
 import { loadExperienceEntries } from "./loadEntries";
 import { ExperiencePageClient } from "./ExperiencePageClient";
 import { readLayoutDefaults } from "@/lib/resumes/typography";
+import { readBackground } from "@/lib/resumes/background";
 
 export default async function ExperiencePage() {
   const supabase = await createClient();
@@ -31,7 +32,10 @@ export default async function ExperiencePage() {
           </div>
         </div>
 
-        <ExperiencePageClient entries={entries} initialLayouts={readLayoutDefaults(profile?.data)} />
+        <ExperiencePageClient
+          entries={entries}
+          background={readBackground(profile?.data)}
+          initialLayouts={readLayoutDefaults(profile?.data)} />
       </div>
     </div>
   );

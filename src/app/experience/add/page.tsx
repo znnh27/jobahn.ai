@@ -6,6 +6,7 @@ import { loadExperienceEntries } from "../loadEntries";
 import Link from "next/link";
 import { ArrowLeftIcon } from "../../icons";
 import { BlobScene } from "../../BlobScene";
+import { lacksBackground } from "@/lib/resumes/background";
 
 // 經歷資料庫的「新增經歷」：跟首次登入同一套版面（滿版色塊、中間大 logo、同一個分頁卡片），
 // 只是分頁換成「新增履歷來源」跟「跟 AI 聊，新增經歷」；左上角多一個回經歷資料庫的連結。
@@ -22,6 +23,7 @@ export default async function AddExperiencePage(props: PageProps<"/experience/ad
 
   const entries = await loadExperienceEntries(supabase, user.id);
   const language = lang === "en" ? "en" : "zh";
+  const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
 
   return (
     <div className="page page--with-nav page--blobs">
@@ -42,7 +44,12 @@ export default async function AddExperiencePage(props: PageProps<"/experience/ad
           </div>
         </div>
 
-        <AddExperienceChoice mode="experience" entries={entries} language={language} />
+        <AddExperienceChoice
+          mode="experience"
+          entries={entries}
+          language={language}
+          needsBackground={lacksBackground(profile?.data)}
+        />
       </div>
     </div>
   );

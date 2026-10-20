@@ -7,6 +7,7 @@ export const SECTION_LABELS: Record<string, Record<string, string>> = {
     education: "EDUCATION",
     skills: "ADDITIONAL INFORMATION",
     computer: "Computer:",
+    languages: "Languages:",
   },
   zh: {
     summary: "專業摘要",
@@ -15,6 +16,7 @@ export const SECTION_LABELS: Record<string, Record<string, string>> = {
     education: "學歷",
     skills: "其他資訊",
     computer: "技能：",
+    languages: "語言：",
   },
 };
 

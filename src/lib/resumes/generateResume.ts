@@ -5,8 +5,16 @@ import { BULLET_RULES } from "@/lib/experience/bulletRules";
 import { computeAtsScore, type JdImportance } from "./atsScore";
 import { resolveJdItems, type JdBaseItem } from "./jdChecklist";
 import { readContact, type ResumeContact } from "./contact";
+import { normalize, readBackground, type LanguageBackground } from "./background";
+import { ensureBackgroundLanguage } from "./translateBackground";
 import { resolveMetrics } from "./typography";
-import { readLayoutDefaults, type ResumeLayoutSettings } from "./typography";
+import {
+  BODY_PT_MAX,
+  BODY_PT_STEP,
+  readLayoutDefaults,
+  readLayoutSettings,
+  type ResumeLayoutSettings,
+} from "./typography";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { toTraditional } from "@/lib/text/toTraditional";
 
@@ -16,7 +24,8 @@ const SUMMARY_RULES = `Professional Summary 寫作規則（一定要遵守）：
 3. 第一句定位使用者的核心優勢/專業定位，中間 1-2 句呼應 JD 最看重的能力並帶出經歷資料庫裡的具體佐證（能帶量化成果就帶），最後視情況一句帶出跟這個職缺/領域的契合度。
 4. 禁止空泛形容詞堆疊（例如「passionate」「driven」「results-oriented」單獨出現卻沒有具體事實撐著），每個特質描述都要有實際內容佐證，不能只是形容詞。
 5. 不要直接重複 work_experience 裡已經寫的 bullet 原句，用更高層次的方式歸納主題，避免跟下面內容重疊感太重。
-6. 一樣要降低 AI 感、避免堆疊術語，寫得像人類自然會寫的用詞。`;
+6. 一樣要降低 AI 感、避免堆疊術語，寫得像人類自然會寫的用詞。
+7. 使用者資料裡的 summaries 是他自己以前寫過的 Summary，用來理解他怎麼定位自己、有哪些可以拿來寫的事實，不要整段照抄；事實一樣不能超出經歷資料庫和這些 Summary 裡有的內容。`;
 
 // bullet 本身的寫法用經歷資料庫共用的那一份規則（lib/experience/bulletRules.ts），
 // 這裡只補「挑內容、排一份履歷」才需要的規則。
@@ -24,8 +33,8 @@ const WRITING_RULES = `${BULLET_RULES}
 
 排履歷的規則（一定要遵守）：
 1. 規則 6 的「依目標 JD 決定留不留」：這次的目標 JD 就是下面給的 JD。
-2. 每段經歷的 bullet 依跟這份 JD 的相關度排序，最相關的放最前面。跟 JD 最相關的那段經歷最多 6 條，其他每段最多 4 條。
-3. 目標是剛好一頁 A4：內容不夠時，依跟 JD 的相關度補上更多經歷和 bullet（包含跟 JD 沒那麼直接、但能展現能力的經歷），不要留下大片空白。真的放不下才取捨，優先拿掉跟這份 JD 關聯度最低的內容（通常是最舊、或最不相關的經歷），不要每一句都砍幾個字讓全部內容都變得倉促。
+2. 先依這份 JD 把經歷資料庫裡的經歷分成「主要經歷」（跟 JD 直接相關）和「次要經歷」（跟 JD 沒那麼直接、但能展現能力）。每段經歷的 bullet 依跟 JD 的相關度排序，最相關的放最前面。
+3. 履歷一定要剛好填滿一頁 A4，少於一頁會讓人覺得經歷太少：主要經歷優先放、bullet 放好放滿；主要經歷都放完了還不滿一頁，就接著放次要經歷。真的放不下才取捨，優先拿掉跟這份 JD 關聯度最低的內容（通常是最舊、或最不相關的次要經歷），不要每一句都砍幾個字讓全部內容都變得倉促。
 4. JD 原文用字要盡量真的出現在履歷裡（不是只有意思接近），但要放在具體案例的敘述裡（見規則 7），前提是使用者真的有對應的真實經歷可以支撐，不能為了關鍵字硬掰。
 5. 同一段經歷可以依這份 JD 換敘事角度（例如投系統規劃職缺強調規劃，投行銷職缺強調成長數據），但底層事實跟程度不能變。`;
 
@@ -54,7 +63,7 @@ const ZH_TO_EN_RULES = `來源轉換規則（這次的經歷資料庫是中文�
 1. 不是逐句翻譯，而是依英文履歷慣例重寫。事實和數字不能改，只改寫法。
 2. 中文的「負責、協助、參與」不能直譯成 Responsible for / Assisted in / Participated in，要改寫成實際做的具體動作。
 3. 例外：這次 "org" 欄位不用跟 org_name 一字不改，要轉成公司的英文名稱（有官方英文名就用官方的）；外國人不認識的公司，在英文名稱後加一句簡介（產業、規模或產品），例如：XX Bank, a Taiwanese commercial bank with 100+ branches。
-4. role、period、location、學歷、技能也都要轉成英文。`;
+4. role、period、location、學歷、技能、語言能力也都要轉成英文。`;
 
 // 反過來：使用者只有英文經歷（例如只上傳了英文履歷）時，中文版改從英文經歷重寫。
 // 以前只有中→英的退路，只有英文資料的人產出的中文履歷會整份沒有經歷。
@@ -62,7 +71,7 @@ const EN_TO_ZH_RULES = `來源轉換規則（這次的經歷資料庫是英文�
 1. 不是逐句翻譯，而是依中文履歷慣例重寫，用台灣用語。事實和數字不能改，只改寫法。
 2. 避免翻譯腔，例如不要把 "Led" 一律翻成「帶領」、不要寫「透過……，成功地……」這種長串修飾。
 3. "org" 欄位跟 org_name 一字不改（外商、英文公司名在中文履歷裡本來就常保留英文）。
-4. role、period、location、學歷、技能轉成中文寫法；專有名詞、產品名、工具名保留英文。`;
+4. role、period、location、學歷、技能、語言能力轉成中文寫法；專有名詞、產品名、工具名保留英文。`;
 
 export const COVERAGE_RULES =`JD 符合度清單的判定標準（務必嚴格遵守，這是評分結果每次跑出來不一致的主要原因，要特別小心）：
 1. covered 只有在內容裡有「明確、具體、可以直接指認」的事實對應到這個 JD 項目時，才標記 true。單純「產業相關」、「性質類似」、「可以類推應該也做得到」都不算，一律標記 false。
@@ -70,11 +79,16 @@ export const COVERAGE_RULES =`JD 符合度清單的判定標準（務必嚴格�
 3. 每次判斷同一個項目，都要用同一套標準重新逐項檢查：先問「這句話有沒有字面上或近乎字面上支持這個要求」，不要憑整體印象覺得「這個人應該做得到」就標 true，也不要因為前一次判斷是 true 就傾向維持 true（或反過來），每次都要重新看內容本身。
 4. 如果只是職務相近、可以類推、但沒有具體事實佐證，一律標 false，並在缺口裡具體寫出缺的是什麼，不要寫模稜兩可的描述。`;
 
-const SYSTEM_PROMPT = `你是履歷客製化助手。使用者會給你：這個職缺的 JD、使用者的經歷資料庫、使用者的個人資料（聯絡方式、學歷、技能）。
+const SYSTEM_PROMPT = `你是履歷客製化助手。使用者會給你：這個職缺的 JD、使用者的經歷資料庫、使用者過去寫過的 Summary 跟學歷、技能、語言能力。
 
 經歷資料庫的結構說明：每筆經歷（同一家公司同一個職位）底下的 achievements 是「同一件事的不同寫法」分組——同一個 achievement 底下的每個 variant 講的是同一件真實的事，只是措辭角度不同，variant.angleLabel 標註這個寫法強調的重點（例如「強調數據分析」「強調從 0 到 1 實作」）。同一個 achievement 底下的多個 variant 不是好幾件不同的事，不要當成好幾條 bullet 分別寫進履歷。
 
-你的任務：分析 JD 要求哪些條件，針對每個要放進履歷的 achievement，從它底下的 variant 裡挑一個角度最貼近 JD 的當作事實依據，再照下面的寫作規則寫成這份履歷的 bullet，合併成一份完整履歷（Professional Summary、工作經歷、領導經驗/專案、學歷、技能）。
+你的任務：分析 JD 要求哪些條件，針對每個要放進履歷的 achievement，從它底下的 variant 裡挑一個角度最貼近 JD 的當作事實依據，再照下面的寫作規則寫成這份履歷的 bullet，合併成一份完整履歷（Professional Summary、工作經歷、領導經驗/專案、學歷、技能、語言能力）。
+
+學歷、技能、語言能力：
+1. education、languages 照使用者資料一字不改照抄全部項目，校名、科系、輔修都不能改寫或翻譯（系統也會直接用使用者資料覆蓋）。
+2. skills 從使用者的技能裡挑跟這份 JD 相關的放前面，跟 JD 完全無關、又佔版面的可以拿掉；每一項都要跟使用者資料裡的寫法一字不差，不能加使用者資料裡沒有的技能。語言能力不要放進 skills。
+3. 使用者資料裡沒有 languages 就給空陣列。
 
 經歷資料庫裡的寫法不一定優化過（使用者可能還沒用過資料庫的檢查、潤飾功能），常見問題是流水帳、步驟描述、弱動詞開頭、沒有成果、一句塞太多事。不要原封不動照抄：每一條都要對照寫作規則檢查，不符合就重寫；已經符合規則的寫法可以保留。重寫只改寫法、不改事實：數字、專案歸屬、做法都只能用資料庫裡有的，不能新增資料庫沒有的數字、成果或方法。
 
@@ -90,7 +104,8 @@ ${WRITING_RULES}
   "work_experience": [{ "org": string, "role": string, "period": string, "location": string|null, "bullets": string[] }],
   "leadership": [{ "org": string, "role": string, "period": string, "location": string|null, "bullets": string[] }],
   "education": [{ "school": string, "period": string, "location": string|null, "detail": string|null }],
-  "skills": string[]
+  "skills": string[],
+  "languages": string[]
 }`;
 
 interface ExperienceEntryRow {
@@ -122,6 +137,8 @@ export interface GeneratedResume {
     }>;
     education: Array<{ school: string; period: string; location: string | null; detail: string | null }>;
     skills: string[];
+    /** 語言能力，例如「German (B2)」。舊的履歷沒有這個欄位。 */
+    languages?: string[];
     /** 使用者在畫布上調的字級跟間距，沒有就用預設值（見 typography.ts）。 */
     layout?: ResumeLayoutSettings;
   };
@@ -220,12 +237,18 @@ export async function generateResumeForApplication(
       sourceLanguage = other;
     }
 
+    // 這個語言還沒有學歷、技能、語言能力就先從另一個語言翻好存起來（只翻一次），
+    // 生成出來的學歷、語言能力一律照這份一字不改（pinBackground）。
+    const background = await ensureBackgroundLanguage({ supabase, userId, language: lang === "zh" ? "zh" : "en" });
+    const pin = (r: Resume) => pinBackground(r, background);
+
     const userPrompt = buildUserPrompt({
       jd: application.job_description,
       language: lang,
       sourceLanguage,
       entries: langEntries,
       profile: profile?.data ?? {},
+      background: withReferenceSummaries(background, profile?.data),
     });
 
     const response = await askClaude({
@@ -237,7 +260,7 @@ export async function generateResumeForApplication(
       supabase,
     });
 
-    const resume = parseJsonResponse<GeneratedResume["resume"]>(response.text);
+    const resume = pin(parseJsonResponse<GeneratedResume["resume"]>(response.text));
     if (lang === "zh") polishChinese(resume);
     // 經歷資料庫調過字級／上下間距的話，新履歷直接用那個設定。
     const defaultLayout = layoutDefaults[lang as "zh" | "en"];
@@ -250,6 +273,8 @@ export async function generateResumeForApplication(
       resume,
       contact: readContact(profile?.data),
       basePrompt: userPrompt,
+      entries: langEntries,
+      pin,
     });
     const filled = resumeDraft[lang];
 
@@ -327,6 +352,7 @@ function resumeLines(r: Resume): string[] {
     `摘要：${r.summary}`,
     ...[...(r.work_experience ?? []), ...(r.leadership ?? [])].flatMap((e) => e.bullets.map((b) => `${e.org}｜${b}`)),
     `技能：${(r.skills ?? []).join(", ")}`,
+    `語言：${(r.languages ?? []).join(", ")}`,
   ];
 }
 
@@ -522,13 +548,16 @@ export async function rescoreResumeForApplication(
   if (updateError) throw new Error(`儲存評分結果失敗：${updateError.message}`);
 }
 
-/** 一頁填不到這個比例就補內容。 */
-const MIN_FILL_RATIO = 0.85;
+/** 一頁要填到這個比例才算滿；不到就補內容，經歷資料庫用完了就放大排版。 */
+const TARGET_FILL_RATIO = 0.92;
+/** 補內容最多幾輪。 */
+const FILL_ROUNDS = 3;
 
 /**
  * 生成完用下載時同一套程式排 PDF 量版面，調到剛好一頁：
- * - 第一頁用不到 85%：請 AI 從經歷資料庫補內容，告訴它大約還剩幾行（最多補一次）。
- *   補完超出一頁、或沒有變多，就用原本的版本。
+ * - 第一頁用不到 92%：請 AI 從經歷資料庫補內容（先主要經歷、再次要經歷），告訴它大約還剩幾行，
+ *   最多補三輪；補完超出一頁就丟掉那一版、下一輪只補一半。
+ * - 經歷資料庫的內容都用完了還不滿：放寬間距、放大內文字級，直到剛好一頁。
  * - 超出一頁：請 AI 拿掉跟 JD 最不相關的內容，告訴它要拿掉幾行（最多兩輪）。
  *   還是超出就留超出最少的那版，畫布上會照常顯示超出一頁的提示。
  */
@@ -540,6 +569,10 @@ async function fitOnePage(params: {
   contact: ResumeContact;
   /** 生成時的完整 prompt（JD、經歷資料庫、個人資料），調整時沿用。 */
   basePrompt: string;
+  /** 這次生成用的經歷資料庫，用來判斷還有沒有內容可以補。 */
+  entries: ExperienceEntryRow[];
+  /** AI 改完的版本一樣要把學歷、技能、語言換回經歷資料庫的寫法。 */
+  pin: (r: Resume) => Resume;
 }): Promise<Resume> {
   const { measureResumePdf } = await import("@/lib/documents/measureResumePdf");
   const { BODY_WIDTH_PT } = await import("@/lib/documents/ResumePdfDocument");
@@ -569,7 +602,7 @@ async function fitOnePage(params: {
       supabase: params.supabase,
     });
     try {
-      const next = parseJsonResponse<Resume>(response.text);
+      const next = params.pin(parseJsonResponse<Resume>(response.text));
       if (params.lang === "zh") polishChinese(next);
       next.layout = resume.layout;
       return next;
@@ -604,19 +637,77 @@ async function fitOnePage(params: {
       break;
     }
   }
-  if (fit.pages > 1 || fit.fillRatio >= MIN_FILL_RATIO) return current;
+  if (fit.pages > 1) return current;
 
-  // 一頁沒填滿：從經歷資料庫補內容（留 2 行緩衝，避免剛好擠到第二頁）。
-  const spareLines = Math.max(0, Math.floor(((1 - fit.fillRatio) * contentHeight) / metrics.line) - 2);
-  const expanded = await ask(current, [
-    `這份履歷只用了一頁 A4 的 ${Math.round(fit.fillRatio * 100)}%，下面還空著大約 ${spareLines} 行（每行${charsPerLine}）。請從經歷資料庫補上內容，把這些空間用掉，但不能超過 ${spareLines} 行：`,
-    `- 優先補回被略過、但跟 JD 有關的經歷或 bullet；其次是能展現能力的其他經歷。`,
-    `- 已經寫好的內容原則上不要改，只新增。`,
-  ]);
-  if (!expanded) return current;
-  const after = await measure(expanded).catch(() => null);
-  if (!after || after.pages > 1 || after.fillRatio <= fit.fillRatio) return current;
-  return expanded;
+  // 一頁沒填滿：分幾輪從經歷資料庫補內容，先補主要經歷、再補次要經歷（留 2 行緩衝，避免剛好擠到第二頁）。
+  // 補完超出一頁就丟掉那一版，下一輪只要求補一半的行數。
+  let askLines = spareLinesOf(fit.fillRatio);
+  for (let round = 0; fit.fillRatio < TARGET_FILL_RATIO && round < FILL_ROUNDS && askLines > 0; round++) {
+    if (dbExhausted(current, params.entries)) break;
+    const expanded = await ask(current, [
+      `這份履歷只用了一頁 A4 的 ${Math.round(fit.fillRatio * 100)}%，下面還空著大約 ${askLines} 行（每行${charsPerLine}）。履歷一定要填滿一頁，少於一頁會讓人覺得經歷太少。請從經歷資料庫補上大約 ${askLines} 行的內容，不能超過：`,
+      `- 先把經歷資料庫裡的經歷依這份 JD 分成主要（跟 JD 直接相關）和次要。主要經歷裡還沒寫進履歷的 bullet 先補；主要經歷都放完了，就補次要經歷（整段經歷沒放進來的也要加進來）。`,
+      `- 這一步不受每段 bullet 條數上限的限制。`,
+      `- 已經寫好的內容原則上不要改，只新增。`,
+    ]);
+    if (!expanded) break;
+    const after = await measure(expanded).catch(() => null);
+    if (!after) break;
+    if (after.pages > 1) {
+      askLines = Math.floor(askLines / 2);
+      continue;
+    }
+    if (after.fillRatio <= fit.fillRatio) break;
+    current = expanded;
+    fit = after;
+    askLines = spareLinesOf(fit.fillRatio);
+  }
+  if (fit.fillRatio >= TARGET_FILL_RATIO) return current;
+
+  // 經歷資料庫的內容都用完了還是不滿一頁：一步步放寬間距、放大字級，挑還在一頁內、最滿的那個。
+  return enlargeToFill(current, params.lang, fit.fillRatio, measure);
+
+  function spareLinesOf(fillRatio: number) {
+    return Math.max(0, Math.floor(((1 - fillRatio) * contentHeight) / metrics.line) - 2);
+  }
+}
+
+/** 經歷資料庫裡的經歷段數、事件數都已經全放進履歷了，沒東西可以補。 */
+function dbExhausted(resume: Resume, entries: ExperienceEntryRow[]): boolean {
+  const sections = [...(resume.work_experience ?? []), ...(resume.leadership ?? [])];
+  const bullets = sections.reduce((n, e) => n + (e.bullets?.length ?? 0), 0);
+  const achievements = entries.reduce((n, e) => n + (Array.isArray(e.achievements) ? e.achievements.length : 0), 0);
+  return sections.length >= entries.length && bullets >= achievements;
+}
+
+/**
+ * 試每一種「間距（目前的／寬鬆）× 內文字級（目前的到上限，每次 +0.5pt）」，量 PDF，
+ * 挑還在一頁內、填得最滿的那一個。量 PDF 是本機排版、不呼叫 AI，全部試一遍也只要幾秒。
+ */
+async function enlargeToFill(
+  resume: Resume,
+  lang: string,
+  fillRatio: number,
+  measure: (r: Resume) => Promise<{ pages: number; fillRatio: number }>,
+): Promise<Resume> {
+  const layout = readLayoutSettings(resume.layout, lang);
+  const spacings: ResumeLayoutSettings["spacing"][] = layout.spacing === "loose" ? ["loose"] : [layout.spacing, "loose"];
+  let best = resume;
+  let bestFill = fillRatio;
+  for (const spacing of spacings) {
+    for (let bodyPt = layout.bodyPt; bodyPt <= BODY_PT_MAX; bodyPt += BODY_PT_STEP) {
+      if (spacing === layout.spacing && bodyPt === layout.bodyPt) continue;
+      const trial = { ...resume, layout: { ...layout, spacing, bodyPt } };
+      const fit = await measure(trial).catch(() => null);
+      // 同一種間距，字再放大只會更長，超出一頁就不用再試更大的字。
+      if (!fit || fit.pages > 1) break;
+      if (fit.fillRatio > bestFill) {
+        best = trial;
+        bestFill = fit.fillRatio;
+      }
+    }
+  }
+  return best;
 }
 
 function buildUserPrompt(params: {
@@ -625,12 +716,15 @@ function buildUserPrompt(params: {
   sourceLanguage: string;
   entries: ExperienceEntryRow[];
   profile: unknown;
+  background: LanguageBackground;
 }): string {
   const languageRules = [
     params.language === "en" ? EN_RULES : params.language === "zh" ? ZH_RULES : null,
     params.sourceLanguage === "zh" && params.language === "en" ? ZH_TO_EN_RULES : null,
     params.sourceLanguage === "en" && params.language === "zh" ? EN_TO_ZH_RULES : null,
   ].filter(Boolean);
+
+  const profile = (params.profile ?? {}) as Record<string, unknown>;
 
   return [
     `目標職缺語言版本：${params.language}`,
@@ -639,10 +733,45 @@ function buildUserPrompt(params: {
     params.jd,
     `===== 使用者經歷資料庫（${params.sourceLanguage}）=====`,
     JSON.stringify(params.entries, null, 2),
-    `===== 使用者個人資料 =====`,
-    // 排版設定跟寫履歷無關，不給 AI 看。
-    JSON.stringify({ ...(params.profile as Record<string, unknown>), resume_layout: undefined }, null, 2),
+    `===== 使用者的 Summary、學歷、技能、語言能力 =====`,
+    JSON.stringify(params.background, null, 2),
+    `===== 使用者其他個人資料 =====`,
+    // 排版設定跟寫履歷無關，不給 AI 看；background 上面已經給過了。
+    // 這裡可能還留著舊版上傳時存的學歷、技能（格式不固定），上面沒有的話可以參考這裡。
+    JSON.stringify({ ...profile, resume_layout: undefined, background: undefined }, null, 2),
   ].join("\n\n");
+}
+
+/** 這個語言還沒有自己的 Summary 時，拿另一個語言的當參考（Summary 只是素材，不會照抄）。 */
+function withReferenceSummaries(background: LanguageBackground, profile: unknown): LanguageBackground {
+  if (background.summaries.length > 0) return background;
+  const all = readBackground(profile);
+  return { ...background, summaries: [...all.zh.summaries, ...all.en.summaries] };
+}
+
+/**
+ * 學歷、語言能力照經歷資料庫一字不改（AI 會「潤飾」科系名稱，使用者不要這樣）；
+ * 技能讓 AI 依 JD 挑選排序，但只留經歷資料庫裡有的、換回資料庫的原字。
+ * 經歷資料庫還沒有這些資料（舊帳號沒重新上傳）時，維持 AI 從舊資料整理出來的內容。
+ */
+function pinBackground(resume: Resume, background: LanguageBackground): Resume {
+  if (background.education.length > 0) {
+    resume.education = background.education.map((e) => ({
+      school: e.school,
+      detail: e.detail,
+      period: e.period ?? "",
+      location: e.location,
+    }));
+  }
+  if (background.languages.length > 0) resume.languages = [...background.languages];
+  if (background.skills.length > 0) {
+    const byKey = new Map(background.skills.map((skill) => [normalize(skill), skill]));
+    const picked = [...new Set((resume.skills ?? []).map((skill) => byKey.get(normalize(skill))))].filter(
+      (skill): skill is string => !!skill,
+    );
+    resume.skills = picked.length > 0 ? picked : [...background.skills];
+  }
+  return resume;
 }
 
 function parseJsonResponse<T>(text: string): T {

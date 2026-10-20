@@ -11,10 +11,13 @@ import {
 } from "docx";
 import { CONTACT_SEPARATOR, contactParts, getLabels, pickName, type ResumeDocInput } from "./resumeDocContent";
 import { resolveMetrics, type ResumeMetrics } from "@/lib/resumes/typography";
+import { groupContactLines } from "./contactLines";
+import { joinList } from "@/lib/resumes/background";
 
 const PAGE_MARGIN_TWIPS = 720; // 0.5"
 const PAGE_WIDTH_TWIPS = 11906; // A4
 const RIGHT_TAB_POS = PAGE_WIDTH_TWIPS - PAGE_MARGIN_TWIPS * 2;
+const BODY_WIDTH_PT = RIGHT_TAB_POS / 20;
 
 const FONT = "Calibri";
 
@@ -73,12 +76,27 @@ export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
   const labels = getLabels(language);
   const t = resolveMetrics(language, resume.layout);
   const name = pickName(contact, language);
-  // 聯絡資訊一行：標籤粗體、內容一般字重，用「 / 」隔開。
-  const contactRuns = contactParts(contact, language).flatMap((p, i) => [
-    ...(i > 0 ? [new TextRun({ text: CONTACT_SEPARATOR, size: halfPt(t.contact), font: FONT })] : []),
-    new TextRun({ text: `${p.label}: `, bold: true, size: halfPt(t.contact), font: FONT }),
-    new TextRun({ text: p.value, size: halfPt(t.contact), font: FONT }),
-  ]);
+  // 聯絡資訊：標籤粗體、內容一般字重，用「 / 」隔開。分行照 PDF 同一套算法（contactLines.ts），
+  // 每一行開頭插換行，Word 才不會把一組「標籤: 內容」拆到兩行。
+  const lines = groupContactLines(contactParts(contact, language), t.contact, BODY_WIDTH_PT);
+  const contactRuns = lines.flatMap(
+    (line, li) =>
+      line.flatMap((p, i) => [
+        ...(i > 0 ? [new TextRun({ text: CONTACT_SEPARATOR, size: halfPt(t.contact), font: FONT })] : []),
+        new TextRun({
+          text: `${p.label}: `,
+          bold: true,
+          size: halfPt(t.contact),
+          font: FONT,
+          break: li > 0 && i === 0 ? 1 : undefined,
+        }),
+        new TextRun({ text: p.value, size: halfPt(t.contact), font: FONT }),
+        // 換行前「/」留在上一行尾端，跟畫布、PDF 一樣。
+        ...(i === line.length - 1 && li < lines.length - 1
+          ? [new TextRun({ text: CONTACT_SEPARATOR.trimEnd(), size: halfPt(t.contact), font: FONT })]
+          : []),
+      ]),
+  );
 
   const children: Paragraph[] = [
     new Paragraph({
@@ -139,10 +157,20 @@ export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
     new Paragraph({
       children: [
         new TextRun({ text: `${labels.computer} `, bold: true, font: FONT }),
-        new TextRun({ text: resume.skills.join(", "), font: FONT }),
+        new TextRun({ text: joinList(resume.skills, language), font: FONT }),
       ],
     }),
   );
+  if ((resume.languages ?? []).length > 0) {
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: `${labels.languages} `, bold: true, font: FONT }),
+          new TextRun({ text: joinList(resume.languages ?? [], language), font: FONT }),
+        ],
+      }),
+    );
+  }
 
   const doc = new Document({
     styles: {
