@@ -1,5 +1,6 @@
 // ATS 分數由程式照固定公式算，不讓 AI 打分（AI 打的分數同一份內容每次都會差幾分）。
-// 公式：必要條件每項 2 分、加分條件每項 1 分，已寫到的加總 ÷ 滿分 × 100。
+// 公式：必要條件每項 2 分、加分條件每項 1 分，已寫到的加總 ÷ 滿分 × 100；部分符合（例如科系要求商管、
+// 使用者是輔修商管）算一半。
 // 每一項是必要還是加分，在第一次建立 JD 條件清單時由 AI 標好，之後固定不變。
 // 前端（顯示每個語言各自的分數）跟後端（存進資料庫）都用這一份。
 
@@ -10,6 +11,8 @@ export interface ScorableItem {
   source?: "resume" | "cover_letter" | null;
   /** 舊資料沒有這個欄位，當成必要條件。 */
   importance?: JdImportance | null;
+  /** 沒有完全符合、但有相關條件撐著（例如輔修），算一半分數。 */
+  partial?: boolean | null;
 }
 
 const WEIGHT: Record<JdImportance, number> = { required: 2, preferred: 1 };
@@ -30,8 +33,9 @@ function weightOf(item: ScorableItem): number {
 export function computeAtsScore(items: ScorableItem[], onlyResume = true): number | null {
   if (items.length === 0) return null;
   const total = items.reduce((sum, i) => sum + weightOf(i), 0);
-  const got = items
-    .filter((i) => (onlyResume ? coveredByResume(i) : i.covered))
-    .reduce((sum, i) => sum + weightOf(i), 0);
+  const got = items.reduce((sum, i) => {
+    if (onlyResume ? coveredByResume(i) : i.covered) return sum + weightOf(i);
+    return i.partial ? sum + weightOf(i) / 2 : sum;
+  }, 0);
   return Math.round((got / total) * 100);
 }

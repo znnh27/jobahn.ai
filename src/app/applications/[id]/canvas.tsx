@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   generateAction,
   rescoreAction,
+  answerWorkConditionAction,
   saveDraftAction,
   finalizeResumeAction,
   reopenResumeAction,
@@ -75,7 +76,7 @@ const UNDO_LIMIT = 30;
 // 取捨建議最多請 AI 補幾輪（一輪不夠塞回一頁才會補下一輪）。
 const TRIM_MAX_ROUNDS = 3;
 
-type Busy = "generate" | "rescore" | "save" | "finalize" | "reopen" | "trim";
+type Busy = "generate" | "rescore" | "condition" | "save" | "finalize" | "reopen" | "trim";
 
 const LANG_LABEL: Record<string, string> = { en: "英文", zh: "中文" };
 
@@ -124,7 +125,7 @@ function AtsScoreHelp({ score }: { score: number | null }) {
   const current = score !== null ? getAtsBand(score) : null;
   return (
     <>
-      分數照固定公式算：必要條件每項 2 分、加分條件每項 1 分，看履歷寫到幾項。內容沒改，分數就不會變。
+      分數照固定公式算：必要條件每項 2 分、加分條件每項 1 分，看履歷寫到幾項；部分符合（例如科系要求商管、你輔修商管）算一半。內容沒改，分數就不會變。
       <ul className="ats-band-list">
         {ATS_BANDS.map((b) => (
           <li key={b.label} className={b === current ? `ats-band-list-item--current ${b.text}` : undefined}>
@@ -202,6 +203,8 @@ export function Canvas({
   // 生成會跑好幾輪（生成、補內容填滿一頁、評分），每個語言大約 3 分鐘。
   const generateProgress = useEstimatedProgress(busy === "generate", 180000 * langCount);
   const rescoreProgress = useEstimatedProgress(busy === "rescore", 20000 * langCount);
+  // 補摘要（每個語言一次）＋重新評分。
+  const conditionProgress = useEstimatedProgress(busy === "condition", 35000 * langCount);
   const finalizeProgress = useEstimatedProgress(busy === "finalize", 20000);
   const trimProgress = useEstimatedProgress(busy === "trim", 20000);
 
@@ -372,6 +375,29 @@ export function Canvas({
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
       setMessage("已重新評分");
+    });
+  }
+
+  // JD 條件清單裡的工作條件（出差這類）：可以配合 → 摘要補一句、重新評分；無法配合 → 只記下來。
+  function handleAnswerCondition(item: string, willing: boolean) {
+    if (!draft) return;
+    setMessage(null);
+    void run("condition", async () => {
+      const result = await answerWorkConditionAction(applicationId, item, willing, draft);
+      if (result.error || !result.data) {
+        setMessage(`錯誤：${result.error}`);
+        return;
+      }
+      setChecklist(result.data.jd_match_checklist);
+      setAtsScore(result.data.ats_score);
+      setGaps(result.data.ats_gaps);
+      if (willing) {
+        setDraft(result.data.resume_draft);
+        setCanvasVersion((v) => v + 1);
+        setMessage("摘要補上了這個條件，也重新評分了");
+      } else {
+        setMessage("記下來了，之後的職缺遇到同樣的條件不會再問");
+      }
     });
   }
 
@@ -548,6 +574,9 @@ export function Canvas({
         {rescoreProgress !== null && (
           <ProgressBar value={rescoreProgress} label="重新比對 JD、計算 ATS 分數…" />
         )}
+        {conditionProgress !== null && (
+          <ProgressBar value={conditionProgress} label="把這個條件寫進摘要、重新計算 ATS 分數…" />
+        )}
         {finalizeProgress !== null && (
           <ProgressBar value={finalizeProgress} label="定案中，把這次用到的內容寫回經歷資料庫…" />
         )}
@@ -650,6 +679,7 @@ export function Canvas({
             language={activeLang}
             legacyGaps={gaps[activeLang] ?? []}
             onDig={finalized ? undefined : setGapDialogText}
+            onAnswerCondition={finalized || isPending ? undefined : handleAnswerCondition}
           />
         </div>
       </div>

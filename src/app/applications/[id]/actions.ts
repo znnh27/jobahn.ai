@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
+  answerWorkCondition,
   generateResumeForApplication,
   rescoreResumeForApplication,
   reviseResumeWithChat,
@@ -166,6 +167,40 @@ export async function rescoreAction(
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "重新評分失敗" };
+  }
+}
+
+/** JD 條件清單裡的工作條件（出差這類）：使用者回答能不能配合。可以配合的話摘要會補一句並重新評分。 */
+export async function answerWorkConditionAction(
+  applicationId: string,
+  item: string,
+  willing: boolean,
+  editedResumeDraft: ResumeMap,
+): Promise<GenerateResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    await answerWorkCondition({ supabase, userId: user.id, applicationId, item, willing, editedResumeDraft });
+    const fresh = await fetchApplicationScoringFields(supabase, user.id, applicationId);
+    revalidatePath(`/applications/${applicationId}`);
+    revalidatePath(`/applications/${applicationId}/cover-letter`);
+    revalidatePath("/");
+    if (!fresh) return { error: "儲存後讀取結果失敗" };
+    return {
+      success: true,
+      data: {
+        resume_draft: fresh.resume_draft,
+        jd_match_checklist: fresh.jd_match_checklist,
+        ats_score: fresh.ats_score,
+        ats_gaps: fresh.ats_gaps,
+      },
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "儲存失敗，請再試一次" };
   }
 }
 

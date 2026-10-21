@@ -8,12 +8,20 @@ import type { JdImportance } from "./atsScore";
 // 結果同一份 JD 每次拆出來的項目數、語言都不一樣（例如一次 7 項英文、一次 8 項中文）。
 // 現在拆 JD 獨立成一步，一份應徵只拆一次、各語言共用；同一位使用者貼了一字不差的 JD，直接沿用上次的清單。
 
+/** requirement＝能力、經驗、學歷這類要有事實佐證的條件；condition＝出差、外派、輪班這類工作條件，問使用者能不能配合。 */
+export type JdItemKind = "requirement" | "condition";
+
 export interface JdBaseItem {
   item: string;
   importance: JdImportance | null;
+  /** 舊清單沒有這個欄位，當成 requirement。 */
+  kind?: JdItemKind;
 }
 
-type StoredChecklists = Record<string, Array<{ item: string; importance?: JdImportance | null }>> | null;
+type StoredChecklists = Record<
+  string,
+  Array<{ item: string; importance?: JdImportance | null; kind?: JdItemKind | null }>
+> | null;
 
 /** 空白、換行的差異不算不同的 JD。 */
 export function normalizeJd(jd: string): string {
@@ -33,7 +41,7 @@ function pickStored(stored: StoredChecklists, jdLang: "zh" | "en"): JdBaseItem[]
   for (const lang of [jdLang, jdLang === "en" ? "zh" : "en", ...Object.keys(stored)]) {
     const list = stored[lang];
     if (list && list.length > 0) {
-      return list.map((i) => ({ item: i.item, importance: i.importance ?? null }));
+      return list.map((i) => ({ item: i.item, importance: i.importance ?? null, kind: i.kind ?? "requirement" }));
     }
   }
   return null;
@@ -81,10 +89,16 @@ const EXTRACT_SYSTEM_PROMPT = `你負責把 JD 拆成「應徵條件清單」，
    - 硬性要求的區段標 "required"；Nice to have、Preferred、Bonus、加分 這類區段標 "preferred"。
    - 工作內容／職責（What you'll do、Responsibilities、工作內容）不列進來。
 2. JD 完全沒有條件區段時，才從職責跟描述歸納 6 到 10 項，一項一件事，都標 "required"。
-3. item 一律用指定的語言寫。
+3. 上面列出來的項目 kind 都是 "requirement"。
+4. 另外掃過整份 JD（包含工作內容、職責、福利、其他說明），把「工作條件」各列一項，kind 標 "condition"：出差（國內／國外，有寫地點就保留）、外派、輪班、假日或夜間待命、常態加班、工作地點、遠端或進辦公室的規定、到職時間這類「要不要配合」的事，不是能力或經驗。
+   - item 照 JD 原文擷取那一句的重點（例如「可能需出差至日本、新加坡等地」），不改寫意思。
+   - JD 寫「必須、需要、能配合」標 "required"；寫「有機會、可能、加分」標 "preferred"。
+   - 已經在第 1 點的條件區段列過的同一件事，不要重複列，把那一項的 kind 改成 "condition" 就好。
+   - 薪資、福利、公司介紹不算工作條件。
+5. item 一律用指定的語言寫。
 
 只輸出 JSON，不要其他文字、不要 markdown code fence：
-{ "items": [{ "item": string, "importance": "required" | "preferred" }] }`;
+{ "items": [{ "item": string, "importance": "required" | "preferred", "kind": "requirement" | "condition" }] }`;
 
 async function extractJdItems(
   supabase: SupabaseClient,
@@ -103,7 +117,7 @@ async function extractJdItems(
   });
 
   const cleaned = response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
-  let parsed: { items?: Array<{ item?: unknown; importance?: unknown }> };
+  let parsed: { items?: Array<{ item?: unknown; importance?: unknown; kind?: unknown }> };
   try {
     parsed = JSON.parse(cleaned);
   } catch {
@@ -116,7 +130,11 @@ async function extractJdItems(
     const item = String(raw.item ?? "").trim().replace(/^[-•*·\s]+/, "").replace(/[.。;；]+$/, "");
     if (!item || seen.has(item)) continue;
     seen.add(item);
-    items.push({ item, importance: raw.importance === "preferred" ? "preferred" : "required" });
+    items.push({
+      item,
+      importance: raw.importance === "preferred" ? "preferred" : "required",
+      kind: raw.kind === "condition" ? "condition" : "requirement",
+    });
   }
   if (items.length === 0) throw new Error("AI 沒有從 JD 拆出任何條件，請確認 JD 內容");
   return items;

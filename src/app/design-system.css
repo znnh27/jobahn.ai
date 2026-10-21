@@ -3664,6 +3664,42 @@ button.step-bar-link:focus-visible {
   font-size: var(--font-xs);
 }
 
+/* 部分符合：顏色介於沒寫到（橘）跟已寫到（綠）之間。 */
+.ats-check--partial .ats-check-icon {
+  color: var(--color-info-text);
+}
+
+/* 條件後面的小標籤：部分符合、無法配合。 */
+.ats-check-tag {
+  display: inline-block;
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--chrome-surface-tint);
+  color: var(--chrome-muted);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+/* 工作條件（出差這類）：問使用者能不能配合。 */
+.ats-check-answer {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.ats-check-answer-label {
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
+}
+.ats-check-answer .btn-wrapper {
+  justify-content: flex-start;
+}
+.ats-check-answer .btn {
+  padding: calc(3px + var(--display-nudge)) var(--space-3) calc(3px - var(--display-nudge));
+  font-size: var(--font-sm);
+}
+
 /* 取捨建議視窗：套用後是不是剛好一頁（每勾一條都重新量）。 */
 .trim-status {
   margin: 0;
