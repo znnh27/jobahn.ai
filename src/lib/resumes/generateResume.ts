@@ -47,7 +47,7 @@ const WRITING_RULES = `${BULLET_RULES}
 const EN_RULES = `英文版額外規則（一定要遵守）：
 1. 每條 bullet 用強動詞開頭（Led, Built, Launched, Redesigned, Increased 等）。弱開頭一律不用：Responsible for, Assisted, Helped, Participated in, Worked on, Served as, Acted as。
 2. 不寫 I、my、me 等第一人稱。
-3. 過去的工作用過去式，現職用現在式。
+3. 時態依事實：以前的工作一律過去式；現職裡持續在做的職責用現在式（Leads, Owns），已經完成的專案或成果用過去式（Rebuilt, Launched）。同一段可以混用，但不能為了時態把已完成的事改寫成持續在做（Rebuilt → Maintains 會把意思改弱，也不符合事實）。
 4. 講自己的貢獻，不是團隊整體做了什麼；團隊成果要寫清楚自己負責的那一塊。
 5. 不用形容詞自誇（例如 excellent, outstanding, passionate, hardworking），改用事實和數字證明。
 6. 職稱用國際通用說法，不要直譯台灣特有職稱（例如「專員」依實際工作內容改成 Specialist / Associate / Coordinator）。
