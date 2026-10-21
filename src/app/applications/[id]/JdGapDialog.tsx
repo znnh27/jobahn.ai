@@ -102,8 +102,7 @@ export function JdGapDialog({ gapText, language, sections, onClose, onCommitBull
       }
       const result = await commitNewAchievementAction({
         entryId,
-        draftText: draft.text,
-        angleLabel: draft.angleLabel || "JD 缺口挖掘",
+        drafts: [{ text: draft.text, angleLabel: draft.angleLabel || "JD 缺口挖掘" }],
         sourceLabel: "JD 缺口挖掘",
       });
       setShowCompletion(

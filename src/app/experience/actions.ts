@@ -317,7 +317,8 @@ export async function quickQualityCheckAction(orgName: string, role: string, tex
 }
 
 /** 手動新增一段經歷，確定要收進資料庫：可能新增到既有 entry，也可能連 entry 都是新的。
- * 使用者已經明確表示這是新內容，所以一律當成新的 achievement，不用再讓 AI 猜要不要合併。 */
+ * 使用者已經明確表示這是新內容，所以一律當成新的 achievement，不用再讓 AI 猜要不要合併。
+ * AI 問答一次可能拆成好幾點（drafts），每點各自是一個 achievement，依序排在這段經歷最後面。 */
 export async function commitNewAchievementAction(params: {
   entryId: string | null;
   newEntry?: {
@@ -328,8 +329,7 @@ export async function commitNewAchievementAction(params: {
     entryType: "work" | "leadership";
     language: "zh" | "en";
   };
-  draftText: string;
-  angleLabel: string;
+  drafts: { text: string; angleLabel: string }[];
   sourceLabel?: string;
 }): Promise<CommitResult> {
   const supabase = await createClient();
@@ -338,12 +338,12 @@ export async function commitNewAchievementAction(params: {
   } = await supabase.auth.getUser();
   if (!user) return { error: "請先登入" };
 
-  const achievement = {
+  const drafts = params.drafts.filter((d) => d.text.trim());
+  if (drafts.length === 0) return { error: "沒有要新增的內容" };
+  const newAchievements = drafts.map((d) => ({
     id: `ach_${Math.random().toString(36).slice(2, 10)}`,
-    variants: [
-      { text: params.draftText, angleLabel: params.angleLabel, source: params.sourceLabel ?? "手動新增" },
-    ],
-  };
+    variants: [{ text: d.text, angleLabel: d.angleLabel, source: params.sourceLabel ?? "手動新增" }],
+  }));
 
   let resultEntryId: string;
   let sourceLanguage: "zh" | "en";
@@ -363,7 +363,7 @@ export async function commitNewAchievementAction(params: {
     if (readError || !row) return { error: "找不到這個經歷區塊" };
 
     const achievements = Array.isArray(row.achievements) ? row.achievements : [];
-    achievements.push(achievement);
+    achievements.push(...newAchievements);
 
     const { error } = await supabase
       .from("experience_entries")
@@ -390,7 +390,7 @@ export async function commitNewAchievementAction(params: {
         location: params.newEntry.location,
         role_variants: [{ role: params.newEntry.role, source: ["手動新增"] }],
         period_variants: [{ period: params.newEntry.period, source: ["手動新增"] }],
-        achievements: [achievement],
+        achievements: newAchievements,
       })
       .select("id")
       .single();
@@ -407,28 +407,34 @@ export async function commitNewAchievementAction(params: {
     return { error: "缺少要新增到哪個經歷區塊的資訊" };
   }
 
+  // 一點一點依序同步，不能同時跑：同步是「讀出另一個語言 → 改 → 寫回」，同時跑會互相蓋掉，
+  // 甚至在另一個語言建出重複的經歷區塊。
   const { syncToOtherLanguage } = await import("@/lib/experience/syncLanguage");
-  const synced = await syncToOtherLanguage({
-    supabase,
-    userId: user.id,
-    sourceLanguage,
-    orgName: sourceOrgName,
-    role: sourceRole,
-    location: sourceLocation,
-    period: sourcePeriod,
-    entryType: sourceEntryType,
-    text: params.draftText,
-    sourceLabel: `${params.sourceLabel ?? "手動新增"}（雙語同步）`,
-  });
+  let syncedCount = 0;
+  for (const d of drafts) {
+    const synced = await syncToOtherLanguage({
+      supabase,
+      userId: user.id,
+      sourceLanguage,
+      orgName: sourceOrgName,
+      role: sourceRole,
+      location: sourceLocation,
+      period: sourcePeriod,
+      entryType: sourceEntryType,
+      text: d.text,
+      sourceLabel: `${params.sourceLabel ?? "手動新增"}（雙語同步）`,
+    });
+    if (synced !== null) syncedCount++;
+  }
 
   revalidatePath("/experience");
   revalidatePath("/"); // 首次設定走「直接打字」時，首頁要知道使用者已經有經歷資料庫了
   return {
     success: true,
     entryId: resultEntryId,
-    achievementId: achievement.id,
+    achievementId: newAchievements[0].id,
     variantIndex: 0,
-    syncedToOtherLanguage: synced !== null,
+    syncedToOtherLanguage: syncedCount > 0,
   };
 }
 

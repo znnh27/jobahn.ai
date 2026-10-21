@@ -9,10 +9,11 @@ import {
   commitNewAchievementAction,
   commitRefinedVariantAction,
 } from "./actions";
-import type { DialogueTurn } from "@/lib/experience/elicitationDialogue";
+import type { DialogueDraft, DialogueTurn } from "@/lib/experience/elicitationDialogue";
 import { MessageComposer } from "./MessageComposer";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompletionPopup } from "./CompletionPopup";
+import { TrashIcon } from "../icons";
 
 type NewEntryFields = {
   orgName: string;
@@ -120,7 +121,8 @@ export function ElicitationPanel({
   const [turns, setTurns] = useState<DialogueTurn[]>(restored?.turns ?? []);
   const [composerText, setComposerText] = useState("");
   const [isPending, setIsPending] = useState(false);
-  const [draft, setDraft] = useState<{ text: string; angleLabel: string } | null>(restored?.draft ?? null);
+  // AI 問答新增經歷時，使用者一次講好幾件事會拆成好幾點；潤飾、自己打字都只有一點。
+  const [drafts, setDrafts] = useState<DialogueDraft[]>(restored?.draft ? [restored.draft] : []);
   const [vagueSuggestion, setVagueSuggestion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCompletion, setShowCompletion] = useState<string | null>(null);
@@ -129,7 +131,7 @@ export function ElicitationPanel({
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [turns, step, draft]);
+  }, [turns, step, drafts]);
 
   useEffect(() => {
     if (restored) return;
@@ -142,8 +144,8 @@ export function ElicitationPanel({
   // 潤飾對話每有新進展就存一次。
   useEffect(() => {
     if (!refineSeed || turns.length === 0 || showCompletion) return;
-    saveRefineSession(refineSeed, { seedText: refineSeed.seedText, turns, draft, step });
-  }, [refineSeed, turns, draft, step, showCompletion]);
+    saveRefineSession(refineSeed, { seedText: refineSeed.seedText, turns, draft: drafts[0] ?? null, step });
+  }, [refineSeed, turns, drafts, step, showCompletion]);
 
   const filteredEntries = entries.filter((e) =>
     `${e.orgName} ${e.roleVariants[0]?.role ?? ""}`.toLowerCase().includes(filterText.toLowerCase()),
@@ -168,11 +170,10 @@ export function ElicitationPanel({
     setError(null);
     try {
       const result = await quickQualityCheckAction(orgContext.orgName, orgContext.role, composerText);
+      setDrafts([{ text: composerText, angleLabel: "" }]);
       if (result.isVague) {
         setVagueSuggestion(result.suggestion);
-        setDraft({ text: composerText, angleLabel: "" });
       } else {
-        setDraft({ text: composerText, angleLabel: "" });
         setStep("confirming");
       }
     } catch (e) {
@@ -199,8 +200,8 @@ export function ElicitationPanel({
         null,
       );
       setTurns(result.turns);
-      if (result.status === "ready" && result.draftText) {
-        setDraft({ text: result.draftText, angleLabel: result.angleLabel ?? "" });
+      if (result.status === "ready") {
+        setDrafts(result.drafts);
         setStep("confirming");
       }
     } catch (e) {
@@ -226,8 +227,8 @@ export function ElicitationPanel({
         reply,
       );
       setTurns(result.turns);
-      if (result.status === "ready" && result.draftText) {
-        setDraft({ text: result.draftText, angleLabel: result.angleLabel ?? "" });
+      if (result.status === "ready") {
+        setDrafts(result.drafts);
         setStep("confirming");
       }
     } catch (e) {
@@ -238,6 +239,7 @@ export function ElicitationPanel({
   }
 
   async function handleConfirm(mode: "replace" | "append" = "replace") {
+    const draft = drafts[0];
     if (!draft) return;
     setIsPending(true);
     setError(null);
@@ -263,8 +265,7 @@ export function ElicitationPanel({
                   entryType: newEntryFields.entryType,
                   language: newEntryFields.language,
                 },
-            draftText: draft.text,
-            angleLabel: draft.angleLabel || "手動新增",
+            drafts: drafts.map((d) => ({ text: d.text, angleLabel: d.angleLabel || "手動新增" })),
           });
 
       if (result.error) {
@@ -470,23 +471,43 @@ export function ElicitationPanel({
                 </ChatBubble>
               )}
 
-              {step === "confirming" && draft && (
+              {step === "confirming" && drafts.length > 0 && (
                 <ChatBubble role="assistant" full>
-                  <p className="text-muted-xs">草稿，可以直接修改：</p>
-                  <textarea
-                    className="textarea mt-1"
-                    rows={4}
-                    value={draft.text}
-                    onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-                  />
+                  <p className="text-muted-xs">
+                    {drafts.length > 1 ? `拆成 ${drafts.length} 點，可以直接修改，不要的點可以刪掉：` : "草稿，可以直接修改："}
+                  </p>
+                  {drafts.map((d, i) => (
+                    <div key={i} className="elicitation-draft">
+                      <textarea
+                        className="textarea"
+                        rows={drafts.length > 1 ? 3 : 4}
+                        value={d.text}
+                        onChange={(e) =>
+                          setDrafts((prev) => prev.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))
+                        }
+                      />
+                      {drafts.length > 1 && (
+                        <button
+                          type="button"
+                          className="icon-btn icon-btn--danger"
+                          aria-label="刪掉這點"
+                          title="刪掉這點"
+                          disabled={isPending}
+                          onClick={() => setDrafts((prev) => prev.filter((_, j) => j !== i))}
+                        >
+                          <TrashIcon />
+                        </button>
+                      )}
+                    </div>
+                  ))}
                   <div className="elicitation-option-list">
                     <button
                       type="button"
                       className="btn btn-primary"
-                      disabled={isPending}
+                      disabled={isPending || drafts.every((d) => !d.text.trim())}
                       onClick={() => handleConfirm("replace")}
                     >
-                      {refineSeed ? "確認，取代原本這條" : "確認新增"}
+                      {refineSeed ? "確認，取代原本這條" : drafts.length > 1 ? `確認新增 ${drafts.length} 點` : "確認新增"}
                     </button>
                     {refineSeed && (
                       <button
@@ -502,7 +523,7 @@ export function ElicitationPanel({
                       type="button"
                       className="btn btn-secondary"
                       onClick={() => {
-                        setDraft(null);
+                        setDrafts([]);
                         setStep("dialogue");
                         // 回到對話但沒有新訊息的話，畫面看起來會像沒反應——
                         // 明確問一句，讓使用者知道現在該做什麼。

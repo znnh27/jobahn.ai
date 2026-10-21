@@ -1912,6 +1912,18 @@
   30% { transform: translateY(-4px); opacity: 1; }
 }
 
+/* AI 問答拆成好幾點時，每點一個編輯框，右邊是刪掉這點的按鈕。 */
+.elicitation-draft {
+  margin-top: var(--space-2);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+.elicitation-draft .textarea {
+  margin-top: 0;
+  flex: 1;
+}
+
 .elicitation-option-list {
   margin-top: var(--space-2);
   display: flex;
