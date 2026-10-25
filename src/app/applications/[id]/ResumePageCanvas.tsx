@@ -30,6 +30,7 @@ interface ResumePageCanvasProps {
   onChangeLanguages: (text: string) => void;
   onChangeBullets: (section: ResumeSectionKey, index: number, bullets: string[]) => void;
   onChangeEntryField: (section: ResumeSectionKey, index: number, field: EntryField, value: string) => void;
+  onChangeEducationField: (index: number, field: EducationField, value: string) => void;
   /** 把整段經歷從這份履歷拿掉（經歷資料庫不受影響）。 */
   onRemoveEntry: (section: ResumeSectionKey, index: number) => void;
 }
@@ -46,6 +47,7 @@ export function ResumePageCanvas({
   onChangeLanguages,
   onChangeBullets,
   onChangeEntryField,
+  onChangeEducationField,
   onRemoveEntry,
 }: ResumePageCanvasProps) {
   const name = pickName(contact, language);
@@ -156,16 +158,40 @@ export function ResumePageCanvas({
         )}
 
         <SectionHeader id="education"><SectionTitle language={language} labelKey="education" editable={editable} /></SectionHeader>
+        {/* 學歷跟經歷的公司、職稱一樣可以直接點了改，只改這份履歷，經歷資料庫不受影響。 */}
         {resume.education.map((edu, i) => (
           <div key={i} className="resume-block">
-            <Row pdfKeyValue={pdfKey.school(i)} left={edu.school} right={edu.location} />
-            {(edu.detail || edu.period) && (
-              <Row
-                pdfKeyValue={pdfKey.eduDetail(i)}
-                left={edu.detail ?? ""}
-                right={edu.period ?? ""}
-                variant="muted"
+            <div className="resume-row" data-pdf-key={pdfKey.school(i)}>
+              <EditableSpan
+                className="resume-row-left"
+                value={edu.school}
+                editable={editable}
+                onCommit={(v) => onChangeEducationField(i, "school", v)}
               />
+              {(edu.location || editable) && (
+                <EditableSpan
+                  className="resume-row-right"
+                  value={edu.location ?? ""}
+                  editable={editable}
+                  onCommit={(v) => onChangeEducationField(i, "location", v)}
+                />
+              )}
+            </div>
+            {(edu.detail || edu.period) && (
+              <div className="resume-row resume-row--muted" data-pdf-key={pdfKey.eduDetail(i)}>
+                <EditableSpan
+                  className="resume-row-left"
+                  value={edu.detail ?? ""}
+                  editable={editable}
+                  onCommit={(v) => onChangeEducationField(i, "detail", v)}
+                />
+                <EditableSpan
+                  className="resume-row-right"
+                  value={edu.period ?? ""}
+                  editable={editable}
+                  onCommit={(v) => onChangeEducationField(i, "period", v)}
+                />
+              </div>
             )}
           </div>
         ))}
@@ -198,27 +224,11 @@ function SectionHeader({ id, children }: { id: string; children: React.ReactNode
   );
 }
 
-function Row({
-  pdfKeyValue,
-  left,
-  right,
-  variant,
-}: {
-  pdfKeyValue: string;
-  left: string;
-  right: string | null;
-  variant?: "muted" | "role";
-}) {
-  return (
-    <div className={`resume-row ${variant ? `resume-row--${variant}` : ""}`} data-pdf-key={pdfKeyValue}>
-      <span className="resume-row-left">{left}</span>
-      {right && <span className="resume-row-right">{right}</span>}
-    </div>
-  );
-}
-
 /** 公司、地點、職稱、期間都可以直接點擊修改（例如公司名後面的說明太長，自己刪短）。 */
 export type EntryField = "org" | "location" | "role" | "period";
+
+/** 學歷：學校、地點、科系那一行、期間。 */
+export type EducationField = "school" | "location" | "detail" | "period";
 
 function ExperienceBlock({
   section,

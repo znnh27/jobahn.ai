@@ -793,6 +793,15 @@ export function Canvas({
               return { ...r, [section]: items };
             })
           }
+          onChangeEducationField={(index, field, value) =>
+            updateResume(activeLang, (r) => {
+              const items = [...r.education];
+              const text = value.trim();
+              // 地點、科系那一行可以清空（PDF 就不印）；學校、期間維持字串。
+              items[index] = { ...items[index], [field]: field === "location" || field === "detail" ? text || null : text };
+              return { ...r, education: items };
+            })
+          }
           onRemoveEntry={(section, index) => {
             const org = resume[section][index]?.org ?? "";
             updateResume(activeLang, (r) => ({ ...r, [section]: r[section].filter((_, j) => j !== index) }));

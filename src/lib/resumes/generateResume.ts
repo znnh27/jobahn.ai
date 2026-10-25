@@ -1229,6 +1229,8 @@ export async function reviseResumeWithChat(params: {
   const parsed = parseJsonResponse<{ reply?: string; resume?: Resume }>(response.text);
   if (!parsed.resume) throw new Error("AI 沒有回傳改好的履歷，請換個說法再試一次");
   const next = pinBackground(parsed.resume, background);
+  // 學歷 AI 本來就不能改；使用者在畫布上手動改過的話，沿用這份履歷目前的，不要被經歷資料庫的版本蓋回去。
+  next.education = resume.education;
   if (language === "zh") polishChinese(next);
   next.layout = resume.layout;
   return { reply: stripRuleRefs(toTraditional(parsed.reply ?? "改好了。")), resume: next };
