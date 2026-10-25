@@ -4,6 +4,7 @@ import { useState } from "react";
 import { EstimatedProgress } from "@/app/ProgressBar";
 import Link from "next/link";
 import { uploadAndMergeResumeAction } from "@/app/experience/actions";
+import { parityNote } from "@/app/experience/parityNote";
 
 type UploadItemState = {
   key: string;
@@ -53,7 +54,7 @@ export function OnboardingUpload() {
                 ? {
                     ...item,
                     status: "done",
-                    message: `新增 ${result.newEntriesCreated} 段全新經歷、${result.newAchievementsCreated} 個新成就${result.backgroundItemsAdded ? `、${result.backgroundItemsAdded} 項 Summary／學歷／技能／語言` : ""}`,
+                    message: `新增 ${result.newEntriesCreated} 段全新經歷、${result.newAchievementsCreated} 個新成就${result.backgroundItemsAdded ? `、${result.backgroundItemsAdded} 項 Summary／學歷／技能／語言` : ""}${parityNote(result)}`,
                   }
                 : { ...item, status: "error", message: result.error }
               : item,

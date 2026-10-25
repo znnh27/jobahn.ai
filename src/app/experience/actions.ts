@@ -32,6 +32,9 @@ type UploadResult = {
   newAchievementsCreated?: number;
   variantsAppended?: number;
   backgroundItemsAdded?: number;
+  /** 上傳後從另一個語言補上的經歷段數、成就件數（中英文資料庫要同步）。 */
+  parityEntriesAdded?: number;
+  parityAchievementsAdded?: number;
   conflicts?: string[];
 };
 
@@ -63,10 +66,23 @@ export async function uploadAndMergeResumeAction(formData: FormData): Promise<Up
       sourceLabel: file.name,
       rawContent: text,
     });
+    // 上傳是兩個語言分開解析的，只出現在這份履歷語言裡的經歷，另一個語言要翻過去補上。
+    const { ensureLanguageParity } = await import("@/lib/experience/languageParity");
+    const parity = await ensureLanguageParity({
+      supabase,
+      userId: user.id,
+      targets: ["zh", "en"],
+      onlyIfBothLanguages: true,
+    });
 
     revalidatePath("/experience");
     revalidatePath("/"); // 首頁要知道使用者是不是已經有經歷資料庫了
-    return { success: true, ...result };
+    return {
+      success: true,
+      ...result,
+      parityEntriesAdded: parity.entriesAdded,
+      parityAchievementsAdded: parity.achievementsAdded,
+    };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "解析失敗" };
   }
@@ -213,6 +229,76 @@ export async function updateAchievementVariantAction(
     .eq("user_id", user.id);
 
   revalidatePath("/experience");
+}
+
+/**
+ * 經歷資料庫裡按 Enter：這一點（某個寫法）改成游標前的文字，游標後的文字變成新的一點，插在這一點正下方。
+ * 改寫跟新增在同一次寫入完成，避免兩個動作同時讀寫同一筆資料、後寫的蓋掉先寫的。
+ * before 是 null 代表這一點不用改（例如在空白的新一點裡按 Enter）。
+ * 新的一點會同步到另一個語言（在背景跑，不擋畫面）。回傳新一點的 id，畫面才能接著在它下面再開一點。
+ */
+export async function insertAchievementAfterAction(params: {
+  entryId: string;
+  afterAchievementId: string;
+  /** 要順便改寫的那一點（游標前的文字）；不用改就不傳。 */
+  edit?: { achievementId: string; variantIndex: number; text: string };
+  text: string;
+}): Promise<{ error?: string; achievementId?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+  const text = params.text.trim();
+  if (!text) return { error: "內容是空的" };
+
+  const { data: row } = await supabase
+    .from("experience_entries")
+    .select("language, entry_type, org_name, location, role_variants, period_variants, achievements")
+    .eq("id", params.entryId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!row) return { error: "找不到這個經歷區塊" };
+
+  const achievements = Array.isArray(row.achievements) ? row.achievements : [];
+  if (params.edit) {
+    const target = achievements.find((a: { id: string }) => a.id === params.edit!.achievementId);
+    if (target?.variants?.[params.edit.variantIndex]) target.variants[params.edit.variantIndex].text = params.edit.text;
+  }
+  const achievement = {
+    id: `ach_${Math.random().toString(36).slice(2, 10)}`,
+    variants: [{ text, angleLabel: "", source: "手動新增" }],
+  };
+  const at = achievements.findIndex((a: { id: string }) => a.id === params.afterAchievementId);
+  achievements.splice(at < 0 ? achievements.length : at + 1, 0, achievement);
+
+  const { error } = await supabase
+    .from("experience_entries")
+    .update({ achievements, updated_at: new Date().toISOString() })
+    .eq("id", params.entryId)
+    .eq("user_id", user.id);
+  if (error) return { error: error.message };
+
+  // 雙語同步要問 AI，放到回應之後跑，打字不用等。
+  const { after } = await import("next/server");
+  after(async () => {
+    const { syncToOtherLanguage } = await import("@/lib/experience/syncLanguage");
+    await syncToOtherLanguage({
+      supabase,
+      userId: user.id,
+      sourceLanguage: row.language,
+      orgName: row.org_name,
+      role: row.role_variants?.[0]?.role ?? "",
+      location: row.location ?? null,
+      period: row.period_variants?.[0]?.period ?? "",
+      entryType: row.entry_type,
+      text,
+      sourceLabel: "手動新增（雙語同步）",
+    }).catch(() => null);
+  });
+
+  revalidatePath("/experience");
+  return { achievementId: achievement.id };
 }
 
 export async function removeAchievementVariantAction(
@@ -1021,4 +1107,74 @@ export async function setRuleMutedAction(ruleId: string, muted: boolean): Promis
   const { error } = await supabase.from("profile_data").upsert({ user_id: user.id, data: { ...data, muted_rules: mutedRules } });
   if (error) return { error: error.message };
   return { mutedRules };
+}
+
+/** 經歷資料庫「上一步／下一步」記下來的一份完整狀態：兩個語言的所有經歷，加上 Summary／學歷／技能／語言。 */
+export interface ExperienceSnapshot {
+  entries: {
+    id: string;
+    language: string;
+    entryType: string;
+    orgName: string;
+    location: string | null;
+    roleVariants: unknown;
+    periodVariants: unknown;
+    achievements: unknown;
+    createdAt?: string;
+  }[];
+  background: unknown;
+}
+
+/**
+ * 把經歷資料庫整份還原成某個時間點（上一步／下一步）：
+ * 快照裡有的經歷寫回去（被刪掉的補回來），快照裡沒有的刪掉，Summary／學歷／技能／語言也換回當時的版本。
+ * 只動目前登入的使用者自己的資料。
+ */
+export async function restoreExperienceSnapshotAction(snapshot: ExperienceSnapshot): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+  if (!Array.isArray(snapshot?.entries)) return { error: "還原的資料格式不對" };
+
+  const { data: current, error: readError } = await supabase.from("experience_entries").select("id").eq("user_id", user.id);
+  if (readError) return { error: readError.message };
+  const keep = new Set(snapshot.entries.map((e) => e.id));
+
+  const rows = snapshot.entries
+    .filter((e) => (e.language === "zh" || e.language === "en") && (e.entryType === "work" || e.entryType === "leadership"))
+    .map((e) => ({
+      id: e.id,
+      user_id: user.id,
+      language: e.language,
+      entry_type: e.entryType,
+      org_name: e.orgName,
+      location: e.location,
+      role_variants: e.roleVariants,
+      period_variants: e.periodVariants,
+      achievements: e.achievements,
+      ...(e.createdAt ? { created_at: e.createdAt } : {}),
+      updated_at: new Date().toISOString(),
+    }));
+  if (rows.length > 0) {
+    const { error } = await supabase.from("experience_entries").upsert(rows, { onConflict: "id" });
+    if (error) return { error: error.message };
+  }
+  const toRemove = (current ?? []).map((r) => r.id).filter((id) => !keep.has(id));
+  if (toRemove.length > 0) {
+    const { error } = await supabase.from("experience_entries").delete().eq("user_id", user.id).in("id", toRemove);
+    if (error) return { error: error.message };
+  }
+
+  if (snapshot.background && typeof snapshot.background === "object") {
+    const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
+    const { error } = await supabase
+      .from("profile_data")
+      .upsert({ user_id: user.id, data: { ...(profile?.data ?? {}), background: readBackground({ background: snapshot.background }) } });
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/experience");
+  return {};
 }

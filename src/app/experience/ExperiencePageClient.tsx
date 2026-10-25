@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ExperienceCanvas, type ExperienceEntry, type HighlightTarget } from "./ExperienceCanvas";
 import Link from "next/link";
 import { FlagRail } from "./FlagRail";
@@ -14,12 +14,18 @@ import { LayoutMenu } from "@/app/LayoutMenu";
 import { readLayoutSettings, type ResumeLayoutSettings } from "@/lib/resumes/typography";
 import type { ProfileBackground } from "@/lib/resumes/background";
 import { ProgressBar } from "@/app/ProgressBar";
+import { RedoIcon, UndoIcon } from "@/app/icons";
+import { useUndoShortcuts } from "@/app/useUndoShortcuts";
+import { SectionLabelsProvider } from "@/app/SectionLabels";
+import type { CustomSectionLabels } from "@/lib/resumes/sectionLabels";
 import {
   applyFlagRewriteAction,
   markVariantsReviewedAction,
+  restoreExperienceSnapshotAction,
   saveDefaultLayoutAction,
   scanExperienceDbAction,
   setRuleMutedAction,
+  type ExperienceSnapshot,
   type ReviewedVariant,
   type ScanFlag,
 } from "./actions";
@@ -62,6 +68,61 @@ function storedFlags(entries: ExperienceEntry[]): ScanFlag[] {
   );
 }
 
+// ---- 上一步／下一步 ----
+// 經歷資料庫是改完一格就直接存，所以「上一步」要把資料庫整份還原回去。每次資料庫內容一變（手動修改、
+// AI 問答新增、上傳履歷、檢查），就把變之前的整份記一份。紀錄存在這個分頁的 sessionStorage（依帳號分開），
+// 到「新增經歷」頁上傳完回來也還在，關掉分頁才清掉。
+const HISTORY_LIMIT = 20;
+
+interface History {
+  /** 上次記下的狀態；畫面拿到的資料跟它不一樣，就代表資料庫又變了一次。 */
+  baseline: ExperienceSnapshot;
+  past: ExperienceSnapshot[];
+  future: ExperienceSnapshot[];
+}
+
+function toSnapshot(entries: ExperienceEntry[], background: ProfileBackground): ExperienceSnapshot {
+  return {
+    entries: entries.map((e) => ({
+      id: e.id,
+      language: e.language,
+      entryType: e.entryType,
+      orgName: e.orgName,
+      location: e.location,
+      roleVariants: e.roleVariants,
+      periodVariants: e.periodVariants,
+      achievements: e.achievements,
+      createdAt: e.createdAt,
+    })),
+    background,
+  };
+}
+
+function sameSnapshot(a: ExperienceSnapshot, b: ExperienceSnapshot): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function historyKey(userId: string) {
+  return `jobahn:experience-history:${userId}`;
+}
+
+function loadHistory(userId: string): History | null {
+  try {
+    const raw = sessionStorage.getItem(historyKey(userId));
+    return raw ? (JSON.parse(raw) as History) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveHistory(userId: string, history: History) {
+  try {
+    sessionStorage.setItem(historyKey(userId), JSON.stringify(history));
+  } catch {
+    // 存不了（私密瀏覽、空間滿了）就只在這次頁面裡有效。
+  }
+}
+
 /** 建議只剩被關掉的類別就不顯示；舊的建議沒有標籤，照常顯示。 */
 function withoutMuted(flags: ScanFlag[], muted: string[]): ScanFlag[] {
   return flags.flatMap((f) => {
@@ -72,11 +133,15 @@ function withoutMuted(flags: ScanFlag[], muted: string[]): ScanFlag[] {
 }
 
 export function ExperiencePageClient({
+  userId,
   entries,
   background,
   initialLayouts,
   initialMutedRules,
+  initialSectionLabels,
 }: {
+  /** 上一步／下一步的紀錄依帳號分開存。 */
+  userId: string;
   entries: ExperienceEntry[];
   /** 經歷以外的 Summary、學歷、技能、語言（每個語言各一份）。 */
   background: ProfileBackground;
@@ -84,6 +149,8 @@ export function ExperiencePageClient({
   initialLayouts: LayoutMap;
   /** 使用者關掉的提醒類別（只影響檢查）。 */
   initialMutedRules: string[];
+  /** 使用者改過的區塊標題（全帳號共用）。 */
+  initialSectionLabels: Record<"zh" | "en", CustomSectionLabels>;
 }) {
   const [mutedRules, setMutedRules] = useState<string[]>(initialMutedRules);
   const [layouts, setLayouts] = useState<LayoutMap>(initialLayouts);
@@ -117,6 +184,107 @@ export function ExperiencePageClient({
     return () => clearInterval(timer);
   }, [isScanning, scan?.done]);
 
+  // ---- 上一步／下一步 ----
+  const [past, setPast] = useState<ExperienceSnapshot[]>([]);
+  const [future, setFuture] = useState<ExperienceSnapshot[]>([]);
+  const [restoring, setRestoring] = useState(false);
+  // 畫布是 contentEditable，整份內容被換掉時要重新掛載，畫面才會顯示還原後的內容。
+  const [canvasVersion, setCanvasVersion] = useState(0);
+  const baseline = useRef<ExperienceSnapshot | null>(null);
+  // 還原中：資料庫的變動是自己造成的，不算新的一步。
+  const restoringTo = useRef<ExperienceSnapshot | null>(null);
+  // 檢查是分好幾批寫進資料庫的，跑完才算一步。
+  const batching = useRef(false);
+  const latest = useRef<ExperienceSnapshot>(toSnapshot(entries, background));
+
+  const persist = useCallback(
+    (nextPast: ExperienceSnapshot[], nextFuture: ExperienceSnapshot[], nextBaseline: ExperienceSnapshot) => {
+      setPast(nextPast);
+      setFuture(nextFuture);
+      baseline.current = nextBaseline;
+      saveHistory(userId, { baseline: nextBaseline, past: nextPast, future: nextFuture });
+    },
+    [userId],
+  );
+
+  /** 資料庫的內容跟上次記下的不一樣：把上次的記進上一步。 */
+  const recordChange = useCallback(
+    (current: ExperienceSnapshot, prevPast: ExperienceSnapshot[]) => {
+      const before = baseline.current;
+      if (!before || sameSnapshot(before, current)) return;
+      persist([...prevPast.slice(-(HISTORY_LIMIT - 1)), before], [], current);
+    },
+    [persist],
+  );
+
+  /** 還原完成：建議跟著還原後的內容重算，畫布重新掛載。 */
+  const applyRestored = useCallback(
+    (restored: ExperienceEntry[]) => {
+      setFlags(withoutMuted(storedFlags(restored), mutedRules));
+      setCanvasVersion((v) => v + 1);
+    },
+    [mutedRules],
+  );
+
+  const pastRef = useRef(past);
+  useEffect(() => {
+    pastRef.current = past;
+  }, [past]);
+
+  useEffect(() => {
+    const current = toSnapshot(entries, background);
+    latest.current = current;
+    // 第一次打開：接上這個分頁之前的紀錄（例如到「新增經歷」頁上傳完回來，上傳就算一步）。
+    if (baseline.current === null) {
+      const saved = loadHistory(userId);
+      pastRef.current = saved?.past ?? [];
+      persist(saved?.past ?? [], saved?.future ?? [], saved?.baseline ?? current);
+      recordChange(current, pastRef.current);
+      return;
+    }
+    if (restoringTo.current) {
+      if (!sameSnapshot(current, restoringTo.current)) return;
+      restoringTo.current = null;
+      baseline.current = current;
+      applyRestored(entries);
+      return;
+    }
+    if (batching.current) return;
+    recordChange(current, pastRef.current);
+    // applyRestored 只在還原完成那一次用到，關掉的提醒類別變了不需要重跑這段。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, background, userId, recordChange, persist]);
+
+  async function restore(target: ExperienceSnapshot, nextPast: ExperienceSnapshot[], nextFuture: ExperienceSnapshot[]) {
+    if (restoring || !baseline.current) return;
+    setRestoring(true);
+    setScanError(null);
+    const previous = { past, future, baseline: baseline.current };
+    restoringTo.current = target;
+    persist(nextPast, nextFuture, target);
+    const result = await restoreExperienceSnapshotAction(target);
+    setRestoring(false);
+    if (result.error) {
+      restoringTo.current = null;
+      persist(previous.past, previous.future, previous.baseline);
+      setScanError(`還原失敗：${result.error}`);
+    }
+  }
+
+  function handleUndo() {
+    const target = past[past.length - 1];
+    if (!target || !baseline.current) return;
+    void restore(target, past.slice(0, -1), [...future, baseline.current]);
+  }
+
+  function handleRedo() {
+    const target = future[future.length - 1];
+    if (!target || !baseline.current) return;
+    void restore(target, [...past.slice(-(HISTORY_LIMIT - 1)), baseline.current], future.slice(0, -1));
+  }
+
+  useUndoShortcuts({ undo: handleUndo, redo: handleRedo, enabled: !restoring && !isScanning });
+
   const scanProgress = scan ? ((scan.done + (scan.done < scan.batches ? creep : 0)) / scan.batches) * 100 : null;
 
   const layout = readLayoutSettings(layouts[activeLanguage], activeLanguage);
@@ -141,6 +309,7 @@ export function ExperiencePageClient({
     setScanNote(null);
     setCreep(0);
     setScan({ done: 0, batches: 1 });
+    batching.current = true;
     const collected: ScanFlag[] = [];
     const passed: ReviewedVariant[] = [];
     let skipped = 0;
@@ -167,7 +336,7 @@ export function ExperiencePageClient({
       setFlags(collected);
       setActiveFlagKey(null);
       // 通過的記下來，內容沒再改的話下次檢查就跳過。等全部批次跑完才記，分批的編號才不會跑掉。
-      if (passed.length > 0) void markVariantsReviewedAction(passed);
+      if (passed.length > 0) await markVariantsReviewedAction(passed);
       if (collected.length === 0) {
         setScanNote(
           checked === 0
@@ -178,6 +347,9 @@ export function ExperiencePageClient({
     } catch (e) {
       setScanError(e instanceof Error ? e.message : "檢查失敗，請再試一次");
     } finally {
+      // 整次檢查（含記下通過的）算一步。
+      batching.current = false;
+      recordChange(latest.current, pastRef.current);
       setIsScanning(false);
       // 停在 100% 一下再收起來，讓使用者看到「跑完了」。
       setTimeout(() => setScan(null), 600);
@@ -261,7 +433,7 @@ export function ExperiencePageClient({
   const visibleFlags = flags.filter((f) => langEntryIds.has(f.entryId));
 
   return (
-    <>
+    <SectionLabelsProvider initial={initialSectionLabels}>
       <div className="canvas-layout">
         <div className="canvas-main" onClick={clearHighlightIfIdle}>
           <div className="canvas-bar">
@@ -275,6 +447,29 @@ export function ExperiencePageClient({
                 onChange={setActiveLanguage}
               />
               <LayoutMenu language={activeLanguage} layout={layout} onChange={changeLayout} />
+              {/* 上一步／下一步：跟「Aa」一樣是灰色純圖示，沒有紀錄時變淡、不能按。 */}
+              <div className="canvas-history">
+                <button
+                  type="button"
+                  className="icon-btn canvas-history-btn"
+                  onClick={handleUndo}
+                  disabled={restoring || isScanning || past.length === 0}
+                  title="上一步（⌘Z／Ctrl+Z）"
+                  aria-label="上一步"
+                >
+                  <UndoIcon />
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn canvas-history-btn"
+                  onClick={handleRedo}
+                  disabled={restoring || isScanning || future.length === 0}
+                  title="下一步（⇧⌘Z／Shift+Ctrl+Z）"
+                  aria-label="下一步"
+                >
+                  <RedoIcon />
+                </button>
+              </div>
             </div>
             <div className="canvas-bar-actions">
               {scanError && <span className="text-error">{scanError}</span>}
@@ -316,6 +511,7 @@ export function ExperiencePageClient({
             </div>
           )}
           <ExperienceCanvas
+            key={canvasVersion}
             entries={entries}
             background={background[activeLanguage]}
             otherBackground={background[activeLanguage === "zh" ? "en" : "zh"]}
@@ -367,6 +563,6 @@ export function ExperiencePageClient({
           onCommitted={handleCommitted}
         />
       )}
-    </>
+    </SectionLabelsProvider>
   );
 }

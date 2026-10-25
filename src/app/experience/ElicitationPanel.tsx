@@ -378,7 +378,7 @@ export function ElicitationPanel({
                       checked={newEntryFields.entryType === "leadership"}
                       onChange={() => setNewEntryFields((f) => ({ ...f, entryType: "leadership" }))}
                     />
-                    領導經驗／專案
+                    領導經驗與專案
                   </label>
                 </div>
                 <div className="checkbox-row">

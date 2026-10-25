@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getSectionLabels } from "@/lib/resumes/sectionLabels";
+import { SectionTitle } from "../SectionLabels";
 import { joinList, type EducationItem, type LanguageBackground } from "@/lib/resumes/background";
 import { translateBackgroundAction, updateBackgroundAction, type BackgroundEdit } from "./actions";
 
@@ -21,11 +21,10 @@ function useSave(language: "zh" | "en") {
 export function SummarySection({ background, language }: { background: LanguageBackground; language: "zh" | "en" }) {
   const { save, error } = useSave(language);
   if (background.summaries.length === 0) return null;
-  const labels = getSectionLabels(language);
 
   return (
     <>
-      <div className="resume-section-header">{labels.summary}</div>
+      <div className="resume-section-header"><SectionTitle language={language} labelKey="summary" /></div>
       {background.summaries.map((text, i) => (
         <div key={`${i}:${text}`} className="exp-background-item">
           <EditableSpan
@@ -55,7 +54,6 @@ export function EducationSkillsSection({
   language: "zh" | "en";
 }) {
   const { save, error } = useSave(language);
-  const labels = getSectionLabels(language);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
   const canTranslate = (["education", "skills", "languages"] as const).some(
@@ -83,7 +81,7 @@ export function EducationSkillsSection({
           {translateError && <span className="exp-background-error">{translateError}</span>}
         </div>
       )}
-      <div className="resume-section-header">{labels.education}</div>
+      <div className="resume-section-header"><SectionTitle language={language} labelKey="education" /></div>
       {background.education.map((edu, i) => (
         <EducationBlock
           key={`${i}:${edu.school}`}
@@ -100,9 +98,9 @@ export function EducationSkillsSection({
         ＋ 新增學歷
       </button>
 
-      <div className="resume-section-header">{labels.skills}</div>
+      <div className="resume-section-header"><SectionTitle language={language} labelKey="skills" /></div>
       <div>
-        <span className="resume-skills-label">{labels.computer} </span>
+        <span className="resume-skills-label"><SectionTitle language={language} labelKey="computer" />{" "}</span>
         <EditableSpan
           className=""
           value={joinList(background.skills, language)}
@@ -111,7 +109,7 @@ export function EducationSkillsSection({
         />
       </div>
       <div>
-        <span className="resume-skills-label">{labels.languages} </span>
+        <span className="resume-skills-label"><SectionTitle language={language} labelKey="languages" />{" "}</span>
         <EditableSpan
           className=""
           value={joinList(background.languages, language)}
@@ -182,6 +180,8 @@ function EditableSpan({
   return (
     <span
       contentEditable
+      // 鍵盤 Cmd/Ctrl + Z 用：跟存好的內容一樣才算「沒在打字」（見 app/useUndoShortcuts.ts）。
+      data-committed={value}
       suppressContentEditableWarning
       data-placeholder={placeholder}
       onBlur={(e) => {

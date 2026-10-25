@@ -6,7 +6,7 @@ import type { ExperienceEntry } from "./ExperienceCanvas";
 export async function loadExperienceEntries(supabase: SupabaseClient, userId: string): Promise<ExperienceEntry[]> {
   const { data } = await supabase
     .from("experience_entries")
-    .select("id, language, entry_type, org_name, location, role_variants, period_variants, achievements")
+    .select("id, language, entry_type, org_name, location, role_variants, period_variants, achievements, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
 
@@ -19,5 +19,6 @@ export async function loadExperienceEntries(supabase: SupabaseClient, userId: st
     roleVariants: row.role_variants ?? [],
     periodVariants: row.period_variants ?? [],
     achievements: row.achievements ?? [],
+    createdAt: row.created_at,
   }));
 }

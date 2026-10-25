@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { EstimatedProgress } from "@/app/ProgressBar";
 import { uploadAndMergeResumeAction } from "./actions";
+import { parityNote } from "./parityNote";
 
 type UploadItemState = {
   key: string;
@@ -54,7 +55,7 @@ export function UploadSourceCard() {
                 ? {
                     ...item,
                     status: "done",
-                    message: `新增 ${result.newEntriesCreated} 段全新經歷、${result.newAchievementsCreated} 個新成就、${result.variantsAppended} 個新寫法${result.backgroundItemsAdded ? `、${result.backgroundItemsAdded} 項 Summary／學歷／技能／語言` : ""}`,
+                    message: `新增 ${result.newEntriesCreated} 段全新經歷、${result.newAchievementsCreated} 個新成就、${result.variantsAppended} 個新寫法${result.backgroundItemsAdded ? `、${result.backgroundItemsAdded} 項 Summary／學歷／技能／語言` : ""}${parityNote(result)}`,
                   }
                 : { ...item, status: "error", message: result.error }
               : item,
