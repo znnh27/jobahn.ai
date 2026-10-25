@@ -17,10 +17,16 @@ export function NewApplicationForm() {
     initialState,
   );
   const [jobUrl, setJobUrl] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
+  // 抓取時帶回來的公司名稱：跟 JD 出自同一個職缺頁，送出時不用再檢查 JD 裡有沒有這個名稱
+  // （104 的 JD 內文常常不寫公司名，不然每次都會跳「可能貼錯公司」）。
+  const [scrapedCompany, setScrapedCompany] = useState<string | null>(null);
   const [jobDescription, setJobDescription] = useState("");
   const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
   const [isScraping, startScrapeTransition] = useTransition();
-  const scrapeProgress = useEstimatedProgress(isScraping, 10000);
+  // 104 直接讀結構化資料比較快；其他網站還要請 AI 篩掉雜訊，比較久。
+  const scrapeProgress = useEstimatedProgress(isScraping, /104\.com\.tw/.test(jobUrl) ? 8000 : 25000);
   const formRef = useRef<HTMLFormElement>(null);
   // JD 裡找不到填的公司名稱時，送出前先確認（可能 JD 貼錯公司）。按「仍要建立」後才真的送出。
   const [mismatchCompany, setMismatchCompany] = useState<string | null>(null);
@@ -31,8 +37,8 @@ export function NewApplicationForm() {
       confirmedMismatch.current = false;
       return;
     }
-    const company = (new FormData(e.currentTarget).get("companyName") as string | null)?.trim() ?? "";
-    if (companyMentionedInJd(company, jobDescription) === false) {
+    const company = companyName.trim();
+    if (company !== scrapedCompany && companyMentionedInJd(company, jobDescription) === false) {
       e.preventDefault();
       setMismatchCompany(company);
     }
@@ -48,7 +54,20 @@ export function NewApplicationForm() {
           return;
         }
         setJobDescription(result.text);
-        setScrapeMessage("抓取完成，內容已帶入下方，記得檢查一下有沒有多餘的雜訊文字");
+        // 公司名稱、職稱只填空白的欄位，使用者已經打的不蓋掉。
+        const filled: string[] = [];
+        if (result.companyName && !companyName.trim()) {
+          setCompanyName(result.companyName);
+          setScrapedCompany(result.companyName);
+          filled.push("公司名稱");
+        }
+        if (result.jobTitle && !jobTitle.trim()) {
+          setJobTitle(result.jobTitle);
+          filled.push("職稱");
+        }
+        setScrapeMessage(
+          `抓取完成，JD 已帶入下方${filled.length > 0 ? `，也幫你填好了${filled.join("、")}` : ""}。送出前再看一眼內容對不對`,
+        );
       } catch {
         // 請求本身失敗（斷網、逾時）也要告訴使用者，不然進度條消失後什麼都沒發生。
         setScrapeMessage("錯誤：抓取失敗，請檢查網路後再試一次，或直接把 JD 貼到下面");
@@ -62,14 +81,28 @@ export function NewApplicationForm() {
         <label htmlFor="companyName" className="label">
           公司名稱（選填）
         </label>
-        <input id="companyName" name="companyName" type="text" className="input" />
+        <input
+          id="companyName"
+          name="companyName"
+          type="text"
+          className="input"
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+        />
       </div>
 
       <div className="field">
         <label htmlFor="jobTitle" className="label">
           職稱（選填）
         </label>
-        <input id="jobTitle" name="jobTitle" type="text" className="input" />
+        <input
+          id="jobTitle"
+          name="jobTitle"
+          type="text"
+          className="input"
+          value={jobTitle}
+          onChange={(e) => setJobTitle(e.target.value)}
+        />
       </div>
 
       <div className="field">
@@ -79,6 +112,7 @@ export function NewApplicationForm() {
         <div className="input-row">
           <input
             id="jobUrl"
+            name="jobUrl"
             type="url"
             value={jobUrl}
             onChange={(e) => setJobUrl(e.target.value)}
