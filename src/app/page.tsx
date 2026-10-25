@@ -27,7 +27,9 @@ export default async function HomePage() {
             jo<span className="landing-wordmark-accent">bahn</span>
           </h1>
           <div className="landing-tagline-group">
-            <p className="landing-tagline">一個故事，拆成精準對上每份職缺的履歷</p>
+            <p className="landing-tagline">
+              一個故事，拆成精準對上每份職缺的履歷
+            </p>
             <p className="landing-subtagline">
               從 AI 追問經歷、拆解職缺、撰寫履歷、ATS 評分到求職信，一條龍完成。
             </p>
@@ -57,46 +59,62 @@ export default async function HomePage() {
 
   const { data: applications } = await supabase
     .from("applications")
-    .select("id, company_name, job_title, status, ats_score, resume_language, created_at")
+    .select(
+      "id, company_name, job_title, status, ats_score, resume_language, created_at, job_source_url, submitted_at, interview_at, offer_at",
+    )
     .order("created_at", { ascending: false });
 
   const displayName = getDisplayName(user);
+  // 首頁的招呼語：吉祥物、標題維持原本的大小跟置中排版，只是不再撐滿 66% 螢幕高度，下面直接接漏斗。
+  const greeting = (
+    <div className="home-hero">
+      <div className="home-hero-greeting">
+        {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
+        <img
+          src="/logo-mascot.png"
+          alt="jobahn 吉祥物：提著公事包的石斑魚"
+          className="home-hero-mascot"
+        />
+        <h1 className="home-hero-greeting-title">
+          <span className="home-hero-greeting-hi">Hi!</span> {displayName}
+        </h1>
+        <p className="home-hero-greeting-sub">和九斑一起打造專業的履歷吧！</p>
+      </div>
+    </div>
+  );
+  const applicationsHeader = (
+    <div className="page-header">
+      <h2 className="heading-page">應徵紀錄</h2>
+      <Link href="/applications/new" className="btn btn-primary">
+        <PlusIcon />
+        新增應徵
+      </Link>
+    </div>
+  );
 
   return (
     <div className="page page--with-nav page--blobs">
       <AppNav userName={displayName} />
       <BlobScene className="blob-scene--home" />
       <div className="page-container page-container--home">
-        <div className="home-hero home-hero--tall">
-          <div className="home-hero-greeting">
-            {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
-            <img
-              src="/logo-mascot.png"
-              alt="jobahn 吉祥物：提著公事包的石斑魚"
-              className="home-hero-mascot"
-            />
-            <h1 className="home-hero-greeting-title">
-              <span className="home-hero-greeting-hi">Hi!</span> {displayName}
-            </h1>
-            <p className="home-hero-greeting-sub">和九斑一起打造專業的履歷吧！</p>
-          </div>
-        </div>
-
-        <div className="page-header">
-          <h2 className="heading-page">應徵紀錄</h2>
-          <Link href="/applications/new" className="btn btn-primary">
-            <PlusIcon />
-            新增應徵
-          </Link>
-        </div>
-
-        <div className="table-wrap">
-          {applications && applications.length > 0 ? (
-            <ApplicationsTable applications={applications} />
-          ) : (
-            <p className="table-empty">還沒有應徵紀錄</p>
-          )}
-        </div>
+        {applications && applications.length > 0 ? (
+          // 招呼語＋漏斗一區，下面是「應徵紀錄」標題跟表格；招呼語、標題傳進去（漏斗要跟表格的勾選即時同步）。
+          <ApplicationsTable
+            applications={applications}
+            intro={greeting}
+            header={applicationsHeader}
+          />
+        ) : (
+          <>
+            {greeting}
+            <div className="applications-section">
+              {applicationsHeader}
+              <div className="table-wrap">
+                <p className="table-empty">還沒有應徵紀錄</p>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
