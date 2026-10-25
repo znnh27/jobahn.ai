@@ -5,10 +5,12 @@ import { COVERAGE_RULES, readScoreBasis, type GeneratedResume } from "./generate
 import { coveredByResume } from "./atsScore";
 import { buildContactLine, pickName, readContact } from "./contact";
 import { isCompanyResearchAvailable, researchCompany } from "@/lib/jobs/researchCompany";
-import { companyMentionedInJd } from "@/lib/jobs/companyInJd";
+import { companyMentionedInJd, searchableCompanyName } from "@/lib/jobs/companyInJd";
 import { letterLength, letterLengthUnit } from "@/lib/text/letterLength";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { toTraditional } from "@/lib/text/toTraditional";
+
+type Resume = GeneratedResume["resume"];
 
 // 寫作規則來自作者長期人工修改求職信後整理的寫作準則。
 // 例子都換成通用的，不放使用者本人的經歷（這套 prompt 所有使用者共用）。
@@ -59,6 +61,24 @@ const LANGUAGE_INSTRUCTION: Record<string, string> = {
 2. 專有名詞、認證縮寫、組織全名要用正確的大小寫跟單複數（例如 iOS 不是 IOS、LinkedIn 不是 Linkedin）。`,
 };
 
+// 軟實力、工作條件履歷證明不了、履歷頁也不算分，交給求職信（2026-10-24 Z 定案）。
+// 只給這份 JD 自己的條件；工作條件只給使用者在這份應徵按過「可以配合」的（不能讓 AI 自己假設使用者願意配合）。
+function traitSection(items: GeneratedResume["jd_match_checklist"]): string | null {
+  const traits = items.filter((i) => i.kind === "trait").map((i) => `- ${i.item}`);
+  if (traits.length === 0) return null;
+  return `===== 這份 JD 要的特質（軟實力，履歷證明不了，交給求職信）=====
+挑 1 到 2 個跟使用者資料最對得上的特質，用履歷裡的具體事例自然帶出來（例如「主動」就講他自己發起的改善），不要直接寫「我很主動積極」這種形容詞。資料裡看不出來的特質不要硬寫，也不用每個都寫到。
+${traits.join("\n")}`;
+}
+
+function conditionSection(items: GeneratedResume["jd_match_checklist"]): string | null {
+  const confirmed = items.filter((i) => i.kind === "condition" && i.answer === "yes").map((i) => `- ${i.item}`);
+  if (confirmed.length === 0) return null;
+  return `===== 使用者確認可以配合的工作條件 =====
+在結尾段用一句話自然提到可以配合（能搭配真實佐證就帶上，例如語言能力、海外經驗），不要寫成一段。清單以外的工作條件一律不提。
+${confirmed.join("\n")}`;
+}
+
 const SIGNATURE_MARK = "{{SIGNATURE}}";
 
 /** 把 {{SIGNATURE}} 換成署名（名字＋聯絡方式）；AI 漏寫記號時接在信尾。 */
@@ -84,9 +104,9 @@ export interface CoverLetterOptions {
 }
 
 export interface CoverLetterGenerateInfo {
-  /** 有勾研究時：參考了哪些網頁；查不到（或因為公司名稱對不上而跳過）是空陣列。沒勾研究是 null。 */
+  /** 有勾研究時：參考了哪些網頁；查不到是空陣列。沒勾研究是 null。 */
   researchSources: string[] | null;
-  /** JD 裡找不到填的公司名稱時，回傳那個名稱，畫面上提醒使用者確認。 */
+  /** JD 裡沒寫填的公司名稱時，回傳實際拿去搜尋的名稱，畫面上提醒使用者確認信裡的公司是對的。 */
   companyMismatch: string | null;
 }
 
@@ -129,22 +149,25 @@ export async function generateCoverLetterForApplication(
 
   // JD 裡找不到填的公司名稱（真實發生過：公司名稱填 A 公司，JD 卻貼成 B 公司的職缺），公司研究可能查到別間公司，
   // 這種情況一律不研究，應徵動機只照 JD 寫，並提醒使用者確認公司名稱。
+  // JD 沒寫公司名稱很常見（104 的內文常常只有工作內容），不代表填錯：建立應徵時已經提醒過使用者，
+  // 這裡照樣研究，只是要求 AI 只用跟 JD 對得上的內容，畫面上也再提醒一次確認公司。
   const companyMismatch =
     companyMentionedInJd(application.company_name, application.job_description) === false
-      ? (application.company_name as string)
+      ? searchableCompanyName(application.company_name ?? "")
       : null;
 
   // 公司研究每次都重新查（不沿用上一次或別的職缺的資料），各語言版本共用同一份。
   const research =
-    options.research && !companyMismatch && isCompanyResearchAvailable()
+    options.research && isCompanyResearchAvailable()
       ? await researchCompany(application.company_name ?? "", application.job_description ?? "")
       : null;
-  const researchSection = companyMismatch
-    ? `===== 公司研究 =====\n這筆應徵填的公司名稱沒有出現在 JD 裡，可能填錯或 JD 貼錯，所以沒有查公司資料。公司名稱一律以 JD 原文為準，第二段（應徵動機）以這個職位的工作內容為主，不要編造公司特色。`
-    : !options.research
+  const mismatchNote = companyMismatch
+    ? `\nJD 裡沒有寫公司名稱，這份資料是用使用者填的「${companyMismatch}」搜尋的。只用產業、業務、產品跟 JD 工作內容對得上的內容；對不上就當作查錯了，不要用。`
+    : "";
+  const researchSection = !options.research
     ? `===== 公司研究 =====\n這次沒有查公司資料。第二段（應徵動機）以這個職位的工作內容為主，不要編造公司特色。`
     : research
-      ? `===== 公司研究素材（剛上網查的「${application.company_name}」相關頁面）=====\n只用明確是在講這間公司的內容；搜尋結果可能混到同名或無關的頁面，看不出來是這間公司的就不要用。\n\n${research.material}`
+      ? `===== 公司研究素材（剛上網查的「${searchableCompanyName(application.company_name ?? "")}」相關頁面）=====\n只用明確是在講這間公司的內容；搜尋結果可能混到同名或無關的頁面，看不出來是這間公司的就不要用。${mismatchNote}\n\n${research.material}`
       : `===== 公司研究 =====\n查不到這間公司夠具體的公開資料。第二段（應徵動機）以這個職位的工作內容為主，不要編造公司特色。`;
 
   const draft: Record<string, string> = {};
@@ -176,15 +199,19 @@ export async function generateCoverLetterForApplication(
       JSON.stringify(resume, null, 2),
       `===== JD 符合度清單（逐條核對；尚未涵蓋的部分可以考慮在求職信補強）=====`,
       JSON.stringify(
-        checklistForResume.map((i) => ({
-          item: i.item,
-          importance: i.importance ?? null,
-          covered: coveredByResume(i),
-          gap: i.gap ?? null,
-        })),
+        checklistForResume
+          .filter((i) => (i.kind ?? "requirement") === "requirement")
+          .map((i) => ({
+            item: i.item,
+            importance: i.importance ?? null,
+            covered: coveredByResume(i),
+            gap: i.gap ?? null,
+          })),
         null,
         2,
       ),
+      traitSection(checklistForResume),
+      conditionSection(checklistForResume),
       researchSection,
     ]
       .filter((part): part is string => part !== null)
@@ -322,4 +349,90 @@ export async function recheckJdMatchWithCoverLetter(
   if (updateError) throw new Error(`儲存重新比對結果失敗：${updateError.message}`);
 
   return updated;
+}
+
+const REVISE_SYSTEM_PROMPT = `你是求職信修改助手。使用者會給你：JD、已經定案的履歷內容、目前的求職信，跟一句想怎麼改的要求。
+
+照使用者的要求修改目前的求職信，修改時一樣要遵守下面的寫作規則：
+
+${COVER_LETTER_RULES}
+
+修改規則：
+1. 沒被要求的地方原則上不要動；被要求改一段，就只改那一段。
+2. 只能用履歷、JD 裡有的事實。要求加的內容資料裡沒有，就不要編，在 reply 說明缺什麼、建議怎麼補。
+3. 信裡的 {{SIGNATURE}} 記號一字不改留在原位，系統會換成使用者的名字跟聯絡方式。
+4. 使用者要求縮短或加長時，reply 裡說明大概改成多少字。
+5. reply 用繁體中文一兩句話說明改了哪裡，口語、不要生硬。
+6. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來：{ "reply": string, "letter": string }`;
+
+/**
+ * 求職信頁的「跟 AI 聊」：照使用者的一句話改這個語言版本的信，回傳改好的整封信跟一句說明。
+ * 不存檔、不重新比對，換進頁面上的草稿（可以復原），使用者按「儲存」才存。
+ * 署名（名字＋聯絡方式）是程式放的，先換回記號再給 AI，改完再放回去，AI 不會改到聯絡方式。
+ */
+export async function reviseCoverLetterWithChat(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  applicationId: string;
+  language: string;
+  letter: string;
+  history: { role: "user" | "assistant"; text: string }[];
+  instruction: string;
+}): Promise<{ reply: string; letter: string }> {
+  const { supabase, userId, applicationId, language, letter, history, instruction } = params;
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("job_description, resume_snapshot")
+    .eq("id", applicationId)
+    .eq("user_id", userId)
+    .single();
+  if (!application) throw new Error("找不到這筆應徵紀錄");
+
+  const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", userId).maybeSingle();
+  const contact = readContact(profile?.data);
+  const signature = [pickName(contact, language), buildContactLine(contact, language)].filter(Boolean).join("\n");
+  const at = signature ? letter.lastIndexOf(signature) : -1;
+  const body = at >= 0 ? `${letter.slice(0, at)}${SIGNATURE_MARK}${letter.slice(at + signature.length)}` : letter;
+
+  const snapshot: Record<string, Resume> = application.resume_snapshot ?? {};
+  const resumeLang = snapshot[language] ? language : Object.keys(snapshot)[0];
+  const { layout: _layout, ...resume } = snapshot[resumeLang] ?? ({} as Resume); // eslint-disable-line @typescript-eslint/no-unused-vars
+
+  const response = await askClaude({
+    userId,
+    feature: "cover_letter_chat",
+    systemPrompt: REVISE_SYSTEM_PROMPT,
+    userPrompt: [
+      LANGUAGE_INSTRUCTION[language] ?? `目標語言：${language}`,
+      `===== JD =====`,
+      application.job_description,
+      `===== 已定案的履歷內容 =====`,
+      JSON.stringify(resume, null, 2),
+      `===== 目前的求職信 =====`,
+      body,
+      history.length > 0
+        ? `===== 之前的對話 =====\n${history.map((t) => `${t.role === "user" ? "使用者" : "AI"}：${t.text}`).join("\n")}`
+        : "",
+      `===== 使用者這次的要求 =====`,
+      instruction,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    maxTokens: 3000,
+    supabase,
+  });
+
+  let parsed: { reply?: string; letter?: string };
+  try {
+    parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
+  } catch {
+    throw new Error("AI 回傳的內容不是有效的 JSON，請再試一次");
+  }
+  let revised = (parsed.letter ?? "").trim();
+  if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
+  if (language === "zh") revised = toFullWidthPunctuation(toTraditional(revised));
+  // 原本的信找不到署名（使用者自己改掉了）就不硬加。
+  if (at >= 0) revised = placeSignature(revised, signature);
+  return { reply: toTraditional(parsed.reply ?? "改好了。"), letter: revised };
 }

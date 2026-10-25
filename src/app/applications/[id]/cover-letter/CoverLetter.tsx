@@ -16,6 +16,7 @@ import { coveredByResume } from "@/lib/resumes/atsScore";
 import { JdChecklist } from "../JdChecklist";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { JdFitScore } from "../JdFitScore";
+import { CoverLetterChatPanel } from "./CoverLetterChatPanel";
 import { letterLength, letterLengthUnit } from "@/lib/text/letterLength";
 import {
   CoverLetterOptionsFields,
@@ -96,6 +97,12 @@ export function CoverLetter({
   const [researching, setResearching] = useState(false);
   // JD 裡找不到填的公司名稱：可能 JD 貼錯，醒目提醒（不是一般的小字訊息）。
   const [companyWarning, setCompanyWarning] = useState<string | null>(null);
+  // 這次生成參考了哪些公司網頁（列出來讓使用者自己確認查的是不是對的公司）。
+  const [researchSources, setResearchSources] = useState<string[]>([]);
+  // 「跟 AI 聊」面板：浮在右下角，邊聊邊看信。AI 改完記下改之前的那一版，可以按「復原上一版」退回；
+  // 之後自己動手改了信，就不再提供復原（不然會連手動改的一起蓋掉）。
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatUndo, setChatUndo] = useState<{ lang: string; text: string } | null>(null);
   const generateProgress = useEstimatedProgress(busy === "generate", 30000 * langCount + (researching ? 15000 : 0));
   const recheckProgress = useEstimatedProgress(busy === "recheck", 20000);
 
@@ -123,21 +130,36 @@ export function CoverLetter({
         return;
       }
       setDraft(result.data.cover_letter_draft);
+      setChatUndo(null);
       // 信換了，上一封信的比對結果不適用。
       setLetterChecklist({});
       setActiveLang(options.languages[0]);
       const { researchSources: sources, companyMismatch } = result.data;
       setCompanyWarning(companyMismatch);
+      setResearchSources(sources ?? []);
       setMessage(
-        companyMismatch
+        sources === null
           ? "求職信生成完成"
-          : sources === null
-            ? "求職信生成完成"
-            : sources.length > 0
-              ? `求職信生成完成（參考了 ${sources.length} 個公司相關網頁）`
-              : "求職信生成完成（查不到這間公司的具體資料，應徵動機改用職位內容來寫）",
+          : sources.length > 0
+            ? `求職信生成完成（參考了 ${sources.length} 個公司相關網頁）`
+            : "求職信生成完成（查不到這間公司的具體資料，應徵動機改用職位內容來寫）",
       );
     });
+  }
+
+  // 「跟 AI 聊」改好的信換進草稿，記下改之前的那一版。改完要按「儲存」才會存。
+  function applyChatRevision(lang: string, next: string) {
+    if (!draft) return;
+    setChatUndo({ lang, text: draft[lang] ?? "" });
+    setDraft({ ...draft, [lang]: next });
+    setMessage("AI 改好了，記得按「儲存」；不滿意可以按「復原上一版」");
+  }
+
+  function undoChatRevision() {
+    if (!draft || !chatUndo) return;
+    setDraft({ ...draft, [chatUndo.lang]: chatUndo.text });
+    setChatUndo(null);
+    setMessage("已復原成 AI 改之前的版本");
   }
 
   // 從履歷頁帶 ?generate= 過來：一進來就開始生成，並把網址上的參數拿掉，重新整理才不會再生成一次。
@@ -245,6 +267,19 @@ export function CoverLetter({
             <div className="canvas-bar-actions">
               {!completed ? (
                 <>
+                  {chatUndo?.lang === activeLang && (
+                    <button type="button" onClick={undoChatRevision} disabled={isPending} className="btn btn-secondary">
+                      復原上一版
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setChatOpen((v) => !v)}
+                    disabled={isPending && !chatOpen}
+                    className="btn btn-secondary"
+                  >
+                    跟 AI 聊
+                  </button>
                   <button type="button" onClick={handleSave} disabled={isPending} className="btn btn-secondary">
                     {busy === "save" && <Spinner />}
                     儲存
@@ -278,10 +313,20 @@ export function CoverLetter({
         {draft && generateProgress !== null && (
           <ProgressBar value={generateProgress} label="AI 正在依履歷跟 JD 重新寫求職信…" />
         )}
-        {companyWarning && (
+        {companyWarning && researchSources.length === 0 && (
           <div className="alert alert-warning" role="status">
-            JD 裡沒有出現「{companyWarning}」，可能是公司名稱填錯或 JD 貼成別間公司的職缺。這次沒有上網研究公司，應徵動機改用職位內容來寫。請確認信裡寫的公司是對的。
+            JD 裡沒有寫公司名稱，信裡的公司是照你填的「{companyWarning}」寫的。請確認公司是對的。
           </div>
+        )}
+        {researchSources.length > 0 && (
+          <ResearchSources
+            urls={researchSources}
+            warning={
+              companyWarning
+                ? `JD 裡沒有寫公司名稱，信裡的公司是照你填的「${companyWarning}」寫的，公司資料也是用這個名稱查的。請確認公司是對的。`
+                : null
+            }
+          />
         )}
         {recheckProgress !== null && (
           <ProgressBar value={recheckProgress} label="用履歷＋求職信重新比對 JD…" />
@@ -294,7 +339,11 @@ export function CoverLetter({
                 aria-label={`${LANG_LABEL[activeLang] ?? activeLang}求職信`}
                 value={letterText}
                 readOnly={completed}
-                onChange={(e) => setDraft((prev) => (prev ? { ...prev, [activeLang]: e.target.value } : prev))}
+                onChange={(e) => {
+                  const text = e.target.value;
+                  setDraft((prev) => (prev ? { ...prev, [activeLang]: text } : prev));
+                  setChatUndo(null);
+                }}
                 className="letter-page-text"
               />
             </div>
@@ -335,13 +384,55 @@ export function CoverLetter({
         <div className="card card--sm">
           <h2 className="heading-card">JD 條件對照</h2>
           <JdFitScore
-            items={checklistItems}
-            note="適配度＝履歷＋求職信合起來涵蓋的 JD 條件比例。履歷寫到的固定算數；求職信有補上的，按「重新比對職缺符合度」才會算進來。信沒改的話，比對結果不會變。"
+            items={checklistItems.filter((i) => !i.invalid)}
+            note={
+              <ul>
+                <li>履歷＋求職信合起來涵蓋的 JD 條件比例</li>
+                <li>軟實力、工作條件也算，這兩類靠求職信補</li>
+                <li>求職信補上的，按「重新比對職缺符合度」才會算進來</li>
+                <li>信沒改，比對結果就不變</li>
+              </ul>
+            }
           />
-          <JdChecklist items={checklistItems} isCovered={(i) => i.covered} showSource language={checklistLang} />
+          <JdChecklist items={checklistItems} isCovered={(i) => i.covered} scope="letter" showSource language={checklistLang} />
         </div>
       </div>
 
+      {chatOpen && !completed && draft && (
+        <CoverLetterChatPanel
+          key={activeLang}
+          applicationId={applicationId}
+          language={activeLang}
+          letter={letterText}
+          onApply={(next) => applyChatRevision(activeLang, next)}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * 這次參考的公司網頁：整個框是一個下拉，箭頭在最右邊，點開才列出網址。
+ * JD 沒寫公司名時用提醒框（請使用者確認公司），有寫就只是一般說明。
+ */
+function ResearchSources({ urls, warning }: { urls: string[]; warning: string | null }) {
+  return (
+    <details className={`alert research-sources ${warning ? "alert-warning" : "research-sources--plain"}`}>
+      <summary className="research-sources-summary">
+        <span>{warning ?? `求職信參考了這間公司的公開資料（${urls.length} 個網頁）`}</span>
+        <span className="research-sources-arrow" aria-hidden="true" />
+      </summary>
+      <p className="research-sources-title">這次參考的 {urls.length} 個公司網頁：</p>
+      <ul className="research-sources-list">
+        {urls.map((url) => (
+          <li key={url}>
+            <a href={url} target="_blank" rel="noreferrer" className="research-sources-link">
+              {url}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
