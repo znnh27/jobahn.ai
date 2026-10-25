@@ -786,6 +786,350 @@
   border-top: 1px solid var(--chrome-border);
 }
 
+/* 首頁應徵紀錄的表格卡片（漏斗是上面另外一張，見 .funnel）。 */
+.applications-card {
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-white);
+  overflow: hidden;
+}
+/* 卡片裡的表格不用自己的外框跟圓角。 */
+.table-wrap--flush {
+  border: none;
+  border-radius: 0;
+}
+/* 「應徵紀錄」標題跟表格卡片包在一起，中間不吃外層的大間距。 */
+.applications-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.applications-row-error {
+  margin: 0;
+}
+
+/* 首頁上半部：招呼語＋求職漏斗同一區，招呼語下面直接接漏斗。 */
+.home-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+/* 首頁的吉祥物貼近「Hi!」那行（圖片底部本身有透明留白），只影響首頁，其他頁的招呼語不動。 */
+.home-dashboard .home-hero-mascot {
+  margin-bottom: -12px;
+}
+
+/* 求職漏斗：一張卡片，三個大數字分在左、中、右，中間的箭頭拉滿空間，箭頭上是轉換率、下是平均天數。 */
+/* 配色跟寫履歷時的進度條（.progress）一致：框線用進度條底軌的淡黃（--chrome-border）、
+   箭頭用品牌檸檬黃（--chrome-accent #ffe134）、轉換率對應百分比用深暖灰、標籤跟天數對應說明文字用輔助灰。
+   整塊不用最重的 --chrome-ink，也沒有陰影。 */
+.funnel {
+  padding: var(--space-5) var(--space-6);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--radius-lg);
+  background: #fffef9;
+}
+.funnel-stages {
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.funnel-item {
+  display: flex;
+  align-items: center;
+}
+/* 第二、三關（前面有箭頭的）撐開，箭頭跟著拉長。 */
+.funnel-item:not(:first-child) {
+  flex: 1;
+}
+.funnel-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  min-width: 88px;
+}
+.funnel-count {
+  font-family: var(--font-display);
+  font-size: 2.75rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--chrome-text);
+  font-variant-numeric: tabular-nums;
+}
+.funnel-label {
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--chrome-muted);
+  white-space: nowrap;
+}
+.funnel-step {
+  flex: 1;
+  display: grid;
+  grid-template-rows: auto auto auto;
+  justify-items: center;
+  gap: var(--space-1);
+  min-width: 80px;
+  margin: 0 var(--space-4);
+  font-size: var(--font-sm);
+  color: var(--chrome-muted);
+  white-space: nowrap;
+}
+.funnel-step-rate {
+  font-weight: 600;
+  color: var(--chrome-text);
+  font-variant-numeric: tabular-nums;
+}
+/* 天藍的線＋右邊的箭頭，寬度拉滿。 */
+.funnel-step-line {
+  position: relative;
+  width: 100%;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--chrome-accent);
+}
+.funnel-step-line::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid var(--chrome-accent);
+  border-right: 2px solid var(--chrome-accent);
+  transform: rotate(45deg);
+}
+.funnel-step-days {
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
+}
+
+/* 手機：三關直排，箭頭改成往下。 */
+@media (max-width: 640px) {
+  .funnel-stages {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .funnel-item {
+    flex-direction: column;
+  }
+  .funnel-step {
+    margin: var(--space-1) 0;
+  }
+  .funnel-step-line {
+    display: none;
+  }
+}
+
+.data-table th.data-table-cell--center,
+.data-table td.data-table-cell--center {
+  text-align: center;
+}
+.data-table td.data-table-cell--muted {
+  color: var(--chrome-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* 公司、職缺太長用「…」截斷，滑過（title）看全名。 */
+.data-table-truncate {
+  display: inline-block;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.data-table-truncate--company {
+  max-width: 150px;
+}
+.data-table-truncate--job {
+  max-width: 190px;
+}
+
+/* 職缺欄：名稱後面的 ↗ 或「＋ 連結」。 */
+.job-title-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.job-url-open {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  color: var(--chrome-muted);
+}
+.job-url-open:hover {
+  background: var(--chrome-surface-tint);
+  color: var(--chrome-ink);
+}
+.job-url-add {
+  padding: 0 var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.data-table-row--link:hover .job-url-add,
+.job-url-add:focus-visible {
+  opacity: 1;
+}
+.job-url-add:hover {
+  background: var(--chrome-surface-tint);
+  color: var(--chrome-text);
+}
+@media (hover: none) {
+  .job-url-add {
+    opacity: 1;
+  }
+}
+.job-url-edit {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.data-table .job-url-input {
+  width: 200px;
+  margin-top: 0;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-xs);
+}
+.job-url-error {
+  font-size: var(--font-xs);
+  white-space: normal;
+}
+
+/* 求職進度標籤：低飽和的灰底，只有 Offer 用淡綠色稍微強調。點了展開勾選。 */
+.stage-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px var(--space-2);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--color-neutral-100);
+  font-size: var(--font-xs);
+  color: var(--color-neutral-700);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stage-pill:hover {
+  border-color: var(--color-neutral-300);
+}
+.stage-pill--none {
+  background: transparent;
+  border-color: var(--color-neutral-200);
+  color: var(--chrome-muted);
+}
+.stage-pill--interview {
+  background: #eef2f6;
+  color: #34506b;
+}
+.stage-pill--offer {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+.stage-pill-date {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.stage-pill-caret {
+  width: 5px;
+  height: 5px;
+  margin-left: var(--space-1);
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-1px) rotate(45deg);
+  opacity: 0.6;
+}
+
+.progress-popover {
+  position: fixed;
+  z-index: 300;
+  width: 228px;
+  padding: var(--space-2);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.progress-row:hover {
+  background: var(--chrome-surface-tint);
+}
+.progress-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-sm);
+  color: var(--chrome-text);
+  cursor: pointer;
+}
+
+/* 勾選框：中性風格，沒勾是細灰框，勾了是深色填滿加白色勾勾。 */
+.milestone-checkbox {
+  appearance: none;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1.5px solid var(--color-neutral-300);
+  border-radius: 4px;
+  background: var(--color-white) center / 12px 12px no-repeat;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.milestone-checkbox:hover {
+  border-color: var(--color-neutral-500);
+}
+.milestone-checkbox:checked {
+  border-color: var(--chrome-ink);
+  background-color: var(--chrome-ink);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 L5 8.5 L9.5 3.5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.milestone-checkbox:focus-visible {
+  outline: 2px solid var(--chrome-secondary);
+  outline-offset: 2px;
+}
+.milestone-date-wrap {
+  position: relative;
+}
+.milestone-date {
+  padding: 0 var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.milestone-date:hover {
+  background: var(--color-white);
+  color: var(--chrome-text);
+  text-decoration: underline;
+}
+/* 真正的日期輸入框藏起來，只拿它的日期選擇器用；選擇器會從這個位置彈出來。 */
+.milestone-date-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* 首頁應徵紀錄：整列可點進詳情頁，刪除圖示只在滑過（或鍵盤聚焦）那一列時出現。 */
 .data-table-row--link {
   cursor: pointer;
@@ -1426,14 +1770,43 @@
   font-weight: 400;
 }
 
-/* 職稱那一列：不用斜體、一般字重，跟粗體的公司名分開。 */
-.resume-row--role .resume-row-left,
-.resume-row--role .resume-row-right {
-  font-weight: 400;
-}
-
 .resume-block {
   margin-top: var(--resume-block, var(--space-2));
+}
+
+/* 履歷頁每段經歷的「刪除」：放在紙的右邊界外，滑到那段（或用鍵盤選到）才出現，跟經歷資料庫頁一樣。 */
+.resume-entry {
+  position: relative;
+}
+.resume-entry-remove {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  margin-left: var(--space-2);
+  white-space: nowrap;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-heading);
+  font-size: var(--font-xs);
+  font-weight: 400;
+  line-height: inherit;
+  color: var(--chrome-muted-light);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.resume-entry:hover .resume-entry-remove,
+.resume-entry-remove:focus-visible {
+  opacity: 1;
+}
+.resume-entry-remove:hover {
+  color: var(--color-danger-text-strong);
+}
+@media (hover: none) {
+  .resume-entry-remove {
+    opacity: 1;
+  }
 }
 
 /* 縮排跟 PDF 一樣：bullet 往內 12pt（16px），符號欄 10pt（13.33px）。 */
@@ -1461,6 +1834,26 @@
 
 .resume-editable--editable:focus {
   background: #fffbeb;
+}
+
+/* 區塊標題（專業摘要、工作經歷…）可以點來改：滑過時游標變成輸入游標，提示點得到。 */
+.section-title-editable {
+  cursor: text;
+}
+.section-title-editable:hover {
+  background: var(--chrome-surface-tint);
+}
+.section-title-error {
+  margin-left: var(--space-2);
+  font-size: var(--font-xs);
+  font-weight: 400;
+  color: var(--color-danger-text);
+}
+
+/* bullet 裡用 Shift + Enter 換的行要顯示出來（文字裡的換行字元）。履歷畫布、經歷資料庫都一樣。 */
+.resume-bullet-text,
+.exp-bullet-text {
+  white-space: pre-wrap;
 }
 
 .resume-skills-label {
@@ -2101,7 +2494,7 @@
    底下的應徵紀錄表格維持在橫幅外面，不受影響。 */
 .home-hero {
   border-radius: var(--radius-lg);
-  padding: var(--space-8) var(--space-6);
+  padding: var(--space-6) var(--space-6);
 }
 
 /* 回訪使用者首頁：色塊層掛在整頁（.page）上，左右滿版、上下從導覽列一路到頁面最底，
@@ -2170,7 +2563,6 @@
   align-items: center;
   justify-content: center;
   text-align: center;
-  gap: var(--space-2);
 }
 
 .home-hero-mascot {
@@ -2353,8 +2745,9 @@
   border-radius: 50%;
 }
 
-/* 色塊跟著游標在小範圍內移動（BlobScene.tsx 把游標位置寫進 --mx、--my，-1 到 1）。
-   每顆的 --blob-depth 不同：大顆移比較多、小顆移比較少，看起來有前後層次；
+/* 色塊跟著游標移動（BlobScene.tsx 把游標位置寫進 --mx、--my，-1 到 1）。
+   每顆的 --blob-depth 不同，數字是最多移幾 px：移動幅度拉大（40–100px），
+   正數跟著游標同方向、負數往反方向，有的往前有的往後，看起來更有層次；
    transition 讓色塊慢半拍跟上，移動起來比較滑順。 */
 .blob-scene {
   --mx: 0;
@@ -2366,13 +2759,13 @@
   transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
 }
-.blob-scene .blob--1 { --blob-depth: 34; }
-.blob-scene .blob--2 { --blob-depth: 18; }
-.blob-scene .blob--3 { --blob-depth: 28; }
-.blob-scene .blob--4 { --blob-depth: 12; }
-.blob-scene .blob--5 { --blob-depth: 10; }
-.blob-scene .blob--6 { --blob-depth: 14; }
-.blob-scene .blob--7 { --blob-depth: 24; }
+.blob-scene .blob--1 { --blob-depth: 70; }
+.blob-scene .blob--2 { --blob-depth: 100; }
+.blob-scene .blob--3 { --blob-depth: -80; }
+.blob-scene .blob--4 { --blob-depth: 40; }
+.blob-scene .blob--5 { --blob-depth: -50; }
+.blob-scene .blob--6 { --blob-depth: -60; }
+.blob-scene .blob--7 { --blob-depth: 90; }
 
 .blob--1 {
   top: 3%;
@@ -2586,6 +2979,9 @@
 .confirm-card {
   width: 100%;
   max-width: 420px;
+  /* 內容太長（例如「換成 JD 用字」列了很多修改）時，視窗不超出畫面，裡面自己捲動。 */
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -2594,9 +2990,19 @@
   background: var(--color-white);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
+/* 內容比較多的視窗（例如「換成 JD 用字」的前後對照）用寬一點的版本。 */
+.confirm-card--wide {
+  max-width: 720px;
+}
 
+/* 按鈕固定在視窗底部：內容捲動時也一直看得到「套用」「取消」。 */
 .confirm-card .btn-wrapper {
-  margin-top: var(--space-2);
+  position: sticky;
+  bottom: calc(-1 * var(--space-6));
+  margin: var(--space-2) calc(-1 * var(--space-6)) calc(-1 * var(--space-6));
+  padding: var(--space-3) var(--space-6) var(--space-6);
+  background: var(--color-white);
+  border-top: 1px solid var(--chrome-border);
 }
 
 .confirm-error {
@@ -3139,6 +3545,15 @@ button.step-bar-link:focus-visible {
   width: 36px;
   height: 36px;
 }
+/* 履歷頁「Aa」右邊的上一步／下一步，大小跟「Aa」一樣。 */
+.canvas-history {
+  display: flex;
+  align-items: center;
+}
+.canvas-history-btn {
+  width: 36px;
+  height: 36px;
+}
 .layout-menu-glyph {
   font-family: Georgia, "Times New Roman", serif;
   font-size: var(--font-base);
@@ -3578,7 +3993,8 @@ button.step-bar-link:focus-visible {
    有寫到：綠色勾勾；沒寫到：橘色驚嘆號。要補的排上面。
    ============================================================ */
 
-/* 「JD 條件」跟「缺口說明」兩個區塊，同一個樣式：上面一條分隔線、同樣的標題。 */
+/* 「JD 條件」「JD 關鍵字」「缺口說明」這些區塊，同一個樣式：上面一條分隔線、同樣的標題。
+   每個區塊都是 <details>，點標題列可以收起來，箭頭在最右邊。 */
 .ats-block {
   margin-top: var(--space-4);
   padding-top: var(--space-3);
@@ -3586,10 +4002,46 @@ button.step-bar-link:focus-visible {
 }
 
 .ats-block-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin: 0 0 var(--space-2);
   font-size: var(--font-sm);
   font-weight: 600;
   color: var(--chrome-ink);
+  cursor: pointer;
+  list-style: none;
+}
+.ats-block-title::-webkit-details-marker {
+  display: none;
+}
+.ats-block:not([open]) > .ats-block-title {
+  margin-bottom: 0;
+}
+.ats-block-title-text {
+  flex: 1;
+  min-width: 0;
+}
+/* 標題旁的小動作（「一鍵換成 JD 用字」），跟「讓 AI 幫你挖掘這段經驗」同一種小字連結。 */
+.ats-block-action {
+  flex-shrink: 0;
+  font-size: var(--font-xs);
+  font-weight: 400;
+}
+
+/* 可收合區塊的箭頭：收起來向下，打開向上。 */
+.disclosure-arrow {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  margin: 0 2px;
+  border-right: 2px solid var(--chrome-muted);
+  border-bottom: 2px solid var(--chrome-muted);
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 0.15s ease;
+}
+details[open] > summary > .disclosure-arrow {
+  transform: translateY(2px) rotate(-135deg);
 }
 
 .ats-score-note {
@@ -3600,13 +4052,14 @@ button.step-bar-link:focus-visible {
 }
 
 /* 兩個清單的文字都左右對齊，右邊才不會參差不齊。 */
+/* 缺口說明：每一條先列對應的 JD 條件（粗體），缺口內文一句一行、縮排在左邊一條細線後面。 */
 .ats-gap-list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-3);
   margin: 0;
-  padding-left: 1.25em;
-  list-style: disc;
+  padding: 0;
+  list-style: none;
   font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--chrome-ink);
@@ -3614,6 +4067,20 @@ button.step-bar-link:focus-visible {
   /* 英文清單（ul 有 lang="en"）左右對齊時自動斷字，字距才不會被拉得很開。 */
   -webkit-hyphens: auto;
   hyphens: auto;
+}
+.ats-gap-item {
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+}
+.ats-gap-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--chrome-border);
+}
+.ats-gap-body p {
+  margin: 0;
 }
 
 .ats-checklist-list {
@@ -3669,7 +4136,18 @@ button.step-bar-link:focus-visible {
   color: var(--color-info-text);
 }
 
-/* 條件後面的小標籤：部分符合、無法配合。 */
+/* 狀態 icon 本身就是提示的按鈕（InfoTip），沿用狀態的顏色，不套 ⓘ 的灰色跟間距。 */
+.info-tip--status {
+  margin-left: 0;
+}
+.info-tip--status .info-tip-btn,
+.info-tip--status .info-tip-btn:hover,
+.info-tip--status .info-tip-btn:focus-visible {
+  padding: 0;
+  color: inherit;
+}
+
+/* 條件後面的小標籤：判斷有問題、無法配合。 */
 .ats-check-tag {
   display: inline-block;
   margin-left: var(--space-1);
@@ -3698,6 +4176,143 @@ button.step-bar-link:focus-visible {
 .ats-check-answer .btn {
   padding: calc(3px + var(--display-nudge)) var(--space-3) calc(3px - var(--display-nudge));
   font-size: var(--font-sm);
+}
+
+/* 求職信頁：這次參考的公司網頁。整個框是下拉，箭頭在最右邊，點開才列網址，讓使用者自己確認查的是不是對的公司。 */
+.research-sources--plain {
+  background: var(--chrome-surface-tint);
+  color: var(--chrome-ink);
+}
+.research-sources-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  cursor: pointer;
+  list-style: none;
+}
+.research-sources-summary::-webkit-details-marker {
+  display: none;
+}
+/* 向下的箭頭，打開時轉成向上。 */
+.research-sources-arrow {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+.research-sources[open] .research-sources-arrow {
+  margin-top: 9px;
+  transform: rotate(-135deg);
+}
+.research-sources-title {
+  margin: var(--space-2) 0 var(--space-1);
+  font-weight: 600;
+}
+.research-sources-list {
+  margin: 0;
+  padding-left: var(--space-4);
+  word-break: break-all;
+}
+.research-sources-link {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* JD 條件清單：軟實力、工作條件不算分，用小圓點代替驚嘆號，顏色也淡一點。 */
+.ats-check--soft .ats-check-icon {
+  color: var(--chrome-muted-light);
+}
+.ats-check-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 5px;
+  border-radius: 999px;
+  background: currentColor;
+}
+/* AI 判斷有問題的項目：灰掉、不算分。 */
+.ats-check--invalid .ats-check-icon {
+  color: var(--chrome-muted-light);
+}
+.ats-check--invalid .ats-check-item {
+  color: var(--chrome-muted);
+}
+/* 「換成 JD 用字」視窗：只顯示改完的那一句，刪掉的字淡紅劃線、加上的字淡綠底。 */
+.reword-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.reword-where {
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
+}
+.reword-diff {
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  color: var(--chrome-text);
+}
+.reword-del {
+  color: var(--color-danger-text);
+  text-decoration: line-through;
+  background: var(--color-danger-bg);
+  border-radius: 2px;
+}
+.reword-ins {
+  color: var(--color-success-text);
+  text-decoration: none;
+  font-weight: 600;
+  background: var(--color-success-bg);
+  border-radius: 2px;
+}
+
+/* 「換成 JD 用字」視窗：找不到對應句子的關鍵字。 */
+.reword-notfound {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  font-size: var(--font-sm);
+  color: var(--chrome-muted);
+}
+
+/* 關鍵字小標籤：缺的用虛線框排前面，有的用淡色加勾勾排後面。 */
+.keyword-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.keyword-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  font-size: var(--font-xs);
+  line-height: 1.6;
+}
+.keyword-chip--missing {
+  border: 1px dashed var(--color-neutral-300);
+  color: var(--chrome-text);
+}
+.keyword-chip--matched {
+  border: 1px solid transparent;
+  background: var(--color-neutral-100);
+  color: var(--chrome-muted);
+}
+.keyword-chip--matched svg {
+  color: var(--color-success-text);
+}
+.keyword-note {
+  margin: 0;
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
 }
 
 /* 取捨建議視窗：套用後是不是剛好一頁（每勾一條都重新量）。 */
@@ -3793,4 +4408,238 @@ span:has(> .info-tip) {
 .info-tip-bubble ul {
   margin: var(--space-1) 0 0;
   padding-left: 1.1em;
+  list-style: disc;
+}
+.info-tip-bubble ul:first-child {
+  margin-top: 0;
+}
+.info-tip-bubble li + li {
+  margin-top: 2px;
+}
+
+/* ============================================================
+   慶祝畫面（Celebration.tsx）：首頁勾「面試 get」「Offer get!」時，吉祥物敲鑼打鼓
+   ============================================================ */
+
+.celebration {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  background: rgba(23, 23, 23, 0.55);
+  backdrop-filter: blur(2px);
+  cursor: pointer;
+  overflow: hidden;
+  animation: celebration-fade-in 0.2s ease-out;
+}
+
+.celebration-stage {
+  position: relative;
+  width: 420px;
+  height: 300px;
+  animation: celebration-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.celebration--offer .celebration-stage {
+  width: 560px;
+}
+
+/* 吉祥物：跟進度條那隻同一組圖層，手繞肩膀轉。 */
+.celebration-mascot {
+  position: absolute;
+  left: 40px;
+  top: 0;
+  width: 280px;
+  height: 280px;
+  z-index: 2;
+}
+.celebration--offer .celebration-mascot {
+  left: 170px;
+}
+.celebration-mascot-part {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.celebration-mascot-part--hand-front {
+  transform-origin: 59% 33%;
+  animation: celebration-hit 0.32s ease-in infinite alternate;
+}
+.celebration-mascot-part--hand-back {
+  transform-origin: 50% 31%;
+}
+/* Offer：後手（提公事包那隻）也一起甩，跟前手錯開一拍，像左右開弓。 */
+.celebration--offer .celebration-mascot-part--hand-back {
+  animation: celebration-hit-back 0.32s ease-in infinite alternate-reverse;
+}
+.celebration-mascot-part--body,
+.celebration-mascot-part--leg-front,
+.celebration-mascot-part--leg-back {
+  animation: celebration-bounce 0.32s ease-in-out infinite alternate;
+}
+
+/* 鼓放在拳頭敲下來的地方（右下）。 */
+.celebration-drum {
+  position: absolute;
+  right: 0;
+  bottom: 10px;
+  width: 150px;
+  z-index: 3;
+}
+.celebration--offer .celebration-drum {
+  right: 30px;
+}
+.celebration-drum-head {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: celebration-drum-head 0.64s ease-out infinite;
+}
+
+/* 鑼放在左邊，公事包甩過去敲。 */
+.celebration-gong {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 190px;
+  z-index: 1;
+}
+.celebration-gong-disc {
+  transform-box: fill-box;
+  transform-origin: 50% 0;
+  animation: celebration-gong-wobble 0.64s ease-in-out infinite;
+}
+
+.celebration-impact {
+  position: absolute;
+  z-index: 4;
+  width: 90px;
+  height: 90px;
+  animation: celebration-impact 0.64s ease-out infinite;
+}
+/* 衝擊線放在鼓皮上方、拳頭敲下來的地方。 */
+.celebration-impact--drum {
+  right: 30px;
+  top: 70px;
+}
+.celebration--offer .celebration-impact--drum {
+  right: 60px;
+}
+/* 鑼的衝擊線在鑼面上，跟鼓錯開半拍（兩隻手輪流敲）。 */
+.celebration-impact--gong {
+  left: 50px;
+  top: 40px;
+  animation-delay: 0.32s;
+}
+
+.celebration-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 3rem;
+  line-height: 1.1;
+  color: #f2b33d;
+  text-shadow: 0 3px 0 #2f5d85, 0 0 24px rgba(0, 0, 0, 0.35);
+  animation: celebration-pop 0.5s 0.15s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.celebration--offer .celebration-title {
+  font-size: 4rem;
+}
+.celebration-subtitle {
+  margin: 0;
+  font-size: var(--font-base);
+  color: #f6f0e3;
+  animation: celebration-fade-in 0.4s 0.3s ease-out both;
+}
+
+/* 彩帶：從畫面上方飄下來。 */
+.celebration-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.celebration-confetti-piece {
+  position: absolute;
+  top: -20px;
+  width: 10px;
+  height: 16px;
+  border-radius: 2px;
+  animation-name: celebration-confetti-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.celebration--offer .celebration-confetti-piece {
+  width: 12px;
+  height: 20px;
+}
+
+@keyframes celebration-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes celebration-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes celebration-hit {
+  from { transform: rotate(-6deg); }
+  to { transform: rotate(38deg); }
+}
+@keyframes celebration-hit-back {
+  from { transform: rotate(-28deg); }
+  to { transform: rotate(10deg); }
+}
+@keyframes celebration-bounce {
+  from { transform: translateY(0); }
+  to { transform: translateY(-3%); }
+}
+/* 每 0.64 秒被敲一次：鼓皮往下凹再彈回來。 */
+@keyframes celebration-drum-head {
+  0%, 45% { transform: scaleY(1); }
+  50% { transform: scaleY(0.55); }
+  70%, 100% { transform: scaleY(1); }
+}
+@keyframes celebration-gong-wobble {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(6deg); }
+  75% { transform: rotate(-6deg); }
+}
+@keyframes celebration-impact {
+  0%, 40% { opacity: 0; transform: scale(0.6); }
+  52% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0; transform: scale(1.25); }
+}
+@keyframes celebration-confetti-fall {
+  from { transform: translateY(0) rotate(0deg); }
+  to { transform: translateY(110vh) rotate(540deg); }
+}
+
+/* 手機：舞台縮小，字也縮小。 */
+@media (max-width: 600px) {
+  .celebration-stage,
+  .celebration--offer .celebration-stage {
+    transform: scale(0.62);
+    animation: none;
+  }
+  .celebration-title,
+  .celebration--offer .celebration-title {
+    font-size: 2.25rem;
+  }
+}
+
+/* 減少動態效果：只留靜態的恭喜畫面，彩帶也不飄。 */
+@media (prefers-reduced-motion: reduce) {
+  .celebration,
+  .celebration * {
+    animation: none !important;
+  }
+  .celebration-impact {
+    opacity: 1;
+  }
+  .celebration-confetti {
+    display: none;
+  }
 }

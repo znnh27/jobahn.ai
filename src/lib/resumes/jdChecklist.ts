@@ -1,26 +1,30 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
-import type { JdImportance } from "./atsScore";
+import type { JdImportance, JdItemKind } from "./atsScore";
+
+export type { JdItemKind } from "./atsScore";
 
 // JD 條件清單（ATS 評分的題目）：同一份 JD 一定要拆出同一份清單，分數才比得起來。
 // 以前「拆 JD」跟「判斷履歷有沒有寫到」放在同一次 AI 呼叫，而且中英文各拆一次，
 // 結果同一份 JD 每次拆出來的項目數、語言都不一樣（例如一次 7 項英文、一次 8 項中文）。
 // 現在拆 JD 獨立成一步，一份應徵只拆一次、各語言共用；同一位使用者貼了一字不差的 JD，直接沿用上次的清單。
 
-/** requirement＝能力、經驗、學歷這類要有事實佐證的條件；condition＝出差、外派、輪班這類工作條件，問使用者能不能配合。 */
-export type JdItemKind = "requirement" | "condition";
+// 每一項分三類（JdItemKind，定義在 atsScore.ts）：requirement＝硬實力，要有事實佐證、算履歷分數；
+// trait＝軟實力、人格特質，履歷不評分、交給求職信；condition＝出差、外派這類工作條件，問使用者能不能配合。
 
 export interface JdBaseItem {
   item: string;
   importance: JdImportance | null;
   /** 舊清單沒有這個欄位，當成 requirement。 */
   kind?: JdItemKind;
+  /** 已經用三類（含軟實力）分類過。2026-10-24 以前建立的清單沒有，重新評分時會補分類一次（classifyJdItems）。 */
+  kindChecked?: boolean;
 }
 
 type StoredChecklists = Record<
   string,
-  Array<{ item: string; importance?: JdImportance | null; kind?: JdItemKind | null }>
+  Array<{ item: string; importance?: JdImportance | null; kind?: JdItemKind | null; kindChecked?: boolean | null }>
 > | null;
 
 /** 空白、換行的差異不算不同的 JD。 */
@@ -41,7 +45,12 @@ function pickStored(stored: StoredChecklists, jdLang: "zh" | "en"): JdBaseItem[]
   for (const lang of [jdLang, jdLang === "en" ? "zh" : "en", ...Object.keys(stored)]) {
     const list = stored[lang];
     if (list && list.length > 0) {
-      return list.map((i) => ({ item: i.item, importance: i.importance ?? null, kind: i.kind ?? "requirement" }));
+      return list.map((i) => ({
+        item: i.item,
+        importance: i.importance ?? null,
+        kind: i.kind ?? "requirement",
+        kindChecked: !!i.kindChecked,
+      }));
     }
   }
   return null;
@@ -89,16 +98,18 @@ const EXTRACT_SYSTEM_PROMPT = `你負責把 JD 拆成「應徵條件清單」，
    - 硬性要求的區段標 "required"；Nice to have、Preferred、Bonus、加分 這類區段標 "preferred"。
    - 工作內容／職責（What you'll do、Responsibilities、工作內容）不列進來。
 2. JD 完全沒有條件區段時，才從職責跟描述歸納 6 到 10 項，一項一件事，都標 "required"。
-3. 上面列出來的項目 kind 都是 "requirement"。
+3. 上面列出來的項目，kind 依內容分：
+   - "trait"：軟實力、人格特質、工作態度、價值觀，只講「是怎樣的人」、沒有具體的技能或經驗可以查證（例如主動積極、樂於挑戰、正直誠信、抗壓性高、細心負責、團隊合作、良好溝通能力、學習能力強）。
+   - "requirement"：其他全部，包含經歷年資、技能工具、學歷科系、語言能力、證照，以及「用某種能力做某件具體的事」（例如「能以英文獨立進行商務會議與簡報」是語言能力，算 requirement）。一條裡同時有硬實力跟軟實力時，算 requirement。
 4. 另外掃過整份 JD（包含工作內容、職責、福利、其他說明），把「工作條件」各列一項，kind 標 "condition"：出差（國內／國外，有寫地點就保留）、外派、輪班、假日或夜間待命、常態加班、工作地點、遠端或進辦公室的規定、到職時間這類「要不要配合」的事，不是能力或經驗。
-   - item 照 JD 原文擷取那一句的重點（例如「可能需出差至日本、新加坡等地」），不改寫意思。
+   - item 照 JD 原文擷取那一句的重點（例如 JD 寫「需不定期出差至○○拜訪客戶」就列「需不定期出差至○○」），不改寫意思；JD 沒寫的工作條件不要列。
    - JD 寫「必須、需要、能配合」標 "required"；寫「有機會、可能、加分」標 "preferred"。
    - 已經在第 1 點的條件區段列過的同一件事，不要重複列，把那一項的 kind 改成 "condition" 就好。
    - 薪資、福利、公司介紹不算工作條件。
 5. item 一律用指定的語言寫。
 
 只輸出 JSON，不要其他文字、不要 markdown code fence：
-{ "items": [{ "item": string, "importance": "required" | "preferred", "kind": "requirement" | "condition" }] }`;
+{ "items": [{ "item": string, "importance": "required" | "preferred", "kind": "requirement" | "trait" | "condition" }] }`;
 
 async function extractJdItems(
   supabase: SupabaseClient,
@@ -133,9 +144,70 @@ async function extractJdItems(
     items.push({
       item,
       importance: raw.importance === "preferred" ? "preferred" : "required",
-      kind: raw.kind === "condition" ? "condition" : "requirement",
+      kind: raw.kind === "condition" || raw.kind === "trait" ? raw.kind : "requirement",
+      kindChecked: true,
     });
   }
   if (items.length === 0) throw new Error("AI 沒有從 JD 拆出任何條件，請確認 JD 內容");
   return items;
 }
+
+const CLASSIFY_SYSTEM_PROMPT = `你負責把 JD 條件分類。每一條判斷是不是「軟實力」：
+
+- "trait"：軟實力、人格特質、工作態度、價值觀，只講「是怎樣的人」、沒有具體的技能或經驗可以查證（例如主動積極、樂於挑戰既有框架、正直誠信、抗壓性高、細心負責、團隊合作、良好溝通能力、學習能力強）。
+- "requirement"：其他全部，包含經歷年資、技能工具、學歷科系、語言能力（例如「英文 聽/精通、說/精通」「能以英文獨立進行商務會議」）、證照。一條裡同時有硬實力跟軟實力時，算 requirement。
+
+條件文字照抄，每一條都要分類。只輸出 JSON，不要其他文字、不要 markdown code fence：
+{ "items": [{ "item": string, "kind": "requirement" | "trait" }] }`;
+
+/**
+ * 2026-10-24 以前建立的清單沒有分出軟實力（kindChecked 是空的）：補分類一次，一份應徵只多一次 AI 呼叫。
+ * 工作條件（condition）已經分好、使用者也可能回答過，不動；其他項目由 AI 判斷是硬實力還是軟實力。
+ * 各語言的清單一起分（條件文字一樣的只問一次）。回傳分類後的清單，跟有沒有真的補分類。
+ */
+export async function classifyJdItems<T extends { item: string; kind?: JdItemKind | null; kindChecked?: boolean | null }>(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  checklists: Record<string, T[]>;
+}): Promise<{ checklists: Record<string, T[]>; classified: boolean }> {
+  const all = Object.values(params.checklists).flat();
+  if (all.length === 0 || all.every((i) => i.kindChecked)) return { checklists: params.checklists, classified: false };
+
+  const pending = [...new Set(all.filter((i) => !i.kindChecked && i.kind !== "condition").map((i) => i.item.trim()))];
+  const kinds = new Map<string, JdItemKind>();
+  if (pending.length > 0) {
+    const response = await askClaude({
+      userId: params.userId,
+      feature: "jd_classify",
+      systemPrompt: CLASSIFY_SYSTEM_PROMPT,
+      userPrompt: JSON.stringify(pending.map((item) => ({ item })), null, 2),
+      maxTokens: 2000,
+      temperature: 0,
+      supabase: params.supabase,
+    });
+    try {
+      const parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "")) as {
+        items?: { item?: string; kind?: string }[];
+      };
+      for (const r of parsed.items ?? []) {
+        if (typeof r.item === "string") kinds.set(r.item.trim(), r.kind === "trait" ? "trait" : "requirement");
+      }
+    } catch {
+      // 分類失敗就先維持原樣、不標記已分類，下次重新評分再試一次。
+      return { checklists: params.checklists, classified: false };
+    }
+  }
+
+  const checklists = Object.fromEntries(
+    Object.entries(params.checklists).map(([lang, items]) => [
+      lang,
+      items.map((i) =>
+        i.kindChecked
+          ? i
+          : { ...i, kind: i.kind === "condition" ? "condition" : (kinds.get(i.item.trim()) ?? "requirement"), kindChecked: true },
+      ),
+    ]),
+  ) as Record<string, T[]>;
+  return { checklists, classified: true };
+}
+

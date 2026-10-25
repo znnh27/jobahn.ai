@@ -21,6 +21,7 @@ export function ConfirmDialog({
   children,
   confirmDisabled,
   secondaryAction,
+  wide,
   onConfirm,
   onCancel,
 }: {
@@ -34,6 +35,8 @@ export function ConfirmDialog({
   children?: ReactNode;
   confirmDisabled?: boolean;
   secondaryAction?: { label: string; onClick: () => void };
+  /** 內容比較多（例如前後對照清單）時用寬一點的視窗。 */
+  wide?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -48,7 +51,7 @@ export function ConfirmDialog({
   return createPortal(
     <div className="confirm-overlay" onClick={pending ? undefined : onCancel}>
       <div
-        className="confirm-card"
+        className={`confirm-card ${wide ? "confirm-card--wide" : ""}`}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-title"

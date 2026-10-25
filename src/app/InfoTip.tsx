@@ -7,6 +7,7 @@ import { InfoIcon } from "./icons";
 // 標題或欄位旁的 ⓘ：說明文字平常收起來，滑過（或用鍵盤選到）才出現，手機點一下顯示、點別處收起。
 // 全站的提醒、規則說明一律用這個，不要在畫面上攤開一段灰字。
 // 提示框掛在 body 上、用 fixed 定位，才不會被側欄卡片之類 overflow 的容器切掉；位置會自動避開畫面邊緣。
+// icon 可以換掉 ⓘ：例如 JD 條件清單前面的狀態 icon，滑過顯示「部分符合」這類說明。
 
 const EDGE = 8;
 const OFFSET = 6;
@@ -14,10 +15,15 @@ const OFFSET = 6;
 export function InfoTip({
   children,
   label = "說明",
+  icon,
+  className = "",
 }: {
   children: ReactNode;
   /** 給螢幕閱讀器的按鈕名稱。 */
   label?: string;
+  /** 換掉預設的 ⓘ。 */
+  icon?: ReactNode;
+  className?: string;
 }) {
   const id = useId();
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -73,7 +79,7 @@ export function InfoTip({
   }, [pinned]);
 
   return (
-    <span className="info-tip">
+    <span className={`info-tip ${className}`}>
       <button
         ref={btnRef}
         type="button"
@@ -91,7 +97,7 @@ export function InfoTip({
           setPinned((p) => !p);
         }}
       >
-        <InfoIcon />
+        {icon ?? <InfoIcon />}
       </button>
       {open &&
         createPortal(

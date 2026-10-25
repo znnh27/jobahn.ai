@@ -13,14 +13,17 @@ import {
 import {
   generateCoverLetterForApplication,
   recheckJdMatchWithCoverLetter,
+  reviseCoverLetterWithChat,
   type CoverLetterOptions,
 } from "@/lib/resumes/generateCoverLetter";
+import { suggestKeywordRewording, type RewordEdit } from "@/lib/resumes/rewordKeywords";
 import { mergeContentIntoExperienceDb, removeVariantsFromSource } from "@/lib/experience/mergeIntoExperienceDb";
 import { measureResumePdf } from "@/lib/documents/measureResumePdf";
 import type { ResumeContact } from "@/lib/resumes/contact";
 import { readLayoutSettings, resolveMetrics, type PdfFit, type ResumeLayoutSettings } from "@/lib/resumes/typography";
 import { BODY_WIDTH_PT } from "@/lib/documents/ResumePdfDocument";
 import { isValidWordLimit } from "@/lib/text/letterLength";
+import { readCustomSectionLabels } from "@/lib/resumes/sectionLabels";
 
 type ResumeMap = Record<string, GeneratedResume["resume"]>;
 type ChecklistMap = Record<string, GeneratedResume["jd_match_checklist"]>;
@@ -64,6 +67,7 @@ type GenerateResult = {
     jd_match_checklist: ChecklistMap;
     ats_score: number | null;
     ats_gaps: GapsMap;
+    jd_keywords: string[] | null;
   };
 };
 
@@ -74,7 +78,7 @@ async function fetchApplicationScoringFields(
 ) {
   const { data } = await supabase
     .from("applications")
-    .select("resume_draft, jd_match_checklist, ats_score, ats_gaps")
+    .select("resume_draft, jd_match_checklist, ats_score, ats_gaps, jd_keywords")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -102,6 +106,7 @@ export async function generateAction(applicationId: string): Promise<GenerateRes
         jd_match_checklist: fresh.jd_match_checklist,
         ats_score: fresh.ats_score,
         ats_gaps: fresh.ats_gaps,
+        jd_keywords: fresh.jd_keywords,
       },
     };
   } catch (e) {
@@ -163,6 +168,7 @@ export async function rescoreAction(
         jd_match_checklist: fresh.jd_match_checklist,
         ats_score: fresh.ats_score,
         ats_gaps: fresh.ats_gaps,
+        jd_keywords: fresh.jd_keywords,
       },
     };
   } catch (e) {
@@ -197,6 +203,7 @@ export async function answerWorkConditionAction(
         jd_match_checklist: fresh.jd_match_checklist,
         ats_score: fresh.ats_score,
         ats_gaps: fresh.ats_gaps,
+        jd_keywords: fresh.jd_keywords,
       },
     };
   } catch (e) {
@@ -243,9 +250,11 @@ export async function measureResumesAction(
   if (resumes.length > 40) return { error: "一次最多量 40 個版本" };
 
   try {
+    const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
+    const labels = readCustomSectionLabels(profile?.data)[language === "zh" ? "zh" : "en"];
     const fits: PdfFit[] = [];
     // 一個一個排：react-pdf 的字型是全域共用的，同時排好幾份沒有比較快。
-    for (const resume of resumes) fits.push(await measureResumePdf({ contact, resume, language }));
+    for (const resume of resumes) fits.push(await measureResumePdf({ contact, resume, language, labels }));
     return { fits };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "量 PDF 版面失敗" };
@@ -451,6 +460,58 @@ export async function recheckWithCoverLetterAction(
     return { success: true, data: { cover_letter_checklist: checklist } };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "重新比對失敗" };
+  }
+}
+
+/** 履歷頁 JD 條件清單的「換成 JD 用字」：找出履歷裡有事實的那一句、只改用字。回傳建議，不存檔。 */
+export async function suggestKeywordRewordingAction(
+  applicationId: string,
+  language: string,
+  resume: GeneratedResume["resume"],
+  keywords: string[],
+  item: string | null,
+  keep: string[] = [],
+): Promise<{ error?: string; edits?: RewordEdit[]; notFound?: { keyword: string; reason: string }[] }> {
+  if (keywords.length === 0) return { error: "沒有要換的關鍵字" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+  try {
+    return await suggestKeywordRewording({ supabase, userId: user.id, applicationId, language, resume, keywords, item, keep });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "分析失敗，請再試一次" };
+  }
+}
+
+/** 求職信頁「跟 AI 聊」：照使用者的一句話改這個語言版本的信，回傳改好的信（不存檔，按儲存才存）。 */
+export async function reviseCoverLetterAction(
+  applicationId: string,
+  language: string,
+  letter: string,
+  history: ResumeChatTurn[],
+  instruction: string,
+): Promise<{ error?: string; reply?: string; letter?: string }> {
+  if (!instruction.trim()) return { error: "請輸入想怎麼改" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    return await reviseCoverLetterWithChat({
+      supabase,
+      userId: user.id,
+      applicationId,
+      language,
+      letter,
+      history: history.slice(-10),
+      instruction: instruction.trim(),
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "修改失敗，請再試一次" };
   }
 }
 

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { InfoTip } from "@/app/InfoTip";
 
 // JD 適配度：直接從 JD 條件對照清單算「已涵蓋條數 ÷ 總條數」，每次都一致，不是 AI 憑感覺給分。
@@ -8,7 +9,7 @@ export function JdFitScore({
   note,
 }: {
   items: { covered: boolean }[];
-  note: string;
+  note: ReactNode;
 }) {
   const total = items.length;
   const covered = items.filter((i) => i.covered).length;

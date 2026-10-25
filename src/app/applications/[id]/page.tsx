@@ -1,4 +1,6 @@
 import { redirect, notFound } from "next/navigation";
+import { detectJdLanguage } from "@/lib/resumes/jdChecklist";
+import { readCustomSectionLabels } from "@/lib/resumes/sectionLabels";
 import { createClient } from "@/lib/supabase/server";
 import { AppNav, getDisplayName } from "../../AppNav";
 import { ApplicationTitle } from "./ApplicationTitle";
@@ -65,6 +67,9 @@ export default async function ApplicationDetailPage(
           hasCoverLetter={!!application.cover_letter_draft}
           initialCoverLetterLanguages={application.cover_letter_language ?? []}
           researchAvailable={isCompanyResearchAvailable()}
+          initialSectionLabels={readCustomSectionLabels(profile?.data)}
+          initialKeywords={application.jd_keywords ?? null}
+          jdLanguage={detectJdLanguage(application.job_description ?? "")}
           stepBar={
             <StepBar
               key="step-bar"

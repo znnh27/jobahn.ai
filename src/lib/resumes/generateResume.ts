@@ -2,10 +2,12 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 import { BULLET_RULES, stripRuleRefs } from "@/lib/experience/bulletRules";
-import { computeAtsScore, type JdImportance } from "./atsScore";
-import { resolveJdItems, type JdBaseItem, type JdItemKind } from "./jdChecklist";
-import { formatWorkConditions, readWorkConditions, type WorkConditionAnswer } from "./workConditions";
+import { ensureLanguageParity } from "@/lib/experience/languageParity";
+import { computeAtsScore, countsForResume, type JdImportance } from "./atsScore";
+import { classifyJdItems, resolveJdItems, type JdBaseItem, type JdItemKind } from "./jdChecklist";
+import { resolveJdKeywords } from "./jdKeywords";
 import { readContact, type ResumeContact } from "./contact";
+import { readCustomSectionLabels, type CustomSectionLabels } from "./sectionLabels";
 import { normalize, readBackground, type LanguageBackground } from "./background";
 import { ensureBackgroundLanguage } from "./translateBackground";
 import { resolveMetrics } from "./typography";
@@ -18,6 +20,7 @@ import {
 } from "./typography";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { toTraditional } from "@/lib/text/toTraditional";
+import { addCjkSpacing } from "@/lib/text/cjkSpacing";
 
 const SUMMARY_RULES = `Professional Summary 寫作規則（一定要遵守）：
 1. 先看 JD 最重視的 1-2 項核心能力/條件，從經歷資料庫裡挑選跟這些條件最相關的主題與成就來寫，其餘經歷不用勉強塞進來湊滿。
@@ -27,7 +30,7 @@ const SUMMARY_RULES = `Professional Summary 寫作規則（一定要遵守）：
 5. 不要直接重複 work_experience 裡已經寫的 bullet 原句，用更高層次的方式歸納主題，避免跟下面內容重疊感太重。
 6. 一樣要降低 AI 感、避免堆疊術語，寫得像人類自然會寫的用詞。
 7. 使用者資料裡的 summaries 是他自己以前寫過的 Summary，用來理解他怎麼定位自己、有哪些可以拿來寫的事實，不要整段照抄；事實一樣不能超出經歷資料庫和這些 Summary 裡有的內容。
-8. 工作條件（出差、外派、輪班、工作地點這類「要不要配合」的事）：JD 有提到、而且在「使用者已確認可以配合的工作條件」裡有同一件事，才寫進最後一句。寫成可以配合的事實，能搭配使用者資料裡真實的佐證就帶上（海外交換、語言能力、跨國協作），例如「曾赴德國交換一年，可配合出差至日本、新加坡等地」「Open to business travel across APAC, backed by a year-long exchange in Germany」。不寫「對出差有高度興趣」這種空泛說法；JD 沒提到、使用者沒確認過、或表示無法配合的條件一律不寫。這是意願不是經歷，所以可以寫，但只能寫使用者確認過的。`;
+8. 工作條件（出差、外派、輪班、工作地點這類「要不要配合」的事）：只有「這份職缺使用者確認可以配合的工作條件」裡列出的才能寫，寫進最後一句；清單是「（無）」就完全不寫任何工作條件、配合意願，就算 JD 提到國際合作、海外客戶也一樣（那是能力，不是工作條件）。只用半句簡短帶過，接在語言能力或跨國經驗後面（例如「英文流利，可配合出差」），地點、細節留給求職信，不另外寫一整句。不寫「對出差有高度興趣」這種空泛說法。`;
 
 // bullet 本身的寫法用經歷資料庫共用的那一份規則（lib/experience/bulletRules.ts），
 // 這裡只補「挑內容、排一份履歷」才需要的規則。
@@ -35,12 +38,16 @@ const WRITING_RULES = `${BULLET_RULES}
 
 排履歷的規則（一定要遵守）：
 1. 規則 6 的「依目標 JD 決定留不留」：這次的目標 JD 就是下面給的 JD。
-2. 最近一份工作一定要寫滿：經歷資料庫裡這段有幾件事就寫幾件（至少 3 條，資料庫不到 3 件就全寫，最多 6 條），不能因為跟 JD 關聯比較低就只寫一兩條。
-   接著依這份 JD 把經歷資料庫裡的經歷分成「主要經歷」（跟 JD 直接相關）和「次要經歷」（跟 JD 沒那麼直接、但能展現能力）。每段經歷的 bullet 依跟 JD 的相關度排序，最相關的放最前面。
-3. 履歷一定要剛好填滿一頁 A4，少於一頁會讓人覺得經歷太少：主要經歷優先放、bullet 放好放滿；主要經歷都放完了還不滿一頁，就接著放次要經歷。真的放不下才取捨，優先拿掉跟這份 JD 關聯度最低的內容（通常是最舊、或最不相關的次要經歷），不要每一句都砍幾個字讓全部內容都變得倉促。
-4. JD 原文用字要盡量真的出現在履歷裡（不是只有意思接近），但要放在具體案例的敘述裡（見規則 7），前提是使用者真的有對應的真實經歷可以支撐，不能為了關鍵字硬掰。
+2. 正式工作經歷（work_experience）永遠是履歷的主體，比社團、專案（leadership）重要，不能因為跟 JD 關聯比較低就把正式工作砍到剩一兩條。每段條數（超過的會被程式直接刪掉）：
+   - 最近一份正式工作 3–4 條（資料庫不到 3 件就全寫）。
+   - 其他正式工作每段 1–3 條，越舊越少；每段至少 1 條，不能只留公司、職稱、期間。
+   - 社團、專案每段最多 3 條。
+   同一段裡的 bullet 依跟 JD 的相關度排序，最相關的放最前面（放不下時會從最後一條開始刪）。
+   社團、專案是次要內容，用來補足正式工作沒展現到、但 JD 需要的能力；放不放、放幾條看跟 JD 的關聯，不看新舊。leadership 陣列依跟 JD 的相關度排序，最相關的放最前面（不照時間排）。
+3. 履歷一定要剛好填滿一頁 A4，少於一頁會讓人覺得經歷太少：先把正式工作放到規則 2 的上限，還不滿一頁再放社團、專案；都放完還不滿，系統會放大字級和間距，不要超過上限硬塞。放不下時系統會依這個順序整條拿掉：(1) 最無關的社團、專案；(2) 其他正式工作多出來的 bullet（從最舊的那段先拿）；最近一份正式工作至少留 3 條。
+4. JD 原文用字要盡量真的出現在履歷裡（不是只有意思接近），但要放在具體案例的敘述裡（見規則 7），前提是使用者真的有對應的真實經歷可以支撐，不能為了關鍵字硬掰。「JD 關鍵字」清單是招募官會逐字搜尋的字：資料庫裡有對應事實的，寫的時候直接用清單上的原字（例如資料寫「跨部門溝通」、JD 關鍵字是 stakeholder management，就寫 stakeholder management）；沒有對應事實的就不要用。
 5. 同一段經歷可以依這份 JD 換敘事角度（例如投系統規劃職缺強調規劃，投行銷職缺強調成長數據），但底層事實跟程度不能變。
-6. 越近越多、越舊越少：最近、最相關的職位條數最多，往前遞減；很舊又跟 JD 無關的經歷可以只留公司、職稱、期間（bullets 給空陣列），把版面讓給重要的經歷。但履歷仍然要填滿一頁（規則 3 優先）。
+6. 正式工作越近越多、越舊越少：最近一份條數最多，往前遞減（條數見規則 2）；每段至少 1 條，bullets 不能是空陣列。社團、專案不套用這條（見規則 2）。
 7. 每段經歷的第一條放這段最強的成果（數字最大、跟 JD 最相關、影響最廣的那件事）。招募官掃履歷時每段的第一條最常被看到。
 8. 整份履歷最強的 2-3 條，在成果後面補一小段「為什麼重要」，交代對業務或使用者的意義（例如「…將結帳轉換率從 2.8% 提升到 3.6%，每月多帶來約 NT$120 萬營收」）；只能用資料裡有的事實，沒有就不要硬加，其他條不用加。
 9. 技能區只放工具、軟體、專業技能（Figma、SQL、A/B Testing、Financial Modeling），不放「領導力、溝通能力、團隊合作、抗壓性」這類軟實力；軟實力要靠經歷裡的事實證明。`;
@@ -85,8 +92,22 @@ export const COVERAGE_RULES =`JD 符合度清單的判定標準（務必嚴格�
 2. 領域/類型不同不能算通過。例如 JD 要求「數位/軟體產品的 0 到 1 經驗」，如果內容寫的是實體門市的展店專案，不算 covered，要在缺口說明清楚差在「產品類型不同」，不要含糊帶過。
 3. 每次判斷同一個項目，都要用同一套標準重新逐項檢查：先問「這句話有沒有字面上或近乎字面上支持這個要求」，不要憑整體印象覺得「這個人應該做得到」就標 true，也不要因為前一次判斷是 true 就傾向維持 true（或反過來），每次都要重新看內容本身。
 4. 如果只是職務相近、可以類推、但沒有具體事實佐證，一律標 false，並在缺口裡具體寫出缺的是什麼，不要寫模稜兩可的描述。
-5. 部分符合（partial）只用在學歷科系：JD 要求某類科系（例如「商業及管理學科類」），主修或雙主修符合就是 covered true；主修不符合、但輔修、副修、minor、學分學程符合，covered 標 false、partial 標 true，gap 寫「主修不同，但有輔修 ○○，算部分符合；可以在學歷或摘要凸顯輔修內容」。其他所有項目 partial 一律 false。
-6. kind 是 "condition" 的項目（出差、外派、輪班這類工作條件）：履歷裡明確寫到可以配合這件事（通常在摘要）才算 covered；有海外經驗、會外語本身不等於可以配合出差，不算 covered。沒寫到時 gap 寫「履歷沒提到可以配合 ○○，確認可以配合的話，摘要會補一句」。`;
+5. 部分符合（partial，算一半分數）只用在下面兩種情況，其他項目 partial 一律 false：
+   (a) 學歷科系：JD 要求某類科系（例如「商業及管理學科類」），主修或雙主修符合就是 covered true；主修不符合、但輔修、副修、minor、學分學程符合，covered 標 false、partial 標 true，gap 寫「主修不同，但有輔修 ○○，算部分符合；可以在學歷或摘要凸顯輔修內容」。
+   (b) 好幾個條件綁成一項：JD 這一項用「、」「及」「和」「與」「並」「and」列了兩件以上的事（例如「中英文流利，並能以英文獨立進行商務會議、簡報及合約溝通」是流利、會議、簡報、合約四件）。先逐件用判定標準 1–4 檢查，全部都有具體事實撐著才是 covered true；至少一半有、但沒有全部有，covered 標 false、partial 標 true；不到一半就是 covered false、partial false。partial 的 gap 一定要寫「缺：○○」列出沒做到的那幾件，再說可以怎麼補（真的沒有相關經驗就不要硬補）。
+   拆開檢查時照 JD 原本的用字判斷，不能自己加碼：JD 寫「進行會議」就不能改成要求「主持會議」，寫「參與」就不能改成要求「主導」。
+   單一條件的項目（只講一件事）維持全有或全無，不能因為「沾到一點邊」就給 partial。
+   例外：同一個語言能力的「聽、說、讀、寫」是一件事的四個面向，不算綁好幾件事，照判定標準 7 整項判斷。
+6. kind 是 "condition" 的項目（出差、外派、輪班這類工作條件）：履歷裡明確寫到可以配合這件事（通常在摘要）才算 covered；有海外經驗、會外語本身不等於可以配合出差，不算 covered。沒寫到時 gap 寫「履歷沒提到可以配合 ○○，確認可以配合的話，摘要會補一句」。
+7. 語言能力：照這張對照表判斷程度有沒有達到，用字不同不算不符合（例如 JD 寫「精通」、履歷寫「流利」就是達到）。
+   - 精通／Proficient／Fluent／Business fluent ＝ 流利、母語、近母語、C1–C2、TOEIC 860 以上、TOEFL iBT 95 以上、IELTS 7 以上、在該語言環境工作或求學一年以上。
+   - 中等／Intermediate ＝ B1–B2、TOEIC 550–855、TOEFL iBT 60–94、IELTS 5–6.5。
+   - 略懂／Basic ＝ A1–A2。
+   高程度一定涵蓋低程度（流利的人一定達到「中等」）。履歷的語言欄有寫程度或分數就以它為準。
+   JD 要求「用某語言進行會議、溝通、協調」：經歷寫到跟使用那個語言的國家的客戶、團隊溝通協調（例如跟美國客戶溝通、協調多國團隊），就是用該語言進行商務溝通／會議的直接事實，不算類推。「簡報」「合約」「談判」這類比較具體的動作，要經歷裡真的寫到對那些對象做過才算。
+8. 沒寫到（covered false）的項目，gap 一定要寫出具體缺什麼；說不出缺什麼，代表其實有寫到，要重新檢查一次再決定。
+   gap 最多 3 句，每句用句號結尾，依序寫：缺什麼、現有什麼（沒有相關經驗就省略這句）、怎麼補。每句寫短，不要用分號串成長句，畫面上會一句一行顯示。
+9. gap 裡「可以怎麼補」的建議（包括建議求職信怎麼寫）只能用履歷裡已經有的事實，不能替使用者宣稱履歷沒寫到的能力或經驗。例如履歷沒有英文簡報的事實，就不能建議求職信寫「有英文簡報基礎」；只能建議「有的話挖出來補一條」，或在求職信用現有的相關事實（例如跨國客戶溝通）說明可以勝任。`;
 
 const SYSTEM_PROMPT = `你是履歷客製化助手。使用者會給你：這個職缺的 JD、使用者的經歷資料庫、使用者過去寫過的 Summary 跟學歷、技能、語言能力。
 
@@ -164,9 +185,13 @@ export interface JdChecklistItem {
   source: "resume" | "cover_letter" | null;
   /** 必要條件還是加分條件。第一次建立清單時標好，之後固定不變，用來算分數（見 atsScore.ts）。舊資料沒有。 */
   importance?: JdImportance | null;
-  /** 能力經驗條件，還是出差這類工作條件（見 jdChecklist.ts）。舊資料沒有，當成能力經驗條件。 */
+  /** 硬實力、軟實力、還是出差這類工作條件（見 jdChecklist.ts）。舊資料沒有，當成硬實力。 */
   kind?: JdItemKind | null;
-  /** 沒完全符合、但有相關條件撐著（目前只用在科系要求、使用者有輔修），算一半分數。 */
+  /** 已經用三類分類過（見 jdChecklist.ts 的 classifyJdItems）。 */
+  kindChecked?: boolean | null;
+  /** AI 判斷有問題（判定沒寫到卻說不出缺什麼），不算進分數，畫面上請使用者重新評分。 */
+  invalid?: boolean | null;
+  /** 沒完全符合、但有相關條件撐著（科系要求、使用者有輔修；或一項綁好幾個條件、做到一半以上），算一半分數。 */
   partial?: boolean | null;
   /** 工作條件：使用者回答能不能配合。null＝還沒回答。 */
   answer?: "yes" | "no" | null;
@@ -178,7 +203,7 @@ export interface JdChecklistItem {
 
 /** 中文版的摘要跟 bullet：簡體字轉繁體、半形標點轉全形（AI 偶爾會混進來）。公司名要跟資料庫比對，不動。 */
 function polishChinese(resume: GeneratedResume["resume"]) {
-  const fix = (t: string) => toFullWidthPunctuation(toTraditional(t));
+  const fix = (t: string) => addCjkSpacing(toFullWidthPunctuation(toTraditional(t)));
   resume.summary = fix(resume.summary ?? "");
   for (const e of [...(resume.work_experience ?? []), ...(resume.leadership ?? [])]) {
     e.bullets = (e.bullets ?? []).map(fix);
@@ -192,7 +217,7 @@ export async function generateResumeForApplication(
 ): Promise<void> {
   const { data: application, error: appError } = await supabase
     .from("applications")
-    .select("job_description, resume_language, jd_match_checklist, score_basis")
+    .select("job_description, resume_language, jd_match_checklist, score_basis, jd_keywords")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -202,14 +227,25 @@ export async function generateResumeForApplication(
   }
 
   // 同一份 JD 重新生成履歷時，沿用原本的 JD 條件清單（條件文字、必要/加分都不變），分數才比得起來。
-  const existingChecklists: Record<string, GeneratedResume["jd_match_checklist"]> =
-    application.jd_match_checklist ?? {};
+  // 2026-10-24 以前的清單沒有分出軟實力，先補分類一次（見 jdChecklist.ts 的 classifyJdItems）。
+  const { checklists: existingChecklists } = await classifyJdItems<JdChecklistItem>({
+    supabase,
+    userId,
+    checklists: application.jd_match_checklist ?? {},
+  });
   const basis = readScoreBasis(application.score_basis);
 
   const languages: string[] = application.resume_language ?? [];
   if (languages.length === 0) {
     throw new Error("這筆應徵沒有指定語言版本");
   }
+
+  // 要生成的語言如果缺了另一個語言有的經歷（例如只上傳過英文履歷的那段），先翻過來補上；兩邊一致就直接跳過。
+  await ensureLanguageParity({
+    supabase,
+    userId,
+    targets: languages.filter((l): l is "zh" | "en" => l === "zh" || l === "en"),
+  });
 
   const { data: entries, error: entriesError } = await supabase
     .from("experience_entries")
@@ -234,6 +270,14 @@ export async function generateResumeForApplication(
     applicationId,
     jd: application.job_description,
     stored: existingChecklists,
+  });
+  // 關鍵字命中用的 JD 關鍵字，一樣一份 JD 只挑一次（見 jdKeywords.ts）；生成時也給 AI，有對應事實就用 JD 原字。
+  const jdKeywords = await resolveJdKeywords({
+    supabase,
+    userId,
+    applicationId,
+    jd: application.job_description,
+    stored: application.jd_keywords,
   });
 
   const layoutDefaults = readLayoutDefaults(profile?.data);
@@ -264,6 +308,8 @@ export async function generateResumeForApplication(
       entries: langEntries,
       profile: profile?.data ?? {},
       background: withReferenceSummaries(background, profile?.data),
+      confirmedConditions: confirmedConditions(existingChecklists),
+      keywords: jdKeywords,
     });
 
     const response = await askClaude({
@@ -287,6 +333,7 @@ export async function generateResumeForApplication(
       lang,
       resume,
       contact: readContact(profile?.data),
+      labels: readCustomSectionLabels(profile?.data)[lang === "zh" ? "zh" : "en"],
       basePrompt: userPrompt,
       entries: langEntries,
       pin,
@@ -305,7 +352,6 @@ export async function generateResumeForApplication(
       previousJudgments: [],
       // 整份重新生成，內容全換了，不拿上一版比對，每一項都重新判斷。
       previousResume: null,
-      workConditions: readWorkConditions(profile?.data),
     });
     checklists[lang] = scored.jd_match_checklist;
     atsScores[lang] = scored.ats_score;
@@ -333,16 +379,17 @@ const SCORE_SYSTEM_PROMPT = `你是履歷跟 JD 的比對助手。使用者會�
 
 1. 清單是固定的：item 文字跟 importance 一律照抄，不能改寫、新增、刪除、合併項目，每一項都要判斷。舊清單如果 importance 是 null，這次依 JD 補上（JD 寫成硬性要求的是 "required"，寫 preferred / nice to have / 加分的是 "preferred"），之後就固定。
 2. 每一項判斷 covered（有沒有寫到），source 有寫到填 "resume"，沒寫到填 null。kind 照抄。沒寫到的項目再判斷 partial（見判定標準 5），有寫到的 partial 是 false。
+   kind 是 "trait" 的項目（軟實力、人格特質）履歷不評分、交給求職信：一律 covered false、partial false、gap null，不用判斷。
 3. 沒寫到的項目，gap 要寫得具體、可以照著做：缺的是什麼具體事實、使用者現有經驗跟這項要求差在哪（例如產品類型不同、年資不夠、只有協助沒有主導）、可以怎麼補（挖掘哪一類經驗寫進履歷，或留到求職信說明）。有寫到的 gap 是 null。gap 一律用繁體中文。
-   範例：item「2 年以上主導數位產品規劃經驗（AI、大數據相關尤佳）」→ gap「缺乏 2 年以上主導 AI、大數據或演算法相關數位產品的具體事實；現有經驗是電商網站改版與實體活動企劃，產品類型不同，現職年資也還不到 2 年。如果有做過跟資料分析、推薦或自動化相關的功能，可以挖出來寫成一條；沒有的話在求職信說明轉換動機。」
+   範例：item「2 年以上主導數位產品規劃經驗（AI、大數據相關尤佳）」→ gap「缺 2 年以上主導 AI、大數據相關數位產品的具體事實。現有經驗是電商網站改版與實體活動企劃，產品類型不同，現職年資也不到 2 年。有做過資料分析、推薦或自動化相關功能的話，挖出來寫成一條；沒有的話在求職信說明轉換動機。」
 4. **判斷要穩定**：如果有給「上次的判斷」跟「這次履歷改了哪些地方」，只有跟改動內容直接相關的項目可以改變 covered；跟改動無關的項目，covered、partial、source、gap、answer 一律照抄上次的判斷，不要重新詮釋。
-5. kind 是 "condition" 的項目，對照「使用者表示無法配合的工作條件」：講的是同一件事（例如都是出差到國外）就 answer 填 "no"、gap 寫「你之前表示無法配合 ○○，這項不寫進履歷；面試時可能會被問到」；不是就照抄上次的 answer，沒有上次就填 null。kind 是 "requirement" 的項目 answer 一律 null。
+5. answer 一律照抄上次的判斷（使用者自己按的），沒有上次就填 null，不要自己判斷。
 
 ${COVERAGE_RULES}
 
 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。輸出格式（嚴格遵守）：
 {
-  "jd_match_checklist": [{ "item": string, "importance": "required"|"preferred", "kind": "requirement"|"condition", "covered": boolean, "partial": boolean, "source": "resume"|null, "gap": string|null, "answer": "yes"|"no"|null }]
+  "jd_match_checklist": [{ "item": string, "importance": "required"|"preferred", "kind": "requirement"|"trait"|"condition", "covered": boolean, "partial": boolean, "source": "resume"|null, "gap": string|null, "answer": "yes"|"no"|null }]
 }`;
 
 type Resume = GeneratedResume["resume"];
@@ -391,8 +438,6 @@ async function scoreResumeAgainstJd(params: {
   previousJudgments: GeneratedResume["jd_match_checklist"];
   /** 上次評分時的履歷。跟這次一模一樣就不呼叫 AI；不一樣就只把差異告訴 AI。 */
   previousResume: Resume | null;
-  /** 使用者回答過的工作條件，無法配合的要標成已回答。 */
-  workConditions: WorkConditionAnswer[];
 }): Promise<Pick<GeneratedResume, "jd_match_checklist" | "ats_score" | "ats_gaps">> {
   const previous = params.previousResume ? params.previousJudgments : [];
   const previousByItem = new Map(previous.map((i) => [i.item.trim(), i]));
@@ -431,7 +476,6 @@ async function scoreResumeAgainstJd(params: {
             null,
             2,
           )}`,
-      `===== 使用者表示無法配合的工作條件 =====\n${formatWorkConditions(params.workConditions, false)}`,
       diff
         ? `===== 這次履歷改了哪些地方（只有跟這些改動相關的項目可以改變判斷）=====\n新增：\n${diff.added.join("\n") || "（無）"}\n\n刪除：\n${diff.removed.join("\n") || "（無）"}`
         : "",
@@ -460,7 +504,7 @@ async function scoreResumeAgainstJd(params: {
   return {
     jd_match_checklist: items,
     ats_score: computeAtsScore(items) ?? 0,
-    ats_gaps: items.filter((i) => !i.covered && i.gap).map((i) => i.gap as string),
+    ats_gaps: items.filter((i) => countsForResume(i) && !i.covered && i.gap).map((i) => i.gap as string),
   };
 }
 
@@ -480,15 +524,22 @@ function lockItems(
   fresh: GeneratedResume["jd_match_checklist"],
 ): GeneratedResume["jd_match_checklist"] {
   const normalize = (item: JdChecklistItem): JdChecklistItem => {
-    const kind = item.kind === "condition" ? "condition" : "requirement";
+    const kind: JdItemKind = item.kind === "condition" || item.kind === "trait" ? item.kind : "requirement";
+    // 軟實力履歷不評分（交給求職信），一律當沒寫到、沒有缺口說明。
+    const covered = kind !== "trait" && !!item.covered;
+    const partial = !covered && kind === "requirement" && !!item.partial;
+    const gap = covered || kind === "trait" ? null : (item.gap?.trim() || null);
     return {
       item: item.item,
       importance: item.importance === "preferred" ? "preferred" : "required",
       kind,
-      covered: !!item.covered,
-      partial: !item.covered && kind === "requirement" && !!item.partial,
-      source: item.covered ? "resume" : null,
-      gap: item.covered ? null : (item.gap ?? null),
+      kindChecked: !!item.kindChecked,
+      covered,
+      partial,
+      source: covered ? "resume" : null,
+      gap,
+      // 硬實力判定沒寫到卻說不出缺什麼：判斷有問題，不算進分數，請使用者重新評分。
+      invalid: kind === "requirement" && !covered && !gap,
       answer: kind === "condition" && (item.answer === "yes" || item.answer === "no") ? item.answer : null,
     };
   };
@@ -504,6 +555,7 @@ function lockItems(
       // 清單已經有 importance 就固定用清單的；舊資料沒有才用這次 AI 補的。
       importance: b.importance ?? judged.importance,
       kind: b.kind ?? "requirement",
+      kindChecked: b.kindChecked ?? false,
       // 使用者親自回答過的不能被 AI 洗掉。
       answer: judged.answer ?? previous?.answer ?? null,
     });
@@ -516,7 +568,12 @@ function itemsForLanguage(
   shared: JdBaseItem[],
 ): JdBaseItem[] {
   if (stored && stored.length > 0) {
-    return stored.map((i) => ({ item: i.item, importance: i.importance ?? null, kind: i.kind ?? "requirement" }));
+    return stored.map((i) => ({
+      item: i.item,
+      importance: i.importance ?? null,
+      kind: i.kind ?? "requirement",
+      kindChecked: !!i.kindChecked,
+    }));
   }
   return shared;
 }
@@ -529,7 +586,7 @@ export async function rescoreResumeForApplication(
 ): Promise<void> {
   const { data: application, error: appError } = await supabase
     .from("applications")
-    .select("job_description, resume_language, jd_match_checklist, score_basis")
+    .select("job_description, resume_language, jd_match_checklist, score_basis, jd_keywords")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -539,15 +596,25 @@ export async function rescoreResumeForApplication(
   }
 
   const languages: string[] = application.resume_language ?? [];
-  const existingChecklists: Record<string, GeneratedResume["jd_match_checklist"]> =
-    application.jd_match_checklist ?? {};
+  // 舊清單還沒分出軟實力就補分類一次；有補分類代表判斷規則變了，這次每一項都重新判斷，不沿用上次的結果。
+  const { checklists: existingChecklists, classified } = await classifyJdItems<JdChecklistItem>({
+    supabase,
+    userId,
+    checklists: application.jd_match_checklist ?? {},
+  });
   const basis = readScoreBasis(application.score_basis);
   const checklists: Record<string, GeneratedResume["jd_match_checklist"]> = { ...existingChecklists };
   const atsScores: Record<string, number> = {};
   const atsGaps: Record<string, string[]> = {};
   let sharedItems: JdBaseItem[] | null = null;
-  const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", userId).maybeSingle();
-  const workConditions = readWorkConditions(profile?.data);
+  // 舊的應徵還沒挑過 JD 關鍵字，重新評分時補挑一次。
+  await resolveJdKeywords({
+    supabase,
+    userId,
+    applicationId,
+    jd: application.job_description,
+    stored: application.jd_keywords,
+  });
 
   for (const lang of languages) {
     const resumeContent = editedResumeDraft[lang];
@@ -570,9 +637,8 @@ export async function rescoreResumeForApplication(
       language: lang,
       resumeContent,
       items: itemsForLanguage(existingChecklists[lang], sharedItems ?? []),
-      previousJudgments: existingChecklists[lang] ?? [],
-      previousResume: basis.resume[lang] ?? null,
-      workConditions,
+      previousJudgments: classified ? [] : (existingChecklists[lang] ?? []),
+      previousResume: classified ? null : (basis.resume[lang] ?? null),
     });
 
     checklists[lang] = scored.jd_match_checklist;
@@ -602,7 +668,7 @@ ${SUMMARY_RULES}
 
 這次要做的事：
 1. 只改摘要，原本的內容盡量保留；把可以配合的條件寫進最後一句（原本最後一句講契合度的話，合併成一句；句數還是控制在 3-4 句）。
-2. 照規則 8 寫成可以配合的事實，能用使用者資料裡真實的佐證（海外交換、語言能力、跨國協作）就帶上，不能編造資料裡沒有的經驗。
+2. 照規則 8 只用半句簡短帶過（例如「英文流利，可配合出差」），接在語言能力或跨國經驗後面，細節留給求職信；不能編造資料裡沒有的經驗。
 3. 用跟目前摘要一樣的語言寫。
 4. 只輸出 JSON，不要其他文字、不要 markdown code fence：{ "summary": string }`;
 
@@ -669,8 +735,8 @@ export async function answerWorkCondition(params: {
       userPrompt: [
         `===== JD =====`,
         application.job_description,
-        `===== 使用者確認可以配合的工作條件 =====`,
-        item,
+        `===== 這份職缺使用者確認可以配合的工作條件（摘要寫作規則 8）=====`,
+        `- ${item}`,
         `===== 使用者的學歷、技能、語言能力（可以拿來當佐證）=====`,
         JSON.stringify({ ...background, summaries: undefined }, null, 2),
         `===== 目前的履歷（${lang}）=====`,
@@ -696,11 +762,12 @@ const FILL_ROUNDS = 3;
 
 /**
  * 生成完用下載時同一套程式排 PDF 量版面，調到剛好一頁：
- * - 第一頁用不到 92%：請 AI 從經歷資料庫補內容（先主要經歷、再次要經歷），告訴它大約還剩幾行，
+ * - 每段條數先套上限（enforceBulletCaps），超過的從最後一條開始刪。
+ * - 第一頁用不到 92%：請 AI 從經歷資料庫補內容（先正式工作、再社團和專案），告訴它大約還剩幾行，
  *   最多補三輪；補完超出一頁就丟掉那一版、下一輪只補一半。
  * - 經歷資料庫的內容都用完了還不滿：放寬間距、放大內文字級，直到剛好一頁。
- * - 超出一頁：請 AI 拿掉跟 JD 最不相關的內容，告訴它要拿掉幾行（最多兩輪）。
- *   還是超出就留超出最少的那版，畫布上會照常顯示超出一頁的提示。
+ * - 超出一頁：程式照固定順序一次刪一條（trimOneBullet），刪到剛好一頁；刪到下限還是超出，
+ *   畫布上會照常顯示超出一頁的提示，由使用者決定。
  */
 async function fitOnePage(params: {
   supabase: SupabaseClient;
@@ -708,6 +775,8 @@ async function fitOnePage(params: {
   lang: string;
   resume: Resume;
   contact: ResumeContact;
+  /** 使用者改過的區塊標題，量版面時要用一樣的標題。 */
+  labels: CustomSectionLabels;
   /** 生成時的完整 prompt（JD、經歷資料庫、個人資料），調整時沿用。 */
   basePrompt: string;
   /** 這次生成用的經歷資料庫，用來判斷還有沒有內容可以補。 */
@@ -717,7 +786,8 @@ async function fitOnePage(params: {
 }): Promise<Resume> {
   const { measureResumePdf } = await import("@/lib/documents/measureResumePdf");
   const { BODY_WIDTH_PT } = await import("@/lib/documents/ResumePdfDocument");
-  const measure = (r: Resume) => measureResumePdf({ contact: params.contact, resume: r, language: params.lang });
+  const measure = (r: Resume) =>
+    measureResumePdf({ contact: params.contact, resume: r, language: params.lang, labels: params.labels });
   const metrics = resolveMetrics(params.lang, params.resume.layout);
   const contentHeight = 841.89 - 36 * 2;
   const charsPerLine =
@@ -735,7 +805,7 @@ async function fitOnePage(params: {
         `===== 目前的履歷 =====`,
         JSON.stringify({ ...resume, layout: undefined }, null, 2),
         `===== 這次要做的事 =====`,
-        ...task,
+        ...task.filter(Boolean),
         `- 不能編造經歷資料庫裡沒有的事實。`,
         `- 輸出整份履歷（格式跟原本完全一樣），不是只輸出改動的部分。`,
       ].join("\n\n"),
@@ -752,48 +822,64 @@ async function fitOnePage(params: {
     }
   };
 
-  let current = params.resume;
+  // 補內容時點名最近一份正式工作，資料庫裡有的話至少要 3 條。
+  const latest = latestWorkFloor(params.entries);
+  const floorRule = latest
+    ? `- 最近一份正式工作是「${latest.org}」（${latest.period}），這段至少要有 ${latest.floor} 條 bullet。`
+    : "";
+  const logShape = (stage: string, r: Resume, f?: { pages: number; fillRatio: number } | null) => {
+    if (process.env.NODE_ENV === "production") return;
+    const counts = (list?: { bullets?: string[] }[]) => (list ?? []).map((e) => e.bullets?.length ?? 0).join(",") || "-";
+    const page = f ? ` pages=${f.pages} fill=${Math.round(f.fillRatio * 100)}%` : "";
+    console.info(`[fitOnePage] ${params.lang} ${stage} work=${counts(r.work_experience)} leadership=${counts(r.leadership)}${page}`);
+  };
+
+  // 每段條數上限由程式把關，不靠 AI 自己遵守。
+  let current = enforceBulletCaps(params.resume);
   let fit;
   try {
     fit = await measure(current);
   } catch {
     return current; // 量不到版面就不調，不影響生成。
   }
+  logShape("draft", current, fit);
 
-  // 超出一頁：拿掉最不相關的內容。
-  for (let round = 0; fit.pages > 1 && round < 2; round++) {
-    const cutLines = Math.ceil(fit.overflowPt / metrics.line) + 1;
-    const next = await ask(current, [
-      `這份履歷超出一頁 A4 大約 ${cutLines} 行（每行${charsPerLine}）。請拿掉至少 ${cutLines} 行的內容，讓它剛好一頁：`,
-      `- 優先整條拿掉跟 JD 最不相關的 bullet；還不夠再拿掉最舊、最不相關的經歷。`,
-      `- 不要把每一句都砍幾個字，剩下的內容原則上不要改寫。`,
-    ]);
-    if (!next) break;
-    const nextFit = await measure(next).catch(() => null);
-    if (!nextFit) break;
-    if (nextFit.pages < fit.pages || nextFit.overflowPt < fit.overflowPt) {
+  // 超出一頁：程式照固定順序一次刪一條、刪一次量一次，剛好一頁就停（不交給 AI，AI 不一定照順序刪，
+  // 每刪一輪又要重寫整份、花一兩分鐘）。全部刪到下限還是超出，就留給使用者自己決定。
+  if (fit.pages > 1) {
+    let cuts = 0;
+    while (fit.pages > 1) {
+      const next = trimOneBullet(current);
+      if (!next) break;
+      const nextFit = await measure(next).catch(() => null);
+      if (!nextFit) break;
       current = next;
       fit = nextFit;
-    } else {
-      break;
+      cuts++;
     }
+    logShape(`trimmed ${cuts} bullet(s)`, current, fit);
+    // 刪過就不再請 AI 補內容（它會把剛刪掉的補回來），沒填滿的部分交給排版放大。
+    if (fit.pages > 1) return current;
+    return enlargeToFill(current, params.lang, fit.fillRatio, measure);
   }
-  if (fit.pages > 1) return current;
 
-  // 一頁沒填滿：分幾輪從經歷資料庫補內容，先補主要經歷、再補次要經歷（留 2 行緩衝，避免剛好擠到第二頁）。
+  // 一頁沒填滿：分幾輪從經歷資料庫補內容，先補正式工作、再補社團和專案（留 2 行緩衝，避免剛好擠到第二頁）。
   // 補完超出一頁就丟掉那一版，下一輪只要求補一半的行數。
   let askLines = spareLinesOf(fit.fillRatio);
   for (let round = 0; fit.fillRatio < TARGET_FILL_RATIO && round < FILL_ROUNDS && askLines > 0; round++) {
     if (dbExhausted(current, params.entries)) break;
-    const expanded = await ask(current, [
+    const raw = await ask(current, [
       `這份履歷只用了一頁 A4 的 ${Math.round(fit.fillRatio * 100)}%，下面還空著大約 ${askLines} 行（每行${charsPerLine}）。履歷一定要填滿一頁，少於一頁會讓人覺得經歷太少。請從經歷資料庫補上大約 ${askLines} 行的內容，不能超過：`,
-      `- 先把經歷資料庫裡的經歷依這份 JD 分成主要（跟 JD 直接相關）和次要。主要經歷裡還沒寫進履歷的 bullet 先補；主要經歷都放完了，就補次要經歷（整段經歷沒放進來的也要加進來）。`,
-      `- 這一步不受每段 bullet 條數上限的限制。`,
+      `- 每段條數上限：最近一份正式工作最多 ${LATEST_WORK_MAX} 條，其他正式工作最多 ${OTHER_WORK_MAX} 條而且越舊越少，社團、專案每段最多 ${LEADERSHIP_MAX} 條；超過的會被直接刪掉。`,
+      `- 先補還沒到上限的正式工作（最近的先補）；正式工作都到上限了，再補跟 JD 相關的社團、專案（整段沒放進來的也要加進來；leadership 依跟 JD 的相關度排，最相關的放最前面）。`,
+      floorRule,
       `- 已經寫好的內容原則上不要改，只新增。`,
     ]);
-    if (!expanded) break;
+    if (!raw) break;
+    const expanded = enforceBulletCaps(raw);
     const after = await measure(expanded).catch(() => null);
     if (!after) break;
+    logShape(`fill${round + 1}`, expanded, after);
     if (after.pages > 1) {
       askLines = Math.floor(askLines / 2);
       continue;
@@ -813,12 +899,127 @@ async function fitOnePage(params: {
   }
 }
 
-/** 經歷資料庫裡的經歷段數、事件數都已經全放進履歷了，沒東西可以補。 */
+/** 每段條數上限（2026-10-21 跟 Z 定案）：最近一份正式工作 4、其他正式工作 3 而且越舊越少、社團專案 3。 */
+const LATEST_WORK_MAX = 4;
+const OTHER_WORK_MAX = 3;
+const LEADERSHIP_MAX = 3;
+/** 刪減時最近一份正式工作至少留幾條。 */
+const LATEST_WORK_MIN = 3;
+
+/** 履歷裡正式工作的 index，依期間從新到舊排。 */
+function workByRecency(resume: Resume): number[] {
+  return (resume.work_experience ?? [])
+    .map((e, i) => ({ i, end: periodEnd(e.period ?? "") }))
+    .sort((a, b) => b.end - a.end || a.i - b.i)
+    .map((x) => x.i);
+}
+
+/**
+ * 套用每段條數上限：最近一份最多 4 條；其他正式工作最多 3 條，而且不能比比它新的那段多（越舊越少）；
+ * 社團、專案每段最多 3 條。bullet 依跟 JD 的相關度排過，超過的從最後一條開始刪。
+ */
+function enforceBulletCaps(resume: Resume): Resume {
+  const work = (resume.work_experience ?? []).map((e) => ({ ...e, bullets: [...(e.bullets ?? [])] }));
+  let newer = Number.POSITIVE_INFINITY;
+  workByRecency(resume).forEach((i, rank) => {
+    const cap = rank === 0 ? LATEST_WORK_MAX : Math.min(OTHER_WORK_MAX, Math.max(1, newer));
+    work[i].bullets = work[i].bullets.slice(0, cap);
+    newer = work[i].bullets.length;
+  });
+  const leadership = (resume.leadership ?? []).map((e) => ({ ...e, bullets: (e.bullets ?? []).slice(0, LEADERSHIP_MAX) }));
+  return { ...resume, work_experience: work, leadership };
+}
+
+/**
+ * 超出一頁時刪一條，順序（2026-10-21 跟 Z 定案）：
+ * 1. 社團、專案：從排最後（跟 JD 最無關）的那段刪最後一條，刪光就整段拿掉。
+ * 2. 其他正式工作：從最舊的那段刪最後一條，每段至少留 1 條，再換比較新的那段。
+ * 3. 最近一份正式工作：刪到剩 3 條為止。
+ * 都到下限了回 null。
+ */
+function trimOneBullet(resume: Resume): Resume | null {
+  const leadership = resume.leadership ?? [];
+  if (leadership.length > 0) {
+    const last = leadership.length - 1;
+    const bullets = leadership[last].bullets ?? [];
+    const next =
+      bullets.length > 1
+        ? leadership.map((e, i) => (i === last ? { ...e, bullets: bullets.slice(0, -1) } : e))
+        : leadership.slice(0, -1);
+    return { ...resume, leadership: next };
+  }
+  const order = workByRecency(resume);
+  for (const i of [...order].reverse()) {
+    const bullets = resume.work_experience[i].bullets ?? [];
+    const min = i === order[0] ? LATEST_WORK_MIN : 1;
+    if (bullets.length > min) {
+      return {
+        ...resume,
+        work_experience: resume.work_experience.map((e, j) => (j === i ? { ...e, bullets: bullets.slice(0, -1) } : e)),
+      };
+    }
+  }
+  return null;
+}
+
+interface LatestWork {
+  org: string;
+  period: string;
+  /** 至少要留幾條：3 條，資料庫不到 3 件就全部。 */
+  floor: number;
+}
+
+/** 經歷資料庫裡最近一份正式工作（work），依期間的結束時間判斷；「至今／Present」最新。 */
+function latestWorkFloor(entries: ExperienceEntryRow[]): LatestWork | null {
+  let best: { entry: ExperienceEntryRow; periods: string[]; end: number } | null = null;
+  for (const entry of entries) {
+    if (entry.entry_type !== "work") continue;
+    const periods = readPeriods(entry.period_variants);
+    const end = Math.max(-1, ...periods.map(periodEnd));
+    if (end < 0) continue;
+    if (!best || end > best.end) best = { entry, periods, end };
+  }
+  if (!best) return null;
+  const achievements = Array.isArray(best.entry.achievements) ? best.entry.achievements.length : 0;
+  const floor = Math.min(3, achievements);
+  if (floor === 0) return null;
+  return { org: best.entry.org_name, period: best.periods[0], floor };
+}
+
+function readPeriods(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((v) => (typeof v === "string" ? v : (v as { period?: unknown })?.period))
+    .filter((p): p is string => typeof p === "string" && p.trim() !== "");
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** 期間結束時間轉成可以比大小的數字（年 × 12 + 月）；「至今」最大，認不出年份回 -1。 */
+function periodEnd(period: string): number {
+  const end = period.split(/\s+[-–—~～]\s+|[–—~～]/).pop() ?? "";
+  if (/present|now|current|至今|迄今|現在|目前/i.test(end)) return Number.MAX_SAFE_INTEGER;
+  const year = end.match(/(19|20)\d{2}/);
+  if (!year) return -1;
+  const lower = end.toLowerCase();
+  const named = MONTHS.findIndex((m) => lower.includes(m));
+  const numbered = end.match(/(?:(?:19|20)\d{2}\s*[年./-]\s*)(\d{1,2})/);
+  const month = named >= 0 ? named + 1 : numbered ? Number(numbered[1]) : 12;
+  return Number(year[0]) * 12 + month;
+}
+
+/** 經歷資料庫裡的經歷都放進履歷了，每段也都放到上限（或資料庫裡的件數），沒東西可以補。 */
 function dbExhausted(resume: Resume, entries: ExperienceEntryRow[]): boolean {
   const sections = [...(resume.work_experience ?? []), ...(resume.leadership ?? [])];
   const bullets = sections.reduce((n, e) => n + (e.bullets?.length ?? 0), 0);
-  const achievements = entries.reduce((n, e) => n + (Array.isArray(e.achievements) ? e.achievements.length : 0), 0);
-  return sections.length >= entries.length && bullets >= achievements;
+  const count = (e: ExperienceEntryRow) => (Array.isArray(e.achievements) ? e.achievements.length : 0);
+  const work = entries
+    .filter((e) => e.entry_type === "work")
+    .sort((a, b) => Math.max(-1, ...readPeriods(b.period_variants).map(periodEnd)) - Math.max(-1, ...readPeriods(a.period_variants).map(periodEnd)));
+  const available =
+    work.reduce((n, e, rank) => n + Math.min(count(e), rank === 0 ? LATEST_WORK_MAX : OTHER_WORK_MAX), 0) +
+    entries.filter((e) => e.entry_type !== "work").reduce((n, e) => n + Math.min(count(e), LEADERSHIP_MAX), 0);
+  return sections.length >= entries.length && bullets >= available;
 }
 
 /**
@@ -858,6 +1059,10 @@ function buildUserPrompt(params: {
   entries: ExperienceEntryRow[];
   profile: unknown;
   background: LanguageBackground;
+  /** 這份應徵的清單裡、使用者按過「可以配合」的工作條件。只有這些能寫進摘要（摘要寫作規則 8）。 */
+  confirmedConditions: string[];
+  /** JD 關鍵字（招募官會逐字搜尋的字），有對應事實時用原字寫（排履歷規則 4）。 */
+  keywords: string[];
 }): string {
   const languageRules = [
     params.language === "en" ? EN_RULES : params.language === "zh" ? ZH_RULES : null,
@@ -866,7 +1071,6 @@ function buildUserPrompt(params: {
   ].filter(Boolean);
 
   const profile = (params.profile ?? {}) as Record<string, unknown>;
-  const workConditions = readWorkConditions(profile);
 
   return [
     `目標職缺語言版本：${params.language}`,
@@ -877,13 +1081,25 @@ function buildUserPrompt(params: {
     JSON.stringify(params.entries, null, 2),
     `===== 使用者的 Summary、學歷、技能、語言能力 =====`,
     JSON.stringify(params.background, null, 2),
-    `===== 使用者已確認可以配合的工作條件（摘要寫作規則 8）=====`,
-    formatWorkConditions(workConditions, true),
+    `===== JD 關鍵字（排履歷規則 4：有對應事實時用這些原字寫）=====`,
+    params.keywords.length > 0 ? params.keywords.join("、") : "（無）",
+    `===== 這份職缺使用者確認可以配合的工作條件（摘要寫作規則 8）=====`,
+    params.confirmedConditions.length > 0 ? params.confirmedConditions.map((c) => `- ${c}`).join("\n") : "（無）",
     `===== 使用者其他個人資料 =====`,
     // 排版設定跟寫履歷無關，不給 AI 看；background、工作條件上面已經給過了。
     // 這裡可能還留著舊版上傳時存的學歷、技能（格式不固定），上面沒有的話可以參考這裡。
     JSON.stringify({ ...profile, resume_layout: undefined, background: undefined, work_conditions: undefined }, null, 2),
   ].join("\n\n");
+}
+
+/**
+ * 這份應徵的清單裡、使用者自己按過「可以配合」的工作條件。
+ * 只給這份 JD 自己的條件：以前把使用者所有回答過的條件都給 AI、讓 AI 判斷 JD 有沒有提到，
+ * 結果 JD 只寫「與海外團隊合作」，摘要就被寫上別份職缺的「可配合出差至日本、新加坡」（2026-10-23）。
+ */
+function confirmedConditions(checklists: Record<string, JdChecklistItem[]>): string[] {
+  const items = Object.values(checklists ?? {}).flat();
+  return [...new Set(items.filter((i) => i.kind === "condition" && i.answer === "yes").map((i) => i.item.trim()))];
 }
 
 /** 這個語言還沒有自己的 Summary 時，拿另一個語言的當參考（Summary 只是素材，不會照抄）。 */
@@ -954,7 +1170,7 @@ export async function reviseResumeWithChat(params: {
 
   const { data: application } = await supabase
     .from("applications")
-    .select("job_description")
+    .select("job_description, jd_match_checklist, jd_keywords")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -981,6 +1197,8 @@ export async function reviseResumeWithChat(params: {
     entries: langEntries,
     profile: profile?.data ?? {},
     background: withReferenceSummaries(background, profile?.data),
+    confirmedConditions: confirmedConditions(application.jd_match_checklist ?? {}),
+    keywords: application.jd_keywords ?? [],
   });
 
   const response = await askClaude({

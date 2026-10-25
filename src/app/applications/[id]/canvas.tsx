@@ -11,6 +11,7 @@ import {
   finalizeResumeAction,
   reopenResumeAction,
   suggestTrimAction,
+  suggestKeywordRewordingAction,
   measureResumesAction,
   saveLayoutAction,
   type TrimSuggestion,
@@ -31,9 +32,15 @@ import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { hasRequiredContact, type ResumeContact } from "@/lib/resumes/contact";
 import { ContactDialog } from "@/app/ContactForm";
-import { CloseIcon, UndoIcon } from "@/app/icons";
+import { CloseIcon, RedoIcon, UndoIcon } from "@/app/icons";
+import { useUndoShortcuts } from "@/app/useUndoShortcuts";
+import { SectionLabelsProvider } from "@/app/SectionLabels";
+import type { CustomSectionLabels } from "@/lib/resumes/sectionLabels";
 import { computeAtsScore, coveredByResume } from "@/lib/resumes/atsScore";
 import { JdChecklist } from "./JdChecklist";
+import { matchKeywords } from "@/lib/resumes/keywordMatch";
+import type { RewordEdit } from "@/lib/resumes/rewordKeywords";
+import { inlineDiff } from "@/lib/text/inlineDiff";
 import { InfoTip } from "@/app/InfoTip";
 import { ResumeChatPanel } from "./ResumeChatPanel";
 import { splitList } from "@/lib/resumes/background";
@@ -66,12 +73,18 @@ interface CanvasProps {
   researchAvailable: boolean;
   /** 流程步驟列，放在左欄最上面，跟 A4 同寬。 */
   stepBar: ReactNode;
+  /** 使用者改過的區塊標題（全帳號共用）。 */
+  initialSectionLabels: Record<"zh" | "en", CustomSectionLabels>;
+  /** JD 關鍵字（關鍵字命中用）；舊的應徵還沒挑過是 null，重新評分時會補挑。 */
+  initialKeywords: string[] | null;
+  /** JD 是中文還是英文：關鍵字只比對同語言的履歷版本。 */
+  jdLanguage: "zh" | "en";
 }
 
 type Resume = GeneratedResume["resume"];
 type TrimPlan = { suggestions: TrimSuggestion[]; checked: boolean[] };
 
-// 復原最多記幾步。
+// 上一步／下一步最多記幾步。
 const UNDO_LIMIT = 30;
 // 取捨建議最多請 AI 補幾輪（一輪不夠塞回一頁才會補下一輪）。
 const TRIM_MAX_ROUNDS = 3;
@@ -120,12 +133,20 @@ function AtsScoreLegend({ score }: { score: number | null }) {
   );
 }
 
-/** ATS 評分怎麼算、四段分數各代表什麼，直接顯示在分數下面；目前落在的那一段加粗、上色。 */
+/** 四段分數各代表什麼，直接顯示在分數下面；目前落在的那一段加粗、上色。分數怎麼算放在標題旁的 ⓘ。 */
+/** 「換成 JD 用字」的修改在履歷的哪裡：摘要、某段經歷的第幾條、技能。 */
+function rewordWhere(edit: RewordEdit, resume: Resume | null): string {
+  const loc = edit.location;
+  if (loc.section === "summary") return "專業摘要";
+  if (loc.section === "skills") return "技能（加上這一項）";
+  const org = resume?.[loc.section]?.[loc.entry]?.org ?? "";
+  return `${org} 第 ${loc.bullet + 1} 條`;
+}
+
 function AtsScoreHelp({ score }: { score: number | null }) {
   const current = score !== null ? getAtsBand(score) : null;
   return (
     <>
-      分數照固定公式算：必要條件每項 2 分、加分條件每項 1 分，看履歷寫到幾項；部分符合（例如科系要求商管、你輔修商管）算一半。內容沒改，分數就不會變。
       <ul className="ats-band-list">
         {ATS_BANDS.map((b) => (
           <li key={b.label} className={b === current ? `ats-band-list-item--current ${b.text}` : undefined}>
@@ -151,12 +172,16 @@ export function Canvas({
   initialCoverLetterLanguages,
   researchAvailable,
   stepBar,
+  initialSectionLabels,
+  initialKeywords,
+  jdLanguage,
 }: CanvasProps) {
   const router = useRouter();
   const [draft, setDraft] = useState<ResumeMap | null>(initialDraft);
   const [checklist, setChecklist] = useState<ChecklistMap>(initialChecklist);
   const [atsScore, setAtsScore] = useState<number | null>(initialAtsScore);
   const [gaps, setGaps] = useState<GapsMap>(initialGaps);
+  const [keywords, setKeywords] = useState<string[] | null>(initialKeywords);
   const [finalized, setFinalized] = useState(initialFinalized);
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [activeLang, setActiveLang] = useState(languages[0]);
@@ -174,6 +199,28 @@ export function Canvas({
   // 記下這次量的是哪一份內容，內容一變就知道結果過期了（顯示「計算中」）。
   const [fitState, setFitState] = useState<{ lang: string; resume: Resume; fit: PdfFit } | null>(null);
   const activeResume = draft?.[activeLang] ?? null;
+  // 關鍵字命中：在瀏覽器裡用程式比對，畫布上改一個字就會更新。
+  // 關鍵字只比對跟 JD 同語言的版本（英文 JD 的字本來就不會出現在中文履歷裡）。
+  const keywordMatch =
+    keywords?.length && activeResume && activeLang === jdLanguage ? matchKeywords(keywords, activeResume) : null;
+  const jdLangLabel = LANG_LABEL[jdLanguage] ?? jdLanguage;
+  const keywordNote =
+    activeLang !== jdLanguage
+      ? languages.includes(jdLanguage)
+        ? `JD 是${jdLangLabel}，切到${jdLangLabel}版履歷看關鍵字`
+        : `JD 是${jdLangLabel}，這份沒有${jdLangLabel}版履歷，關鍵字沒辦法逐字比對`
+      : !keywords?.length
+        ? "按「重新檢查評分」後會列出 JD 關鍵字"
+        : null;
+  // 「換成 JD 用字」：AI 找出有事實的那一句、只改用字，前後對照給使用者勾選，套用才換進畫布（可以按上一步退回）。
+  const [reword, setReword] = useState<{
+    keywords: string[];
+    loading: boolean;
+    error: string | null;
+    edits: RewordEdit[];
+    picked: boolean[];
+    notFound: { keyword: string; reason: string }[];
+  } | null>(null);
   const fit = fitState?.lang === activeLang ? fitState.fit : null;
   const measuring = activeResume !== null && fitState?.resume !== activeResume;
   const overflowPt = fit?.overflowPt ?? 0;
@@ -185,15 +232,19 @@ export function Canvas({
   const layoutSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [trimPlan, setTrimPlan] = useState<TrimPlan | null>(null);
   const [pendingDownload, setPendingDownload] = useState<string | null>(null);
-  // 「回上一步」：每次內容有變動前，先把整份草稿存一份。
+  // 「上一步」：每次內容有變動前，先把整份草稿存一份；「下一步」：按了上一步之後可以再走回來，
+  // 內容又有新的變動就清掉。
   const [past, setPast] = useState<ResumeMap[]>([]);
-  // 畫布是直接在 DOM 上編輯的（contentEditable），整份內容被換掉（復原、套用取捨）時要重新掛載，
+  const [future, setFuture] = useState<ResumeMap[]>([]);
+  // 畫布是直接在 DOM 上編輯的（contentEditable），整份內容被換掉（上一步、套用取捨）時要重新掛載，
   // 畫面才會顯示新的內容。
   const [canvasVersion, setCanvasVersion] = useState(0);
   // 這筆已經有求職信時，按「寫求職信」先問要沿用還是依新履歷重新生成。
   const [coverChoiceDialog, setCoverChoiceDialog] = useState(false);
   // 「跟 AI 聊」面板：浮在右下角，邊聊邊看畫布。
   const [chatOpen, setChatOpen] = useState(false);
+  // 「重新產生履歷」會蓋掉畫布上的內容（含手動改的），先確認。
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [coverChoice, setCoverChoice] = useState<CoverLetterChoice>(() =>
     initialChoice(initialCoverLetterLanguages.length > 0 ? initialCoverLetterLanguages : languages, researchAvailable),
   );
@@ -219,6 +270,9 @@ export function Canvas({
     }
   }
 
+  // 區塊標題改了就加一，讓上面的量版面重跑一次。
+  const [labelsVersion, setLabelsVersion] = useState(0);
+
   // 內容、語言、抬頭一變，停 0.6 秒沒再動就重新排一次 PDF 量。
   useEffect(() => {
     if (!activeResume) return;
@@ -231,7 +285,8 @@ export function Canvas({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [activeResume, activeLang, contact]);
+    // 標題改了也要重量：標題變長可能換行，多出一行。
+  }, [activeResume, activeLang, contact, labelsVersion]);
 
   /** 一次量好幾個版本的 PDF，回傳各自超出一頁多少 pt。 */
   const measureMany = useCallback(
@@ -283,7 +338,7 @@ export function Canvas({
     updateResume(activeLang, (r) => applyTrimSuggestions(r, picked));
     setCanvasVersion((v) => v + 1);
     setTrimPlan(null);
-    setMessage(`已套用 ${picked.length} 項取捨，可按復原退回，記得儲存`);
+    setMessage(`已套用 ${picked.length} 項取捨，可按「上一步」退回，記得儲存`);
   }
 
   /** 調字級／間距：畫布馬上套用，停 0.5 秒後存檔（定案後也能調，下載的檔案會跟著變）。 */
@@ -297,19 +352,43 @@ export function Canvas({
     }, 500);
   }
 
+  /** 內容要變動前呼叫：現在這份記進上一步，下一步的紀錄作廢。 */
+  function remember(snapshot: ResumeMap) {
+    setPast((p) => [...p.slice(-(UNDO_LIMIT - 1)), snapshot]);
+    setFuture([]);
+  }
+
+  /** 換成上一步／下一步的內容：只換內容，字級跟間距維持現在的設定（排版設定是另外存的，不算一步）。 */
+  function restore(target: ResumeMap) {
+    if (!draft) return;
+    setDraft(
+      Object.fromEntries(
+        Object.entries(target).map(([lang, r]) => [lang, { ...r, layout: draft[lang]?.layout ?? r.layout }]),
+      ),
+    );
+    setCanvasVersion((v) => v + 1);
+  }
+
   function handleUndo() {
     const previous = past[past.length - 1];
     if (!previous || !draft) return;
     setPast(past.slice(0, -1));
-    // 復原只退內容，字級跟間距維持現在的設定（排版設定是另外存的，不算一步）。
-    setDraft(
-      Object.fromEntries(
-        Object.entries(previous).map(([lang, r]) => [lang, { ...r, layout: draft[lang]?.layout ?? r.layout }]),
-      ),
-    );
-    setCanvasVersion((v) => v + 1);
-    setMessage("已復原上一步");
+    setFuture((f) => [...f, draft]);
+    restore(previous);
+    setMessage("已回到上一步");
   }
+
+  function handleRedo() {
+    const next = future[future.length - 1];
+    if (!next || !draft) return;
+    setFuture(future.slice(0, -1));
+    setPast((p) => [...p.slice(-(UNDO_LIMIT - 1)), draft]);
+    restore(next);
+    setMessage("已回到下一步");
+  }
+
+  // Cmd/Ctrl + Z 上一步、Shift + Cmd/Ctrl + Z 下一步（正在某一格打字時先退打的字）。
+  useUndoShortcuts({ undo: handleUndo, redo: handleRedo, enabled: !finalized && !isPending });
 
   /** 超出一頁時先提醒再下載；沒超出就照一般連結直接下載。 */
   function guardDownload(e: React.MouseEvent<HTMLAnchorElement>) {
@@ -330,36 +409,85 @@ export function Canvas({
 
   function handleGenerate() {
     setMessage(null);
+    // 重新產生時，舊的那份記進上一步，不滿意可以按「上一步」退回去。
+    const previous = draft;
     void run("generate", async () => {
       const result = await generateAction(applicationId);
       if (result.error || !result.data) {
         setMessage(`錯誤：${result.error}`);
         return;
       }
+      if (previous) remember(previous);
       setDraft(result.data.resume_draft);
       setChecklist(result.data.jd_match_checklist);
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
-      setMessage("生成完成");
+      setKeywords(result.data.jd_keywords);
+      setCanvasVersion((v) => v + 1);
+      setMessage(previous ? "已重新產生；想回到上一版可以按「上一步」再按「儲存」" : "生成完成");
     });
   }
 
   function updateResume(lang: string, updater: (r: Resume) => Resume) {
     if (!draft) return;
     const next = { ...draft, [lang]: updater(draft[lang]) };
-    // 失焦也會觸發一次提交，內容沒變就不記進復原紀錄。
+    // 失焦也會觸發一次提交，內容沒變就不記進上一步。
     if (JSON.stringify(next[lang]) === JSON.stringify(draft[lang])) return;
-    setPast((p) => [...p.slice(-(UNDO_LIMIT - 1)), draft]);
+    remember(draft);
     setDraft(next);
   }
 
-  // 「跟 AI 聊」改好的整份履歷換進草稿：記進復原紀錄、畫布重新掛載才看得到新內容。字級間距維持現在的設定。
+  async function handleReword(words: string[], item: string | null) {
+    if (!activeResume) return;
+    setReword({ keywords: words, loading: true, error: null, edits: [], picked: [], notFound: [] });
+    // 已經用到的關鍵字一起傳過去：改用字時不能把它們改掉。
+    const result = await suggestKeywordRewordingAction(
+      applicationId,
+      activeLang,
+      activeResume,
+      words,
+      item,
+      keywordMatch?.matched ?? [],
+    );
+    setReword({
+      keywords: words,
+      loading: false,
+      error: result.error ?? null,
+      edits: result.edits ?? [],
+      picked: (result.edits ?? []).map(() => true),
+      notFound: result.notFound ?? [],
+    });
+  }
+
+  function applyReword() {
+    if (!reword) return;
+    const chosen = reword.edits.filter((_, i) => reword.picked[i]);
+    updateResume(activeLang, (r) => {
+      const next: Resume = JSON.parse(JSON.stringify(r));
+      for (const e of chosen) {
+        const loc = e.location;
+        if (loc.section === "summary") next.summary = e.after;
+        else if (loc.section === "skills") {
+          if (!next.skills.some((s) => s.toLowerCase() === e.after.toLowerCase())) next.skills = [...next.skills, e.after];
+        } else {
+          const bullets = next[loc.section][loc.entry]?.bullets;
+          if (bullets && bullets[loc.bullet] === e.before) bullets[loc.bullet] = e.after;
+        }
+      }
+      return next;
+    });
+    setCanvasVersion((v) => v + 1);
+    setReword(null);
+    setMessage("換好了，記得按「儲存」；不滿意可以按「上一步」");
+  }
+
+  // 「跟 AI 聊」改好的整份履歷換進草稿：記進上一步、畫布重新掛載才看得到新內容。字級間距維持現在的設定。
   function applyChatRevision(lang: string, next: Resume) {
     if (!draft) return;
-    setPast((p) => [...p.slice(-(UNDO_LIMIT - 1)), draft]);
+    remember(draft);
     setDraft({ ...draft, [lang]: { ...next, layout: draft[lang]?.layout ?? next.layout } });
     setCanvasVersion((v) => v + 1);
-    setMessage("AI 改好了，記得按「儲存」；不滿意可以按「復原」");
+    setMessage("AI 改好了，記得按「儲存」；不滿意可以按「上一步」");
   }
 
   function handleRescore() {
@@ -374,6 +502,7 @@ export function Canvas({
       setChecklist(result.data.jd_match_checklist);
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
+      setKeywords(result.data.jd_keywords);
       setMessage("已重新評分");
     });
   }
@@ -382,6 +511,7 @@ export function Canvas({
   function handleAnswerCondition(item: string, willing: boolean) {
     if (!draft) return;
     setMessage(null);
+    const previous = draft;
     void run("condition", async () => {
       const result = await answerWorkConditionAction(applicationId, item, willing, draft);
       if (result.error || !result.data) {
@@ -391,10 +521,12 @@ export function Canvas({
       setChecklist(result.data.jd_match_checklist);
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
+      setKeywords(result.data.jd_keywords);
       if (willing) {
+        remember(previous);
         setDraft(result.data.resume_draft);
         setCanvasVersion((v) => v + 1);
-        setMessage("摘要補上了這個條件，也重新評分了");
+        setMessage("摘要補上了這個條件，也重新評分了；不滿意可以按「上一步」");
       } else {
         setMessage("記下來了，之後的職缺遇到同樣的條件不會再問");
       }
@@ -434,6 +566,7 @@ export function Canvas({
       }
       setFinalized(true);
       setPast([]);
+      setFuture([]);
       setMessage("已定案，可以進到求職信步驟了");
       // 讓步驟列更新到「寫求職信」。
       router.refresh();
@@ -488,6 +621,7 @@ export function Canvas({
   const layout = readLayoutSettings(resume.layout, activeLang);
 
   return (
+    <SectionLabelsProvider initial={initialSectionLabels} onChange={() => setLabelsVersion((v) => v + 1)}>
     <div className="canvas-layout">
       {/* 左欄：A4 上方工具列（左邊語言切換，右邊動作按鈕）+ A4 + 備註。 */}
       <div className="canvas-main">
@@ -500,6 +634,31 @@ export function Canvas({
               onChange={setActiveLang}
             />
             <LayoutMenu language={activeLang} layout={layout} onChange={changeLayout} fit={fit} measuring={measuring} />
+            {/* 上一步／下一步：跟「Aa」一樣是灰色純圖示，沒有紀錄時變淡、不能按。定案後不能編輯，就不顯示。 */}
+            {!finalized && (
+              <div className="canvas-history">
+                <button
+                  type="button"
+                  className="icon-btn canvas-history-btn"
+                  onClick={handleUndo}
+                  disabled={isPending || past.length === 0}
+                  title="上一步（⌘Z／Ctrl+Z）"
+                  aria-label="上一步"
+                >
+                  <UndoIcon />
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn canvas-history-btn"
+                  onClick={handleRedo}
+                  disabled={isPending || future.length === 0}
+                  title="下一步（⇧⌘Z／Shift+Ctrl+Z）"
+                  aria-label="下一步"
+                >
+                  <RedoIcon />
+                </button>
+              </div>
+            )}
           </div>
           {/* 提示訊息用小字塞在按鈕左邊的剩餘空間，最多兩行，不把按鈕擠到下一行。 */}
           {message && (
@@ -542,6 +701,9 @@ export function Canvas({
               </>
             ) : (
               <>
+                <button type="button" onClick={() => setConfirmRegenerate(true)} disabled={isPending} className="btn btn-secondary">
+                  重新產生履歷
+                </button>
                 <button
                   type="button"
                   onClick={() => setChatOpen((v) => !v)}
@@ -550,12 +712,6 @@ export function Canvas({
                 >
                   跟 AI 聊
                 </button>
-                {past.length > 0 && (
-                  <button type="button" onClick={handleUndo} disabled={isPending} className="btn btn-secondary" title="回到上一步的內容">
-                    <UndoIcon />
-                    復原
-                  </button>
-                )}
                 <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
                   {busy === "save" && <Spinner />}
                   儲存
@@ -571,11 +727,14 @@ export function Canvas({
           </div>
         </div>
 
+        {generateProgress !== null && (
+          <ProgressBar value={generateProgress} label="AI 正在依 JD 重新挑選經歷、產生履歷…" />
+        )}
         {rescoreProgress !== null && (
-          <ProgressBar value={rescoreProgress} label="重新比對 JD、計算 ATS 分數…" />
+          <ProgressBar value={rescoreProgress} label="重新比對 JD、計算符合度…" />
         )}
         {conditionProgress !== null && (
-          <ProgressBar value={conditionProgress} label="把這個條件寫進摘要、重新計算 ATS 分數…" />
+          <ProgressBar value={conditionProgress} label="把這個條件寫進摘要、重新計算符合度…" />
         )}
         {finalizeProgress !== null && (
           <ProgressBar value={finalizeProgress} label="定案中，把這次用到的內容寫回經歷資料庫…" />
@@ -634,6 +793,13 @@ export function Canvas({
               return { ...r, [section]: items };
             })
           }
+          onRemoveEntry={(section, index) => {
+            const org = resume[section][index]?.org ?? "";
+            updateResume(activeLang, (r) => ({ ...r, [section]: r[section].filter((_, j) => j !== index) }));
+            // 畫布是 contentEditable、用位置當 key，刪掉中間一段要重新掛載，後面幾段才不會顯示錯位的內容。
+            setCanvasVersion((v) => v + 1);
+            setMessage(`已從這份履歷刪除「${org}」，經歷資料庫不受影響；可以按「上一步」退回`);
+          }}
           onChangeBullets={(section, index, bullets) =>
             updateResume(activeLang, (r) => {
               const items = [...r[section]];
@@ -657,7 +823,15 @@ export function Canvas({
       <div className="canvas-sidebar canvas-sidebar--match">
         <div className="card card--sm">
           <h2 className="heading-card">
-            ATS 評分（{LANG_LABEL[activeLang]}）
+            JD 符合度（{LANG_LABEL[activeLang]}）
+            <InfoTip label="JD 符合度怎麼算">
+              <ul>
+                <li>逐條比對 JD 條件，不是雇主 ATS 系統的分數</li>
+                <li>必要條件每項 2 分，加分條件每項 1 分</li>
+                <li>部分符合算一半</li>
+                <li>履歷內容沒改，分數就不變</li>
+              </ul>
+            </InfoTip>
           </h2>
           <p className="ats-score-value">
             {langScore ?? "—"}
@@ -669,7 +843,7 @@ export function Canvas({
             )}
           </p>
           <AtsScoreLegend score={langScore} />
-          {/* 分數怎麼算直接攤開（使用者要求不要藏在 ⓘ 裡）。 */}
+          {/* 四段分數的說明直接攤開；公式收在標題旁的 ⓘ（2026-10-23 使用者要求縮起來）。 */}
           <div className="ats-score-help">
             <AtsScoreHelp score={langScore} />
           </div>
@@ -680,6 +854,9 @@ export function Canvas({
             legacyGaps={gaps[activeLang] ?? []}
             onDig={finalized ? undefined : setGapDialogText}
             onAnswerCondition={finalized || isPending ? undefined : handleAnswerCondition}
+            keywords={keywordMatch}
+            keywordNote={keywordNote}
+            onReword={finalized || isPending ? undefined : handleReword}
           />
         </div>
       </div>
@@ -692,6 +869,20 @@ export function Canvas({
           resume={activeResume}
           onApply={(next) => applyChatRevision(activeLang, next)}
           onClose={() => setChatOpen(false)}
+        />
+      )}
+
+      {confirmRegenerate && (
+        <ConfirmDialog
+          title="重新產生履歷？"
+          message={`AI 會依 JD 跟經歷資料庫從頭寫一份新的${languages.length > 1 ? `（${languages.map((l) => LANG_LABEL[l] ?? l).join("、")}都會重寫）` : ""}，畫面上現在的內容會被換掉，包括你手動改過的地方。產生完不滿意，可以按「上一步」回到現在這一版。每個語言版本大約 3–5 分鐘。`}
+          confirmLabel="重新產生"
+          tone="primary"
+          onConfirm={() => {
+            setConfirmRegenerate(false);
+            handleGenerate();
+          }}
+          onCancel={() => setConfirmRegenerate(false)}
         />
       )}
 
@@ -778,6 +969,83 @@ export function Canvas({
         </ConfirmDialog>
       )}
 
+      {reword && (
+        <ConfirmDialog
+          title="換成 JD 用字"
+          wide
+          message={
+            reword.loading
+              ? `正在履歷裡找跟「${reword.keywords.join("、")}」講同一件事的句子…`
+              : reword.edits.length > 0
+                ? "只改用字、不改事實。勾選要套用的修改："
+                : "履歷裡找不到講同一件事的句子，不建議硬補。真的有相關經驗的話，可以讓 AI 幫你挖掘這段經驗。"
+          }
+          confirmLabel={reword.edits.length > 0 ? "套用" : "知道了"}
+          tone="primary"
+          pending={reword.loading}
+          error={reword.error}
+          confirmDisabled={reword.edits.length > 0 && !reword.picked.some(Boolean)}
+          onConfirm={reword.edits.length > 0 ? applyReword : () => setReword(null)}
+          onCancel={() => setReword(null)}
+        >
+          {reword.edits.length > 0 && (
+            <ul className="trim-list">
+              {reword.edits.map((e, i) => (
+                <li key={i}>
+                  <label className="trim-item">
+                    <input
+                      type="checkbox"
+                      checked={reword.picked[i]}
+                      onChange={(ev) =>
+                        setReword((prev) =>
+                          prev ? { ...prev, picked: prev.picked.map((p, j) => (j === i ? ev.target.checked : p)) } : prev,
+                        )
+                      }
+                    />
+                    <span className="trim-item-body">
+                      <span className="reword-meta">
+                        <span className="trim-item-tag">{e.keyword}</span>
+                        <span className="reword-where">{rewordWhere(e, activeResume)}</span>
+                      </span>
+                      {/* 只顯示改完的那一句：刪掉的字劃線、加上的字標色，一眼看出改了哪裡。 */}
+                      <span className="reword-diff">
+                        {e.location.section === "skills" ? (
+                          <ins className="reword-ins">{e.after}</ins>
+                        ) : (
+                          inlineDiff(e.before, e.after).map((part, k) =>
+                            part.type === "del" ? (
+                              <del key={k} className="reword-del">
+                                {part.text}
+                              </del>
+                            ) : part.type === "ins" ? (
+                              <ins key={k} className="reword-ins">
+                                {part.text}
+                              </ins>
+                            ) : (
+                              <span key={k}>{part.text}</span>
+                            ),
+                          )
+                        )}
+                      </span>
+                      {e.reason && <span className="trim-item-reason">{e.reason}</span>}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+          {!reword.loading && reword.notFound.length > 0 && (
+            <ul className="reword-notfound">
+              {reword.notFound.map((n) => (
+                <li key={n.keyword}>
+                  <strong>{n.keyword}</strong>：{n.reason || "履歷裡找不到講同一件事的句子"}
+                </li>
+              ))}
+            </ul>
+          )}
+        </ConfirmDialog>
+      )}
+
       {gapDialogText && (
         <JdGapDialog
           gapText={gapDialogText}
@@ -808,5 +1076,6 @@ export function Canvas({
         />
       )}
     </div>
+    </SectionLabelsProvider>
   );
 }
