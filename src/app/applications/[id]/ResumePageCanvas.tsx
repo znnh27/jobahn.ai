@@ -5,16 +5,13 @@ import { ResumePaper } from "@/app/ResumePaper";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { contactParts, hasRequiredContact, pickName, type ResumeContact } from "@/lib/resumes/contact";
 import { pdfKey, ptToPx, resolveMetrics, type PdfFit, type ResumeSectionKey } from "@/lib/resumes/typography";
-import { getSectionLabels } from "@/lib/resumes/sectionLabels";
+import { SectionTitle } from "@/app/SectionLabels";
 import { joinList } from "@/lib/resumes/background";
+import { cleanBulletText, insertLineBreak, isComposing, placeCaret, splitAtCaret } from "@/app/bulletEditing";
 
 type Resume = GeneratedResume["resume"];
 type ExperienceEntry = Resume["work_experience"][number];
 
-
-function getLabels(language: string) {
-  return getSectionLabels(language);
-}
 
 /** 畫布寬 794px 對應 A4 寬（96 dpi），紙本身見 ResumePaper。 */
 const PAGE_WIDTH_PX = 794;
@@ -33,6 +30,8 @@ interface ResumePageCanvasProps {
   onChangeLanguages: (text: string) => void;
   onChangeBullets: (section: ResumeSectionKey, index: number, bullets: string[]) => void;
   onChangeEntryField: (section: ResumeSectionKey, index: number, field: EntryField, value: string) => void;
+  /** 把整段經歷從這份履歷拿掉（經歷資料庫不受影響）。 */
+  onRemoveEntry: (section: ResumeSectionKey, index: number) => void;
 }
 
 export function ResumePageCanvas({
@@ -47,8 +46,8 @@ export function ResumePageCanvas({
   onChangeLanguages,
   onChangeBullets,
   onChangeEntryField,
+  onRemoveEntry,
 }: ResumePageCanvasProps) {
-  const labels = getLabels(language);
   const name = pickName(contact, language);
   const parts = contactParts(contact, language);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -116,7 +115,7 @@ export function ResumePageCanvas({
           </button>
         )}
 
-        <SectionHeader id="summary">{labels.summary}</SectionHeader>
+        <SectionHeader id="summary"><SectionTitle language={language} labelKey="summary" editable={editable} /></SectionHeader>
         <EditableParagraph
           pdfKeyValue={pdfKey.summary()}
           value={resume.summary}
@@ -124,7 +123,7 @@ export function ResumePageCanvas({
           onCommit={onChangeSummary}
         />
 
-        <SectionHeader id="experience">{labels.experience}</SectionHeader>
+        <SectionHeader id="experience"><SectionTitle language={language} labelKey="experience" editable={editable} /></SectionHeader>
         {resume.work_experience.map((exp, i) => (
           <ExperienceBlock
             key={i}
@@ -134,12 +133,13 @@ export function ResumePageCanvas({
             editable={editable}
             onChangeBullets={(bullets) => onChangeBullets("work_experience", i, bullets)}
             onChangeField={(field, value) => onChangeEntryField("work_experience", i, field, value)}
+            onRemove={() => onRemoveEntry("work_experience", i)}
           />
         ))}
 
         {resume.leadership.length > 0 && (
           <>
-            <SectionHeader id="leadership">{labels.leadership}</SectionHeader>
+            <SectionHeader id="leadership"><SectionTitle language={language} labelKey="leadership" editable={editable} /></SectionHeader>
             {resume.leadership.map((exp, i) => (
               <ExperienceBlock
                 key={i}
@@ -149,12 +149,13 @@ export function ResumePageCanvas({
                 editable={editable}
                 onChangeBullets={(bullets) => onChangeBullets("leadership", i, bullets)}
                 onChangeField={(field, value) => onChangeEntryField("leadership", i, field, value)}
+                onRemove={() => onRemoveEntry("leadership", i)}
               />
             ))}
           </>
         )}
 
-        <SectionHeader id="education">{labels.education}</SectionHeader>
+        <SectionHeader id="education"><SectionTitle language={language} labelKey="education" editable={editable} /></SectionHeader>
         {resume.education.map((edu, i) => (
           <div key={i} className="resume-block">
             <Row pdfKeyValue={pdfKey.school(i)} left={edu.school} right={edu.location} />
@@ -169,14 +170,14 @@ export function ResumePageCanvas({
           </div>
         ))}
 
-        <SectionHeader id="skills">{labels.skills}</SectionHeader>
+        <SectionHeader id="skills"><SectionTitle language={language} labelKey="skills" editable={editable} /></SectionHeader>
         <div data-pdf-key={pdfKey.skills()}>
-          <span className="resume-skills-label">{labels.computer} </span>
+          <span className="resume-skills-label"><SectionTitle language={language} labelKey="computer" editable={editable} />{" "}</span>
           <EditableSpan value={joinList(resume.skills, language)} editable={editable} onCommit={onChangeSkills} />
         </div>
         {(resume.languages ?? []).length > 0 && (
           <div data-pdf-key={pdfKey.languages()}>
-            <span className="resume-skills-label">{labels.languages} </span>
+            <span className="resume-skills-label"><SectionTitle language={language} labelKey="languages" editable={editable} />{" "}</span>
             <EditableSpan
               value={joinList(resume.languages ?? [], language)}
               editable={editable}
@@ -189,7 +190,7 @@ export function ResumePageCanvas({
   );
 }
 
-function SectionHeader({ id, children }: { id: string; children: string }) {
+function SectionHeader({ id, children }: { id: string; children: React.ReactNode }) {
   return (
     <div className="resume-section-header" data-pdf-key={pdfKey.header(id)}>
       {children}
@@ -226,6 +227,7 @@ function ExperienceBlock({
   editable,
   onChangeBullets,
   onChangeField,
+  onRemove,
 }: {
   section: ResumeSectionKey;
   index: number;
@@ -233,9 +235,22 @@ function ExperienceBlock({
   editable: boolean;
   onChangeBullets: (bullets: string[]) => void;
   onChangeField: (field: EntryField, value: string) => void;
+  onRemove: () => void;
 }) {
   return (
-    <div className="resume-block">
+    <div className="resume-block resume-entry">
+      {/* 「刪除」不是履歷內容：放在紙的右邊界外，滑到這段才出現，不影響排版跟 PDF。 */}
+      {editable && (
+        <button
+          type="button"
+          className="resume-entry-remove"
+          onClick={onRemove}
+          title="從這份履歷刪除這段經歷（經歷資料庫不受影響，可以按「上一步」退回）"
+          aria-label={`從這份履歷刪除「${entry.org}」這段經歷`}
+        >
+          刪除
+        </button>
+      )}
       <div className="resume-row" data-pdf-key={pdfKey.org(section, index)}>
         <EditableSpan className="resume-row-left" value={entry.org} editable={editable} onCommit={(v) => onChangeField("org", v)} />
         {(entry.location || editable) && (
@@ -281,6 +296,8 @@ function EditableParagraph({
     <div
       data-pdf-key={pdfKeyValue}
       contentEditable={editable}
+      // 鍵盤 Cmd/Ctrl + Z 用：跟存好的內容一樣才算「沒在打字」（見 app/useUndoShortcuts.ts）。
+      data-committed={value}
       suppressContentEditableWarning
       onBlur={(e) => onCommit(e.currentTarget.textContent ?? "")}
       className={`resume-editable ${editable ? "resume-editable--editable" : ""}`}
@@ -304,6 +321,8 @@ function EditableSpan({
   return (
     <span
       contentEditable={editable}
+      // 鍵盤 Cmd/Ctrl + Z 用：跟存好的內容一樣才算「沒在打字」（見 app/useUndoShortcuts.ts）。
+      data-committed={value}
       suppressContentEditableWarning
       onBlur={(e) => onCommit(e.currentTarget.textContent ?? "")}
       className={`resume-editable ${editable ? "resume-editable--editable" : ""} ${className}`}
@@ -327,45 +346,44 @@ function EditableBulletList({
   const refs = useRef<Array<HTMLDivElement | null>>([]);
   // 用 {index, token} 而不是單純的 index：token 每次都遞增成新物件，確保就算兩次都要 focus
   // 同一個 index，effect 依賴也一定會變化而重新觸發，不用在 effect 裡把狀態設回 null。
-  const [focusRequest, setFocusRequest] = useState<{ index: number; token: number } | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{ index: number; atStart: boolean; token: number } | null>(null);
   const tokenRef = useRef(0);
 
   useEffect(() => {
     if (focusRequest === null) return;
     const el = refs.current[focusRequest.index];
-    if (el) {
-      el.focus();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel?.removeAllRanges();
-      sel?.addRange(range);
-    }
+    if (el) placeCaret(el, focusRequest.atStart);
   }, [focusRequest]);
 
-  function requestFocus(index: number) {
+  function requestFocus(index: number, atStart = false) {
     tokenRef.current += 1;
-    setFocusRequest({ index, token: tokenRef.current });
+    setFocusRequest({ index, atStart, token: tokenRef.current });
   }
 
   function commitBulletText(index: number, text: string) {
     const next = [...bullets];
-    next[index] = text;
+    next[index] = cleanBulletText(text);
     onChange(next);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>, index: number) {
-    if (e.key === "Enter") {
+    // 中文輸入法選字時按的 Enter 是確認選字，不是換點。
+    if (isComposing(e)) return;
+    if (e.key === "Enter" && e.shiftKey) {
+      // Shift + Enter：同一點裡換行，不新增一點。
       e.preventDefault();
-      const text = e.currentTarget.textContent ?? "";
+      insertLineBreak(e.currentTarget);
+    } else if (e.key === "Enter") {
+      // Enter：游標後面的文字移到新的一點（游標在最後就是新增空白的一點）。
+      e.preventDefault();
+      const [before, after] = splitAtCaret(e.currentTarget);
       const next = [...bullets];
-      next[index] = text;
-      next.splice(index + 1, 0, "");
-      requestFocus(index + 1);
+      next[index] = cleanBulletText(before);
+      next.splice(index + 1, 0, cleanBulletText(after));
+      requestFocus(index + 1, true);
       onChange(next);
     } else if (e.key === "Backspace") {
-      const text = e.currentTarget.textContent ?? "";
+      const text = cleanBulletText(e.currentTarget.textContent ?? "");
       if (text === "" && bullets.length > 1) {
         e.preventDefault();
         const next = bullets.filter((_, i) => i !== index);
@@ -385,10 +403,12 @@ function EditableBulletList({
               refs.current[i] = el;
             }}
             contentEditable={editable}
+            // 鍵盤 Cmd/Ctrl + Z 用：跟存好的內容一樣才算「沒在打字」（見 app/useUndoShortcuts.ts）。
+            data-committed={b}
             suppressContentEditableWarning
             onBlur={(e) => commitBulletText(i, e.currentTarget.textContent ?? "")}
             onKeyDown={(e) => handleKeyDown(e, i)}
-            className={`resume-editable ${editable ? "resume-editable--editable" : ""}`}
+            className={`resume-editable resume-bullet-text ${editable ? "resume-editable--editable" : ""}`}
           >
             {b}
           </div>
@@ -397,3 +417,4 @@ function EditableBulletList({
     </div>
   );
 }
+

@@ -42,6 +42,13 @@ export function measureWidth(text: string, fontSize: number, bold = false): numb
 }
 
 export function wrapCjkText(text: string, fontSize: number, maxWidthPt: number): string {
+  // 使用者自己換的行（bullet 裡按 Shift + Enter）保留，每一行各自折行。
+  if (text.includes("\n")) {
+    return text
+      .split("\n")
+      .map((line) => wrapCjkText(line, fontSize, maxWidthPt))
+      .join("\n");
+  }
   const tokens = text.match(CJK_OR_WHITESPACE_TOKEN) ?? [text];
   const lines: string[] = [];
   let current = "";

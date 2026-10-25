@@ -56,8 +56,8 @@ function roleLine(role: string, period: string): Paragraph {
   return new Paragraph({
     tabStops: [{ type: TabStopType.RIGHT, position: RIGHT_TAB_POS }],
     children: [
-      new TextRun({ text: role, font: FONT }),
-      new TextRun({ text: `\t${period}`, font: FONT }),
+      new TextRun({ text: role, bold: true, font: FONT }),
+      new TextRun({ text: `\t${period}`, bold: true, font: FONT }),
     ],
   });
 }
@@ -67,13 +67,14 @@ function bulletParagraph(text: string): Paragraph {
     bullet: { level: 0 },
     // 縮排跟 PDF 一樣（bullet 往內 12pt、符號欄 10pt），Word 預設的清單縮排比較寬，一行放的字會變少。
     indent: { left: twip(22), hanging: twip(10) },
-    children: [new TextRun({ text, font: FONT })],
+    // 使用者自己換的行（Shift + Enter）在 Word 裡用換行符號，不另起一點。
+    children: text.split("\n").map((line, i) => new TextRun({ text: line, font: FONT, break: i > 0 ? 1 : undefined })),
   });
 }
 
 export async function buildResumeDocx(input: ResumeDocInput): Promise<Buffer> {
   const { contact, resume, language } = input;
-  const labels = getLabels(language);
+  const labels = getLabels(language, input.labels);
   const t = resolveMetrics(language, resume.layout);
   const name = pickName(contact, language);
   // 聯絡資訊：標籤粗體、內容一般字重，用「 / 」隔開。分行照 PDF 同一套算法（contactLines.ts），

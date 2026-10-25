@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { readCustomSectionLabels } from "@/lib/resumes/sectionLabels";
 import { createClient } from "@/lib/supabase/server";
 import { buildResumeDocx } from "@/lib/documents/buildResumeDocx";
 import { buildResumePdf } from "@/lib/documents/buildResumePdf";
@@ -50,7 +51,8 @@ export async function GET(
 
   const contact = readContact(profile?.data);
 
-  const input = { contact, resume: resumeSnapshot[lang], language: lang };
+  const labels = readCustomSectionLabels(profile?.data)[lang === "zh" ? "zh" : "en"];
+  const input = { contact, resume: resumeSnapshot[lang], language: lang, labels };
   const buffer = format === "docx" ? await buildResumeDocx(input) : await buildResumePdf(input);
 
   const fileName = resumeFileName({

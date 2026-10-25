@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { readCustomSectionLabels } from "@/lib/resumes/sectionLabels";
 import { createClient } from "@/lib/supabase/server";
 import { AppNav, getDisplayName } from "../AppNav";
 import { loadExperienceEntries } from "./loadEntries";
@@ -34,10 +35,13 @@ export default async function ExperiencePage() {
         </div>
 
         <ExperiencePageClient
+          userId={user.id}
           entries={entries}
           background={readBackground(profile?.data)}
           initialMutedRules={readRuleTags(profile?.data?.muted_rules)}
-          initialLayouts={readLayoutDefaults(profile?.data)} />
+          initialLayouts={readLayoutDefaults(profile?.data)}
+          initialSectionLabels={readCustomSectionLabels(profile?.data)}
+        />
       </div>
     </div>
   );

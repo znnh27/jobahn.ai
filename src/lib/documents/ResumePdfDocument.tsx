@@ -147,8 +147,8 @@ function ExperienceBlocks({
             {exp.location && <Text style={[styles.bold, styles.rowRight]}>{exp.location}</Text>}
           </Keyed>
           <Keyed k={pdfKey.role(section, i)} style={styles.row}>
-            <Text style={styles.rowLeft}>{exp.role}</Text>
-            <Text style={styles.rowRight}>{exp.period}</Text>
+            <Text style={[styles.bold, styles.rowLeft]}>{exp.role}</Text>
+            <Text style={[styles.bold, styles.rowRight]}>{exp.period}</Text>
           </Keyed>
           {exp.bullets.map((b, j) => (
             <Keyed key={j} k={pdfKey.bullet(section, i, j)} style={styles.bullet} splittable>
@@ -166,10 +166,11 @@ export function ResumePdfDocument({
   contact,
   resume,
   language,
+  labels: customLabels,
   onRender,
 }: ResumeDocInput & { onRender?: DocumentProps["onRender"] }) {
   registerFontOnce();
-  const labels = getLabels(language);
+  const labels = getLabels(language, customLabels);
   const metrics = resolveMetrics(language, resume.layout);
   const styles = createStyles(metrics);
   // 標題後面至少要放得下下一段的上方間距加兩行，標題才留在這一頁。
