@@ -3357,6 +3357,42 @@ button.step-bar-link:focus-visible {
   box-shadow: 0 0 0 2px var(--chrome-secondary-bg);
 }
 
+/* 「補充進求職信」新加的字標綠底（LetterEditor.tsx）：textarea 後面墊一層排版一模一樣的文字，
+   只有新加的字有底色、文字本身透明，看起來像 textarea 裡的字底下有螢光筆。兩層的字型、字級、行高、
+   內距、換行方式要完全一樣，綠底才會對準。顏色跟經歷資料庫剛改完的那一條（.exp-variant--updated）一樣。 */
+.letter-editor {
+  position: relative;
+}
+.letter-editor .letter-page-text {
+  padding: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+.letter-editor textarea.letter-page-text {
+  position: relative;
+}
+.letter-highlight {
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  pointer-events: none;
+}
+.letter-highlight mark {
+  color: transparent;
+  background-color: #dcfce7;
+  border-radius: 2px;
+}
+
+/* 找不到事實、沒補進信裡的條件。 */
+.letter-notfound-title {
+  margin: 0;
+}
+.letter-notfound-list {
+  margin: var(--space-1) 0;
+  padding-left: 1.25em;
+  list-style: disc;
+}
+
 /* 還沒生成、正在生成時，信紙中間放說明或進度。 */
 .letter-page--empty {
   display: flex;
@@ -3483,10 +3519,9 @@ button.step-bar-link:focus-visible {
 }
 
 /* JD 適配度：分數大一點，下面用小字說明怎麼算的。 */
+/* 下面接的 JD 條件區塊（.ats-block）自己有頂線，這裡不再畫底線，不然會變兩條。 */
 .jd-fit {
   margin-top: var(--space-2);
-  padding-bottom: var(--space-3);
-  border-bottom: 1px solid var(--chrome-border);
 }
 .jd-fit-score {
   display: flex;
@@ -4103,7 +4138,8 @@ details[open] > summary > .disclosure-arrow {
   flex-shrink: 0;
   margin-top: 2px;
 }
-.ats-check--ok .ats-check-icon {
+.ats-check--ok .ats-check-icon,
+.ats-check--letter .ats-check-icon {
   color: var(--color-success-text);
 }
 .ats-check--gap .ats-check-icon {

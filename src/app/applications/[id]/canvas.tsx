@@ -701,8 +701,10 @@ export function Canvas({
               </>
             ) : (
               <>
-                <button type="button" onClick={() => setConfirmRegenerate(true)} disabled={isPending} className="btn btn-secondary">
-                  重新產生履歷
+                {/* 儲存固定在最左邊、重新產生跟重新檢查評分排在一起、主要按鈕「定案」在最右邊（2026-10-25 Z 要求，跟求職信頁一樣）。 */}
+                <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
+                  {busy === "save" && <Spinner />}
+                  儲存
                 </button>
                 <button
                   type="button"
@@ -712,9 +714,8 @@ export function Canvas({
                 >
                   跟 AI 聊
                 </button>
-                <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
-                  {busy === "save" && <Spinner />}
-                  儲存
+                <button type="button" onClick={() => setConfirmRegenerate(true)} disabled={isPending} className="btn btn-secondary">
+                  重新產生履歷
                 </button>
                 <button onClick={handleRescore} disabled={isPending} className="btn btn-secondary">
                   重新檢查評分

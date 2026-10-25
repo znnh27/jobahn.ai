@@ -1,6 +1,7 @@
 "use client";
 
 import { LangSwitch } from "@/app/LangSwitch";
+import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -8,6 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   generateCoverLetterAction,
   recheckWithCoverLetterAction,
+  addToCoverLetterAction,
   saveCoverLetterDraftAction,
   finalizeCoverLetterAction,
   reopenCoverLetterAction,
@@ -18,6 +20,7 @@ import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { JdFitScore } from "../JdFitScore";
 import { CoverLetterChatPanel } from "./CoverLetterChatPanel";
 import { letterLength, letterLengthUnit } from "@/lib/text/letterLength";
+import { LetterEditor } from "./LetterEditor";
 import {
   CoverLetterOptionsFields,
   choiceInvalid,
@@ -27,7 +30,7 @@ import {
 } from "./CoverLetterOptions";
 
 type ChecklistMap = Record<string, GeneratedResume["jd_match_checklist"]>;
-type Busy = "generate" | "recheck" | "save" | "finalize" | "reopen";
+type Busy = "generate" | "recheck" | "add" | "save" | "finalize" | "reopen";
 
 interface CoverLetterProps {
   applicationId: string;
@@ -99,12 +102,21 @@ export function CoverLetter({
   const [companyWarning, setCompanyWarning] = useState<string | null>(null);
   // 這次生成參考了哪些公司網頁（列出來讓使用者自己確認查的是不是對的公司）。
   const [researchSources, setResearchSources] = useState<string[]>([]);
-  // 「跟 AI 聊」面板：浮在右下角，邊聊邊看信。AI 改完記下改之前的那一版，可以按「復原上一版」退回；
+  // 「跟 AI 聊」面板：浮在右下角，邊聊邊看信。
+  // AI 改完、或重新產生之後，記下改之前的整份信（跟當時的比對結果），可以按「復原上一版」退回；
   // 之後自己動手改了信，就不再提供復原（不然會連手動改的一起蓋掉）。
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatUndo, setChatUndo] = useState<{ lang: string; text: string } | null>(null);
-  const generateProgress = useEstimatedProgress(busy === "generate", 30000 * langCount + (researching ? 15000 : 0));
+  const [undo, setUndo] = useState<{ draft: Record<string, string>; checklist: ChecklistMap } | null>(null);
+  // 「重新產生」視窗：跟第一次產生一樣選語言、字數上限、要不要研究公司。
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  // 「補充進求職信」：記下第一次補充前的信（每個語言），跟現在的信比對，新加的字標綠底；按「儲存」就清掉。
+  const [addedBase, setAddedBase] = useState<Record<string, string>>({});
+  // 找不到事實、沒有補進信裡的條件。
+  const [notFound, setNotFound] = useState<{ item: string; reason: string }[]>([]);
+  // 生成完會接著比對職缺符合度，多抓 20 秒。
+  const generateProgress = useEstimatedProgress(busy === "generate", 30000 * langCount + 20000 + (researching ? 15000 : 0));
   const recheckProgress = useEstimatedProgress(busy === "recheck", 20000);
+  const addProgress = useEstimatedProgress(busy === "add", 25000);
 
   async function run(kind: Busy, fn: () => Promise<void>) {
     setBusy(kind);
@@ -118,6 +130,8 @@ export function CoverLetter({
   }
 
   function handleGenerate(options: AutoGenerate) {
+    // 重新產生時記下舊的那封，產生完可以按「復原上一版」拿回來。
+    const previous = draft ? { draft, checklist: letterChecklist } : null;
     setMessage(null);
     setResearching(options.research);
     void run("generate", async () => {
@@ -130,35 +144,47 @@ export function CoverLetter({
         return;
       }
       setDraft(result.data.cover_letter_draft);
-      setChatUndo(null);
+      setUndo(previous);
+      setAddedBase({});
+      setNotFound([]);
       // 信換了，上一封信的比對結果不適用。
       setLetterChecklist({});
       setActiveLang(options.languages[0]);
       const { researchSources: sources, companyMismatch } = result.data;
       setCompanyWarning(companyMismatch);
       setResearchSources(sources ?? []);
-      setMessage(
+      const done =
         sources === null
           ? "求職信生成完成"
           : sources.length > 0
             ? `求職信生成完成（參考了 ${sources.length} 個公司相關網頁）`
-            : "求職信生成完成（查不到這間公司的具體資料，應徵動機改用職位內容來寫）",
-      );
+            : "求職信生成完成（查不到這間公司的具體資料，應徵動機改用職位內容來寫）";
+      // 生成完直接比對一次，右欄才看得到信補上了哪些條件（以前要自己按「重新比對」，沒按就只顯示履歷的結果）。
+      // 之後手動改信、跟 AI 聊改過，還是按「重新比對」更新。
+      const recheck = await recheckWithCoverLetterAction(applicationId, result.data.cover_letter_draft);
+      if (recheck.error || !recheck.data) {
+        setMessage(`${done}，但比對職缺符合度失敗：${recheck.error ?? "請按「重新比對」再試一次"}`);
+        return;
+      }
+      setLetterChecklist(recheck.data.cover_letter_checklist);
+      setMessage(previous ? `${done}，不滿意可以按「復原上一版」` : done);
     });
   }
 
   // 「跟 AI 聊」改好的信換進草稿，記下改之前的那一版。改完要按「儲存」才會存。
   function applyChatRevision(lang: string, next: string) {
     if (!draft) return;
-    setChatUndo({ lang, text: draft[lang] ?? "" });
+    setUndo({ draft, checklist: letterChecklist });
     setDraft({ ...draft, [lang]: next });
     setMessage("AI 改好了，記得按「儲存」；不滿意可以按「復原上一版」");
   }
 
-  function undoChatRevision() {
-    if (!draft || !chatUndo) return;
-    setDraft({ ...draft, [chatUndo.lang]: chatUndo.text });
-    setChatUndo(null);
+  function undoRevision() {
+    if (!undo) return;
+    setDraft(undo.draft);
+    setLetterChecklist(undo.checklist);
+    if (!(activeLang in undo.draft)) setActiveLang(Object.keys(undo.draft)[0]);
+    setUndo(null);
     setMessage("已復原成 AI 改之前的版本");
   }
 
@@ -182,7 +208,44 @@ export function CoverLetter({
         return;
       }
       setLetterChecklist(result.data.cover_letter_checklist);
-      setMessage("已重新比對職缺符合度");
+      setMessage("已重新比對");
+    });
+  }
+
+  // 「補充進求職信」：AI 只用履歷、經歷資料庫有的事實補；補上的條件右欄直接標成求職信補上，找不到的列在信上方。
+  function handleAddToLetter(items: GeneratedResume["jd_match_checklist"]) {
+    if (!draft) return;
+    const lang = activeLang;
+    const before = draft[lang] ?? "";
+    setMessage(null);
+    setNotFound([]);
+    void run("add", async () => {
+      const result = await addToCoverLetterAction(
+        applicationId,
+        lang,
+        before,
+        items.map((i) => ({ item: i.item, kind: i.kind ?? "requirement", partial: !!i.partial, gap: i.partial ? (i.gap ?? null) : null })),
+      );
+      if (result.error || !result.letter) {
+        setMessage(`錯誤：${result.error ?? "補充失敗，請再試一次"}`);
+        return;
+      }
+      const added = new Set(result.added ?? []);
+      setNotFound(result.notFound ?? []);
+      if (added.size === 0) {
+        setMessage("沒有補進任何條件");
+        return;
+      }
+      setUndo({ draft, checklist: letterChecklist });
+      setDraft({ ...draft, [lang]: result.letter });
+      setAddedBase((prev) => (lang in prev ? prev : { ...prev, [lang]: before }));
+      setLetterChecklist({
+        ...letterChecklist,
+        [lang]: checklistItems.map((i) =>
+          added.has(i.item.trim()) && !i.covered ? { ...i, covered: true, source: "cover_letter" as const } : i,
+        ),
+      });
+      setMessage(`已補進 ${added.size} 項，新加的字標成綠底，記得按「儲存」`);
     });
   }
 
@@ -192,6 +255,8 @@ export function CoverLetter({
     void run("save", async () => {
       const result = await saveCoverLetterDraftAction(applicationId, draft);
       setMessage(result.error ? `錯誤：${result.error}` : "已儲存");
+      // 存了就代表確認了新加的內容，綠底拿掉。
+      if (!result.error) setAddedBase({});
     });
   }
 
@@ -205,6 +270,8 @@ export function CoverLetter({
         return;
       }
       setCompleted(true);
+      setAddedBase({});
+      setNotFound([]);
       setMessage("已定案");
       // 讓標題列的步驟列更新到「完成」。
       router.refresh();
@@ -267,8 +334,13 @@ export function CoverLetter({
             <div className="canvas-bar-actions">
               {!completed ? (
                 <>
-                  {chatUndo?.lang === activeLang && (
-                    <button type="button" onClick={undoChatRevision} disabled={isPending} className="btn btn-secondary">
+                  {/* 順序跟履歷頁一樣：儲存在最左邊、重新產生跟重新比對排在一起、主要按鈕「定案」在最右邊（2026-10-25 Z 要求）。 */}
+                  <button type="button" onClick={handleSave} disabled={isPending} className="btn btn-secondary">
+                    {busy === "save" && <Spinner />}
+                    儲存
+                  </button>
+                  {undo && (
+                    <button type="button" onClick={undoRevision} disabled={isPending} className="btn btn-secondary">
                       復原上一版
                     </button>
                   )}
@@ -280,12 +352,16 @@ export function CoverLetter({
                   >
                     跟 AI 聊
                   </button>
-                  <button type="button" onClick={handleSave} disabled={isPending} className="btn btn-secondary">
-                    {busy === "save" && <Spinner />}
-                    儲存
+                  <button
+                    type="button"
+                    onClick={() => setConfirmRegenerate(true)}
+                    disabled={isPending}
+                    className="btn btn-secondary"
+                  >
+                    重新產生
                   </button>
                   <button type="button" onClick={handleRecheck} disabled={isPending} className="btn btn-secondary">
-                    重新比對職缺符合度
+                    重新比對
                   </button>
                   <button type="button" onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
                     {busy === "finalize" && <Spinner />}
@@ -331,20 +407,36 @@ export function CoverLetter({
         {recheckProgress !== null && (
           <ProgressBar value={recheckProgress} label="用履歷＋求職信重新比對 JD…" />
         )}
+        {addProgress !== null && (
+          <ProgressBar value={addProgress} label="從履歷跟經歷資料庫找事實，補進求職信…" />
+        )}
+        {notFound.length > 0 && (
+          <div className="alert alert-warning" role="status">
+            <p className="letter-notfound-title">這幾項在履歷跟經歷資料庫找不到事實，沒有補進信裡：</p>
+            <ul className="letter-notfound-list">
+              {notFound.map((n) => (
+                <li key={n.item}>
+                  <strong>{n.item}</strong>
+                  {n.reason && `：${n.reason}`}
+                </li>
+              ))}
+            </ul>
+            <p className="letter-notfound-title">有相關經驗的話，可以用「跟 AI 聊」告訴它。</p>
+          </div>
+        )}
 
         {draft ? (
           <>
             <div className="letter-page">
-              <textarea
-                aria-label={`${LANG_LABEL[activeLang] ?? activeLang}求職信`}
+              <LetterEditor
+                label={`${LANG_LABEL[activeLang] ?? activeLang}求職信`}
                 value={letterText}
+                base={completed ? null : (addedBase[activeLang] ?? null)}
                 readOnly={completed}
-                onChange={(e) => {
-                  const text = e.target.value;
+                onChange={(text) => {
                   setDraft((prev) => (prev ? { ...prev, [activeLang]: text } : prev));
-                  setChatUndo(null);
+                  setUndo(null);
                 }}
-                className="letter-page-text"
               />
             </div>
           </>
@@ -389,14 +481,41 @@ export function CoverLetter({
               <ul>
                 <li>履歷＋求職信合起來涵蓋的 JD 條件比例</li>
                 <li>軟實力、工作條件也算，這兩類靠求職信補</li>
-                <li>求職信補上的，按「重新比對職缺符合度」才會算進來</li>
+                <li>求職信補上的用虛線打勾；生成時會自動比對，之後改了信要按「重新比對」</li>
                 <li>信沒改，比對結果就不變</li>
               </ul>
             }
           />
-          <JdChecklist items={checklistItems} isCovered={(i) => i.covered} scope="letter" showSource language={checklistLang} />
+          <JdChecklist
+            items={checklistItems}
+            isCovered={(i) => i.covered}
+            scope="letter"
+            language={checklistLang}
+            onAddToLetter={completed || isPending || !draft ? undefined : handleAddToLetter}
+          />
         </div>
       </div>
+
+      {confirmRegenerate && (
+        <ConfirmDialog
+          title="重新產生求職信？"
+          message="AI 會依履歷、經歷資料庫跟 JD 從頭寫一封新的，畫面上現在的信會被換掉，包括你手動改過的地方。產生完不滿意，可以按「復原上一版」拿回現在這一封。"
+          confirmLabel="重新產生"
+          tone="primary"
+          confirmDisabled={choiceInvalid(choice)}
+          onConfirm={() => {
+            setConfirmRegenerate(false);
+            handleGenerate({
+              languages: choice.languages,
+              wordLimits: choiceWordLimits(choice),
+              research: choice.research && researchAvailable,
+            });
+          }}
+          onCancel={() => setConfirmRegenerate(false)}
+        >
+          <CoverLetterOptionsFields value={choice} onChange={setChoice} researchAvailable={researchAvailable} />
+        </ConfirmDialog>
+      )}
 
       {chatOpen && !completed && draft && (
         <CoverLetterChatPanel

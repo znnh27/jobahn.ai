@@ -74,11 +74,12 @@ export function AlertIcon({ size = 16 }: { size?: number }) {
 
 // JD 條件的狀態 icon 是同一組：同樣粗細的圓框，只換圓圈裡的符號（勾、橫線、驚嘆號、問號）。
 
-/** 圓圈裡打勾：JD 條件已寫到。 */
-export function CheckCircleIcon({ size = 16 }: { size?: number }) {
+/** 圓圈裡打勾：JD 條件已寫到。dashed＝虛線圓框，求職信補上的（證據沒有履歷本身硬）。 */
+export function CheckCircleIcon({ size = 16, dashed = false }: { size?: number; dashed?: boolean }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
+      {/* 圓周長約 56.5，切成 8 段；虛線用平頭，圓頭會把空隙補滿。 */}
+      <circle cx="12" cy="12" r="9" {...(dashed ? { strokeDasharray: "4 3.07", strokeLinecap: "butt" as const } : {})} />
       <path d="M8 12.25l2.75 2.75L16 9.5" />
     </svg>
   );

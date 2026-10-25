@@ -17,7 +17,8 @@ type Resume = GeneratedResume["resume"];
 const COVER_LETTER_RULES = `求職信結構（四段式，篇幅半頁到一頁）：
 1. 開頭自我介紹：姓名、目前背景一句話帶過、從哪裡得知這個職缺（資料裡沒有就略過，不要編）、簡短的應徵動機（1 到 2 句）。
 2. 應徵動機：為什麼是「這間公司」，不是泛用的「為什麼是這個產業」。有提供公司研究素材時，從裡面挑 1 到 2 個具體、只有這間公司才有的特色（特有的用詞、制度、做法，例如「扁平組織讓新人也能發言」「學徒制文化」「橫跨上百個城市的據點網絡」；不是「創新」「以客戶為中心」這種每間公司都會講的空話），跟使用者的實際經歷或做事風格連結成一句自然的話，不要生硬地並列「公司特色」加「我的特質」。沒有素材、或素材裡找不到夠具體的內容時，改寫以這個職位工作內容為主的動機，絕對不能編造公司特色。
-3. 個人亮點：2 到 3 個具體案例，最好對應履歷裡已經寫的內容，用不同的語氣重新敘事（不是逐字複製履歷 bullet），並明確扣回 JD 的資格要求。逐條核對 JD 符合度清單，重要的資格都要在信裡找得到呼應；履歷沒寫到的條件，只有資料裡有真實經歷可以支撐才補。
+3. 個人亮點：2 到 3 個具體案例，最好對應履歷裡已經寫的內容，用不同的語氣重新敘事（不是逐字複製履歷 bullet），並明確扣回 JD 的資格要求。逐條核對 JD 符合度清單，重要的資格都要在信裡找得到呼應。
+   履歷沒寫到、或部分符合的條件，是求職信最該補的地方：到經歷資料庫找有沒有對應的事實（履歷只有一頁，很多經歷沒放進去），有就寫進來；部分符合的照 gap 寫的「缺：○○」優先補缺的那幾件。經歷資料庫也找不到的，才照誠實原則 3 處理。
 4. 結尾：感謝對方撥空閱讀、提醒履歷已附上、期待後續機會。聯絡方式由系統接在署名下方，信裡不用再寫。
 段落之間不要重複：同一個特質、同一組數字在整封信只出現一次。
 
@@ -37,9 +38,9 @@ const COVER_LETTER_RULES = `求職信結構（四段式，篇幅半頁到一頁�
 6. 非技術職缺不用過度技術化的詞，換成一般人看得懂的說法。
 7. 同一個資訊（例如某段經歷的公司名稱、某個特質）在同一段裡不要出現兩次。`;
 
-const SYSTEM_PROMPT = `你是求職信寫作助手。使用者會給你：JD、已經定案的履歷內容、JD 符合度清單（標記履歷還缺少哪些條件），有時還有剛上網查到的公司研究素材。
+const SYSTEM_PROMPT = `你是求職信寫作助手。使用者會給你：JD、已經定案的履歷內容、使用者的經歷資料庫（履歷沒放進去的經歷跟成就也在裡面）、JD 符合度清單（標記履歷還缺少哪些條件），有時還有剛上網查到的公司研究素材。
 
-你的任務：寫一封求職信，語氣自然、針對這個職缺客製化，適度用已經定案履歷裡沒放進去、但 JD 有列出的條件去補強說服力。
+你的任務：寫一封求職信，語氣自然、針對這個職缺客製化，用經歷資料庫裡、履歷沒放進去的事實，補上 JD 有列出但履歷沒寫到的條件跟特質。
 
 ${COVER_LETTER_RULES}
 
@@ -67,7 +68,8 @@ function traitSection(items: GeneratedResume["jd_match_checklist"]): string | nu
   const traits = items.filter((i) => i.kind === "trait").map((i) => `- ${i.item}`);
   if (traits.length === 0) return null;
   return `===== 這份 JD 要的特質（軟實力，履歷證明不了，交給求職信）=====
-挑 1 到 2 個跟使用者資料最對得上的特質，用履歷裡的具體事例自然帶出來（例如「主動」就講他自己發起的改善），不要直接寫「我很主動積極」這種形容詞。資料裡看不出來的特質不要硬寫，也不用每個都寫到。
+履歷或經歷資料庫裡找得到具體事例的特質都要寫到，用事例自然帶出來（例如「主動」就講他自己發起的改善），不要直接寫「我很主動積極」這種形容詞。
+可以併進第三段的案例裡，一個案例帶出一兩個特質，不用每個特質各寫一段；有字數上限時，優先寫 JD 寫在前面、事例最有力的。資料裡看不出來的特質不要硬寫。
 ${traits.join("\n")}`;
 }
 
@@ -147,6 +149,17 @@ export async function generateCoverLetterForApplication(
     .maybeSingle();
   const contact = readContact(profile?.data);
 
+  // 經歷資料庫：履歷只有一頁，很多經歷沒放進去，求職信要補缺口跟軟實力時從這裡找事實。
+  // 這個語言還沒有資料時，用另一個語言的。
+  const { data: entryRows } = await supabase
+    .from("experience_entries")
+    .select("language, entry_type, org_name, location, role_variants, period_variants, achievements")
+    .eq("user_id", userId);
+  const allEntries = (entryRows ?? []) as Array<{ language: string } & Record<string, unknown>>;
+  const entryLanguage = (lang: string) =>
+    allEntries.some((e) => e.language === lang) ? lang : (allEntries[0]?.language ?? lang);
+  const entriesFor = (lang: string) => allEntries.filter((e) => e.language === entryLanguage(lang));
+
   // JD 裡找不到填的公司名稱（真實發生過：公司名稱填 A 公司，JD 卻貼成 B 公司的職缺），公司研究可能查到別間公司，
   // 這種情況一律不研究，應徵動機只照 JD 寫，並提醒使用者確認公司名稱。
   // JD 沒寫公司名稱很常見（104 的內文常常只有工作內容），不代表填錯：建立應徵時已經提醒過使用者，
@@ -197,7 +210,9 @@ export async function generateCoverLetterForApplication(
       application.job_description,
       `===== 已定案的履歷內容 =====`,
       JSON.stringify(resume, null, 2),
-      `===== JD 符合度清單（逐條核對；尚未涵蓋的部分可以考慮在求職信補強）=====`,
+      `===== 使用者經歷資料庫（${entryLanguage(lang)}；履歷沒放進去的事實可以從這裡找，只能用這裡有的事實）=====`,
+      JSON.stringify(entriesFor(lang), null, 2),
+      `===== JD 符合度清單（逐條核對；尚未涵蓋、部分符合的是求職信要補的地方）=====`,
       JSON.stringify(
         checklistForResume
           .filter((i) => (i.kind ?? "requirement") === "requirement")
@@ -205,6 +220,7 @@ export async function generateCoverLetterForApplication(
             item: i.item,
             importance: i.importance ?? null,
             covered: coveredByResume(i),
+            partial: !coveredByResume(i) && !!i.partial,
             gap: i.gap ?? null,
           })),
         null,
@@ -258,6 +274,8 @@ export async function generateCoverLetterForApplication(
 const RECHECK_SYSTEM_PROMPT = `你是求職信比對助手。使用者會給你 JD、幾項「履歷沒寫到的 JD 條件」、跟一封求職信。
 
 你的任務：逐項判斷這封求職信有沒有補上這項條件。判斷要穩定：同一封信每次判斷結果都要一樣，只看信裡有沒有「明確、具體」對應到這項的內容。
+- partial 是 true 的項目，履歷已經涵蓋一部分，gap 寫了還缺什麼：求職信只要具體補上 gap 裡缺的那幾件就算 covered，不用把履歷已經有的部分再寫一次。
+- kind 是 "trait" 的項目（軟實力）：信裡有用具體的事例或行為帶出這個特質才算，只寫形容詞（例如「我積極主動」）不算。
 
 ${COVERAGE_RULES}
 
@@ -311,7 +329,11 @@ export async function recheckJdMatchWithCoverLetter(
         `===== JD =====`,
         application.job_description,
         `===== 履歷沒寫到的 JD 條件 =====`,
-        JSON.stringify(missing.map((i) => i.item), null, 2),
+        JSON.stringify(
+          missing.map((i) => ({ item: i.item, kind: i.kind ?? "requirement", partial: !!i.partial, gap: i.partial ? i.gap : null })),
+          null,
+          2,
+        ),
         `===== 求職信內容 =====`,
         coverLetter,
       ].join("\n\n");
@@ -390,10 +412,7 @@ export async function reviseCoverLetterWithChat(params: {
   if (!application) throw new Error("找不到這筆應徵紀錄");
 
   const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", userId).maybeSingle();
-  const contact = readContact(profile?.data);
-  const signature = [pickName(contact, language), buildContactLine(contact, language)].filter(Boolean).join("\n");
-  const at = signature ? letter.lastIndexOf(signature) : -1;
-  const body = at >= 0 ? `${letter.slice(0, at)}${SIGNATURE_MARK}${letter.slice(at + signature.length)}` : letter;
+  const { body, restore } = maskSignature(letter, readContact(profile?.data), language);
 
   const snapshot: Record<string, Resume> = application.resume_snapshot ?? {};
   const resumeLang = snapshot[language] ? language : Object.keys(snapshot)[0];
@@ -432,7 +451,116 @@ export async function reviseCoverLetterWithChat(params: {
   let revised = (parsed.letter ?? "").trim();
   if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
   if (language === "zh") revised = toFullWidthPunctuation(toTraditional(revised));
-  // 原本的信找不到署名（使用者自己改掉了）就不硬加。
-  if (at >= 0) revised = placeSignature(revised, signature);
-  return { reply: toTraditional(parsed.reply ?? "改好了。"), letter: revised };
+  return { reply: toTraditional(parsed.reply ?? "改好了。"), letter: restore(revised) };
+}
+
+/**
+ * 署名（名字＋聯絡方式）是程式放的：給 AI 之前換回 {{SIGNATURE}} 記號，改完再放回去，AI 不會改到聯絡方式。
+ * 原本的信找不到署名（使用者自己改掉了）就不硬加。
+ */
+function maskSignature(letter: string, contact: ReturnType<typeof readContact>, language: string) {
+  const signature = [pickName(contact, language), buildContactLine(contact, language)].filter(Boolean).join("\n");
+  const at = signature ? letter.lastIndexOf(signature) : -1;
+  const body = at >= 0 ? `${letter.slice(0, at)}${SIGNATURE_MARK}${letter.slice(at + signature.length)}` : letter;
+  return { body, restore: (text: string) => (at >= 0 ? placeSignature(text, signature) : text) };
+}
+
+const ADD_SYSTEM_PROMPT = `你是求職信修改助手。使用者從 JD 條件清單裡自己挑了幾項，要你補進現有的求職信。
+
+${COVER_LETTER_RULES}
+
+補充規則：
+1. 每一項先到履歷、經歷資料庫找有沒有具體事實可以支撐。
+   - 有：在信裡最適合的段落加一兩句，或改寫一句既有的句子讓它涵蓋這一項；能併進既有的案例就併，不要每一項各開一段。
+   - 沒有：不要加、不要編，列進 not_found，reason 用繁體中文一句話說缺什麼事實。
+2. partial 是 true 的項目，履歷已經涵蓋一部分，只補 gap 裡寫的「缺：○○」那幾件。
+3. kind 是 "trait" 的項目（軟實力）：用具體事例帶出這個特質，不要只寫「我很主動積極」這種形容詞。
+4. 只動為了補這幾項必須加的句子、或必須改的那一句，其他地方一字不改：不要順便潤飾、不要調整段落順序、不要刪掉原本的內容。
+5. 信裡的 {{SIGNATURE}} 記號一字不改留在原位。
+6. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來：
+{ "letter": string, "added": string[], "not_found": [{ "item": string, "reason": string }] }
+added、not_found 裡的 item 照抄清單裡的文字。`;
+
+export interface AddToLetterItem {
+  item: string;
+  kind: "requirement" | "trait" | "condition";
+  partial: boolean;
+  gap: string | null;
+}
+
+/**
+ * 求職信頁 JD 條件清單的「補充進求職信」：使用者自己挑要補的條件（沒寫到、部分符合、軟實力），
+ * AI 從履歷跟經歷資料庫找事實補進信裡，找不到事實的不加、說明缺什麼。
+ * 不存檔，換進頁面上的草稿（新加的字標綠底、可以復原），使用者按「儲存」才存。
+ */
+export async function addItemsToCoverLetter(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  applicationId: string;
+  language: string;
+  letter: string;
+  items: AddToLetterItem[];
+}): Promise<{ letter: string; added: string[]; notFound: { item: string; reason: string }[] }> {
+  const { supabase, userId, applicationId, language, letter, items } = params;
+
+  const { data: application } = await supabase
+    .from("applications")
+    .select("job_description, resume_snapshot")
+    .eq("id", applicationId)
+    .eq("user_id", userId)
+    .single();
+  if (!application) throw new Error("找不到這筆應徵紀錄");
+
+  const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", userId).maybeSingle();
+  const { body, restore } = maskSignature(letter, readContact(profile?.data), language);
+
+  const snapshot: Record<string, Resume> = application.resume_snapshot ?? {};
+  const resumeLang = snapshot[language] ? language : Object.keys(snapshot)[0];
+  const { layout: _layout, ...resume } = snapshot[resumeLang] ?? ({} as Resume); // eslint-disable-line @typescript-eslint/no-unused-vars
+
+  const { data: entryRows } = await supabase
+    .from("experience_entries")
+    .select("language, entry_type, org_name, location, role_variants, period_variants, achievements")
+    .eq("user_id", userId);
+  const allEntries = (entryRows ?? []) as Array<{ language: string } & Record<string, unknown>>;
+  const entryLang = allEntries.some((e) => e.language === language) ? language : (allEntries[0]?.language ?? language);
+
+  const response = await askClaude({
+    userId,
+    feature: "cover_letter_add",
+    systemPrompt: ADD_SYSTEM_PROMPT,
+    userPrompt: [
+      LANGUAGE_INSTRUCTION[language] ?? `目標語言：${language}`,
+      `===== JD =====`,
+      application.job_description,
+      `===== 已定案的履歷內容 =====`,
+      JSON.stringify(resume, null, 2),
+      `===== 使用者經歷資料庫（${entryLang}；只能用這裡跟履歷有的事實）=====`,
+      JSON.stringify(allEntries.filter((e) => e.language === entryLang), null, 2),
+      `===== 要補進信裡的條件 =====`,
+      JSON.stringify(items, null, 2),
+      `===== 目前的求職信 =====`,
+      body,
+    ].join("\n\n"),
+    maxTokens: 4000,
+    supabase,
+  });
+
+  let parsed: { letter?: string; added?: string[]; not_found?: { item: string; reason: string }[] };
+  try {
+    parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
+  } catch {
+    throw new Error("AI 回傳的內容不是有效的 JSON，請再試一次");
+  }
+  let revised = (parsed.letter ?? "").trim();
+  if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
+  if (language === "zh") revised = toFullWidthPunctuation(toTraditional(revised));
+
+  // 只認清單裡真的有的條件（AI 偶爾會改寫條件文字）。
+  const asked = new Set(items.map((i) => i.item.trim()));
+  const added = (parsed.added ?? []).map((i) => i.trim()).filter((i) => asked.has(i));
+  const notFound = (parsed.not_found ?? [])
+    .filter((n) => asked.has(n.item?.trim()))
+    .map((n) => ({ item: n.item.trim(), reason: toTraditional(n.reason ?? "") }));
+  return { letter: added.length > 0 ? restore(revised) : letter, added, notFound };
 }

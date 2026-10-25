@@ -10,9 +10,13 @@ import { InfoTip } from "@/app/InfoTip";
 //    AI 判斷有問題（判定沒寫到卻說不出缺什麼）的項目標出來、不算分，請使用者重新評分。
 //    JD 關鍵字（有沒有逐字用到 JD 的字）統一放在條件清單下面一個區塊，不分散到每一條（2026-10-24 Z 要求），
 //    一個「一鍵換成 JD 用字」處理全部沒用到的字：AI 只在履歷有對應事實的句子改用字，找不到就說找不到。
-// 2. 求職信可以補充的特質（軟實力）：履歷證明不了，履歷頁不算分；求職信頁看求職信有沒有用例子帶出來。
-// 3. 工作條件（出差、外派…）：履歷頁不算分，問使用者能不能配合（給了 onAnswerCondition 才問）。
+// 2. 求職信可以補充的特質（軟實力）：履歷證明不了，履歷頁不算分、用灰色小圓點；求職信頁看求職信有沒有用例子帶出來，
+//    跟 JD 條件一樣用打勾／驚嘆號，排在 JD 條件正下方（2026-10-25 Z 要求）。
+// 3. 工作條件（出差、外派…）：履歷頁不算分，問使用者能不能配合（給了 onAnswerCondition 才問）；求職信頁跟特質一樣算。
 // isCovered 決定「算不算寫到」：履歷頁只算履歷本身，求職信頁履歷＋求職信合起來算。
+// 求職信頁：求職信補上的項目用虛線圓框打勾，跟履歷本身寫到的（實線）分開；缺口說明是改履歷用的建議，求職信頁不顯示。
+// 求職信頁沒寫到、部分符合的條件跟還沒提到的特質，底下有「補充進求職信」、標題旁有「全部補充進求職信」：
+// 使用者自己挑要補哪幾項，AI 只用履歷、經歷資料庫裡有的事實補（2026-10-25 Z 要求）。
 // 部分符合（科系要求商管、使用者輔修商管；或一項綁好幾個條件、做到一半以上）排在沒寫到的後面、已寫到的前面，算一半分數。
 // 每一條的狀態只用前面的 icon 表示，滑過 icon 才顯示狀態名稱，不另外標文字（2026-10-24 Z 要求）。
 // icon 是同一組圓框：已寫到打勾、部分符合橫線、沒寫到驚嘆號、判斷有問題問號（2026-10-25 Z 要求）。
@@ -24,13 +28,13 @@ export function JdChecklist({
   isCovered,
   scope = "resume",
   legacyGaps = [],
-  showSource = false,
   language,
   keywords,
   keywordNote,
   onDig,
   onAnswerCondition,
   onReword,
+  onAddToLetter,
 }: {
   items: JdChecklistItem[];
   isCovered: (item: JdChecklistItem) => boolean;
@@ -38,8 +42,6 @@ export function JdChecklist({
   scope?: "resume" | "letter";
   /** 舊資料的缺口清單（那時候每一項還沒有自己的缺口說明）。 */
   legacyGaps?: string[];
-  /** 寫到的項目後面標出是履歷還是求職信寫到的。 */
-  showSource?: boolean;
   /** JD 條件是用哪種語言寫的。英文左右對齊時要能自動斷字，字距才不會被拉得很開。 */
   language?: string;
   /** JD 關鍵字有沒有逐字出現在履歷裡（只有履歷頁、而且履歷跟 JD 同語言才有）。 */
@@ -50,18 +52,31 @@ export function JdChecklist({
   onAnswerCondition?: (item: string, willing: boolean) => void;
   /** 「一鍵換成 JD 用字」：這些關鍵字沒有逐字出現，請 AI 在履歷裡找有事實的句子改用字。 */
   onReword?: (keywords: string[], item: string | null) => void;
+  /** 求職信頁「補充進求職信」：把這幾項補進信裡。 */
+  onAddToLetter?: (items: JdChecklistItem[]) => void;
 }) {
   const requirements = items.filter((i) => (i.kind ?? "requirement") === "requirement");
   const traits = items.filter((i) => i.kind === "trait");
   const conditions = items.filter((i) => i.kind === "condition");
 
-  const covered = requirements.filter((i) => !i.invalid && isCovered(i));
-  const partial = requirements.filter((i) => !i.invalid && !isCovered(i) && i.partial);
-  const missing = requirements.filter((i) => !i.invalid && !isCovered(i) && !i.partial);
-  const invalid = requirements.filter((i) => i.invalid);
-  const itemGaps = [...missing, ...partial]
-    .filter((i) => !!i.gap)
-    .map((i) => ({ item: i.item as string | null, gap: i.gap as string }));
+  const letter = scope === "letter";
+  /** 每一條的狀態。soft＝履歷頁不算分的特質、工作條件還沒寫到，用灰色小圓點。 */
+  const stateOf = (item: JdChecklistItem, scored: boolean): CheckState | "soft" => {
+    if (item.invalid) return "invalid";
+    if (isCovered(item)) return letter && item.source === "cover_letter" ? "letter" : "ok";
+    if (!scored) return "soft";
+    return item.partial ? "partial" : "gap";
+  };
+
+  // 要補的排上面：判斷有問題、沒寫到、部分符合、求職信補上、履歷寫到。
+  const ORDER: Record<CheckState | "soft", number> = { invalid: 0, gap: 1, partial: 2, soft: 2, letter: 3, ok: 4 };
+  const sorted = requirements
+    .map((item) => ({ item, state: stateOf(item, true) }))
+    .sort((a, b) => ORDER[a.state] - ORDER[b.state]);
+
+  const itemGaps = sorted
+    .filter(({ item, state }) => (state === "gap" || state === "partial") && !!item.gap)
+    .map(({ item }) => ({ item: item.item as string | null, gap: item.gap as string }));
   // 舊資料的缺口清單沒有對應的條件名稱。
   const gaps = itemGaps.length > 0 ? itemGaps : legacyGaps.map((gap) => ({ item: null, gap }));
 
@@ -69,149 +84,176 @@ export function JdChecklist({
   const keywordTotal = keywords ? keywords.matched.length + keywords.missing.length : 0;
   const lang = language === "en" ? "en" : undefined;
 
-  return (
+  // 求職信頁可以補的：沒寫到、部分符合（判斷有問題的不算）。
+  const canAdd = (state: CheckState | "soft") => letter && !!onAddToLetter && (state === "gap" || state === "partial");
+  const addAll = (list: JdChecklistItem[]) =>
+    list.length > 0 &&
+    onAddToLetter && (
+      <button
+        type="button"
+        className="link-muted ats-block-action"
+        onClick={(e) => {
+          // 按鈕在可收合的標題列裡，不要順便把區塊收起來。
+          e.preventDefault();
+          onAddToLetter(list);
+        }}
+      >
+        全部補充進求職信
+      </button>
+    );
+  const addOne = (item: JdChecklistItem) => (
+    <button type="button" className="link-muted ats-check-dig" onClick={() => onAddToLetter?.([item])}>
+      補充進求職信
+    </button>
+  );
+
+  const requirementBlock = requirements.length > 0 && (
+    <Block title="JD 條件" action={letter && addAll(sorted.filter(({ state }) => canAdd(state)).map(({ item }) => item))}>
+      <ul className="ats-checklist-list" lang={lang}>
+        {sorted.map(({ item, state }, i) => (
+          <li key={i} className={`ats-check ats-check--${state}`}>
+            <StatusIcon state={state} />
+            <div className="ats-check-body">
+              <p className="ats-check-item">
+                {item.item}
+                {state === "invalid" && <span className="ats-check-tag">判斷有問題，請重新檢查評分</span>}
+              </p>
+              {(state === "gap" || state === "partial") && onDig && (
+                <button type="button" className="link-muted ats-check-dig" onClick={() => onDig(item.item)}>
+                  讓 AI 幫你挖掘這段經驗
+                </button>
+              )}
+              {canAdd(state) && addOne(item)}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Block>
+  );
+
+  const keywordBlock = (keywordTotal > 0 || keywordNote) && (
+    <Block
+      title="JD 關鍵字"
+      action={
+        !keywordNote &&
+        missingKeywords.length > 0 &&
+        onReword && (
+          <button
+            type="button"
+            className="link-muted ats-block-action"
+            onClick={(e) => {
+              // 按鈕在可收合的標題列裡，不要順便把區塊收起來。
+              e.preventDefault();
+              onReword(missingKeywords, null);
+            }}
+          >
+            一鍵換成 JD 用字
+          </button>
+        )
+      }
+    >
+      {keywordNote ? (
+        <p className="keyword-note">{keywordNote}</p>
+      ) : (
+        <KeywordChips matched={keywords!.matched} missing={missingKeywords} />
+      )}
+    </Block>
+  );
+
+  const gapBlock = !letter && gaps.length > 0 && (
+    <Block title="缺口說明">
+      <ul className="ats-gap-list" lang={lang}>
+        {gaps.map((g, i) => (
+          <li key={i} className="ats-gap">
+            {g.item && <p className="ats-gap-item">{g.item}</p>}
+            <div className="ats-gap-body">
+              {splitSentences(g.gap).map((line, j) => (
+                <p key={j}>{line}</p>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Block>
+  );
+
+  const traitBlock = traits.length > 0 && (
+    <Block
+      title="求職信可以補充的特質"
+      action={letter && addAll(traits.filter((item) => canAdd(stateOf(item, true))))}
+    >
+      <ul className="ats-checklist-list" lang={lang}>
+        {traits.map((item, i) => {
+          const state = stateOf(item, letter);
+          return (
+            <li key={i} className={`ats-check ats-check--${state}`}>
+              <StatusIcon state={state} />
+              <div className="ats-check-body">
+                <p className="ats-check-item">{item.item}</p>
+                {canAdd(state) && addOne(item)}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Block>
+  );
+
+  const conditionBlock = conditions.length > 0 && (
+    <Block title="工作條件">
+      <ul className="ats-checklist-list" lang={lang}>
+        {conditions.map((item, i) => {
+          const state = stateOf(item, letter);
+          const ok = state === "ok" || state === "letter";
+          return (
+            <li key={i} className={`ats-check ats-check--${state}`}>
+              <StatusIcon state={state} />
+              <div className="ats-check-body">
+                <p className="ats-check-item">
+                  {item.item}
+                  {!ok && item.answer === "no" && <span className="ats-check-tag">無法配合</span>}
+                  {!ok && item.answer === "yes" && <span className="ats-check-tag">可以配合</span>}
+                </p>
+                {!ok && onAnswerCondition && !item.answer && (
+                  <div className="ats-check-answer">
+                    <span className="ats-check-answer-label">這個條件你可以配合嗎？</span>
+                    <div className="btn-wrapper">
+                      <button type="button" className="btn btn-secondary" onClick={() => onAnswerCondition(item.item, false)}>
+                        無法配合
+                      </button>
+                      <button type="button" className="btn btn-primary" onClick={() => onAnswerCondition(item.item, true)}>
+                        可以配合
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!ok && onAnswerCondition && item.answer === "no" && (
+                  <button type="button" className="link-muted ats-check-dig" onClick={() => onAnswerCondition(item.item, true)}>
+                    改成可以配合
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Block>
+  );
+
+  // 求職信頁：特質是求職信的主場，緊接在 JD 條件下面；履歷頁特質、工作條件只是參考，排最後。
+  return letter ? (
     <>
-      {requirements.length > 0 && (
-        <Block title="JD 條件">
-          <ul className="ats-checklist-list" lang={lang}>
-            {[...invalid, ...missing, ...partial, ...covered].map((item, i) => {
-              const ok = !item.invalid && isCovered(item);
-              const state = item.invalid ? "invalid" : ok ? "ok" : item.partial ? "partial" : "gap";
-              return (
-                <li key={i} className={`ats-check ats-check--${state}`}>
-                  <StatusIcon state={state} />
-                  <div className="ats-check-body">
-                    <p className="ats-check-item">
-                      {item.item}
-                      {ok && showSource && item.source && (
-                        <span className="checklist-item-source">（{item.source === "cover_letter" ? "求職信" : "履歷"}）</span>
-                      )}
-                      {state === "invalid" && <span className="ats-check-tag">判斷有問題，請重新檢查評分</span>}
-                    </p>
-                    {(state === "gap" || state === "partial") && onDig && (
-                      <button type="button" className="link-muted ats-check-dig" onClick={() => onDig(item.item)}>
-                        讓 AI 幫你挖掘這段經驗
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </Block>
-      )}
-
-      {(keywordTotal > 0 || keywordNote) && (
-        <Block
-          title="JD 關鍵字"
-          action={
-            !keywordNote &&
-            missingKeywords.length > 0 &&
-            onReword && (
-              <button
-                type="button"
-                className="link-muted ats-block-action"
-                onClick={(e) => {
-                  // 按鈕在可收合的標題列裡，不要順便把區塊收起來。
-                  e.preventDefault();
-                  onReword(missingKeywords, null);
-                }}
-              >
-                一鍵換成 JD 用字
-              </button>
-            )
-          }
-        >
-          {keywordNote ? (
-            <p className="keyword-note">{keywordNote}</p>
-          ) : (
-            <KeywordChips matched={keywords!.matched} missing={missingKeywords} />
-          )}
-        </Block>
-      )}
-
-      {gaps.length > 0 && (
-        <Block title="缺口說明">
-          <ul className="ats-gap-list" lang={lang}>
-            {gaps.map((g, i) => (
-              <li key={i} className="ats-gap">
-                {g.item && <p className="ats-gap-item">{g.item}</p>}
-                <div className="ats-gap-body">
-                  {splitSentences(g.gap).map((line, j) => (
-                    <p key={j}>{line}</p>
-                  ))}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Block>
-      )}
-
-      {traits.length > 0 && (
-        <Block title="求職信可以補充的特質">
-          <ul className="ats-checklist-list" lang={lang}>
-            {traits.map((item, i) => {
-              const ok = scope === "letter" && isCovered(item);
-              return (
-                <li key={i} className={`ats-check ${ok ? "ats-check--ok" : "ats-check--soft"}`}>
-                  {ok ? <StatusIcon state="ok" /> : <span className="ats-check-icon"><span className="ats-check-dot" /></span>}
-                  <div className="ats-check-body">
-                    <p className="ats-check-item">
-                      {item.item}
-                      {ok && showSource && item.source && (
-                        <span className="checklist-item-source">（{item.source === "cover_letter" ? "求職信" : "履歷"}）</span>
-                      )}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </Block>
-      )}
-
-      {conditions.length > 0 && (
-        <Block title="工作條件">
-          <ul className="ats-checklist-list" lang={lang}>
-            {conditions.map((item, i) => {
-              const ok = isCovered(item);
-              return (
-                <li key={i} className={`ats-check ${ok ? "ats-check--ok" : "ats-check--soft"}`}>
-                  {ok ? <StatusIcon state="ok" /> : <span className="ats-check-icon"><span className="ats-check-dot" /></span>}
-                  <div className="ats-check-body">
-                    <p className="ats-check-item">
-                      {item.item}
-                      {ok && showSource && item.source && (
-                        <span className="checklist-item-source">（{item.source === "cover_letter" ? "求職信" : "履歷"}）</span>
-                      )}
-                      {!ok && item.answer === "no" && <span className="ats-check-tag">無法配合</span>}
-                      {!ok && item.answer === "yes" && <span className="ats-check-tag">可以配合</span>}
-                    </p>
-                    {!ok && onAnswerCondition && !item.answer && (
-                      <div className="ats-check-answer">
-                        <span className="ats-check-answer-label">這個條件你可以配合嗎？</span>
-                        <div className="btn-wrapper">
-                          <button type="button" className="btn btn-secondary" onClick={() => onAnswerCondition(item.item, false)}>
-                            無法配合
-                          </button>
-                          <button type="button" className="btn btn-primary" onClick={() => onAnswerCondition(item.item, true)}>
-                            可以配合
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {!ok && onAnswerCondition && item.answer === "no" && (
-                      <button type="button" className="link-muted ats-check-dig" onClick={() => onAnswerCondition(item.item, true)}>
-                        改成可以配合
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </Block>
-      )}
+      {requirementBlock}
+      {traitBlock}
+      {conditionBlock}
+    </>
+  ) : (
+    <>
+      {requirementBlock}
+      {keywordBlock}
+      {gapBlock}
+      {traitBlock}
+      {conditionBlock}
     </>
   );
 }
@@ -230,10 +272,11 @@ function Block({ title, action, children }: { title: string; action?: ReactNode;
   );
 }
 
-type CheckState = "ok" | "gap" | "partial" | "invalid";
+type CheckState = "ok" | "letter" | "gap" | "partial" | "invalid";
 
 const STATUS_TIP: Record<CheckState, string> = {
   ok: "已寫到",
+  letter: "求職信補上",
   gap: "沒寫到",
   partial: "部分符合",
   invalid: "判斷有問題，請重新評分",
@@ -241,13 +284,21 @@ const STATUS_TIP: Record<CheckState, string> = {
 
 const STATUS_ICON: Record<CheckState, ReactNode> = {
   ok: <CheckCircleIcon />,
+  letter: <CheckCircleIcon dashed />,
   gap: <AlertIcon />,
   partial: <MinusCircleIcon />,
   invalid: <QuestionCircleIcon />,
 };
 
 /** 每一條前面的狀態 icon，滑過（手機點一下）說明是什麼狀態。 */
-function StatusIcon({ state }: { state: CheckState }) {
+function StatusIcon({ state }: { state: CheckState | "soft" }) {
+  if (state === "soft") {
+    return (
+      <span className="ats-check-icon">
+        <span className="ats-check-dot" />
+      </span>
+    );
+  }
   return (
     <span className="ats-check-icon">
       <InfoTip icon={STATUS_ICON[state]} label={STATUS_TIP[state]} className="info-tip--status">
