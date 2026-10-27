@@ -111,8 +111,6 @@ export function CoverLetter({
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   // 「補充進求職信」：記下第一次補充前的信（每個語言），跟現在的信比對，新加的字標綠底；按「儲存」就清掉。
   const [addedBase, setAddedBase] = useState<Record<string, string>>({});
-  // 找不到事實、沒有補進信裡的條件。
-  const [notFound, setNotFound] = useState<{ item: string; reason: string }[]>([]);
   // 生成完會接著比對職缺符合度，多抓 20 秒。
   const generateProgress = useEstimatedProgress(busy === "generate", 30000 * langCount + 20000 + (researching ? 15000 : 0));
   const recheckProgress = useEstimatedProgress(busy === "recheck", 20000);
@@ -146,7 +144,6 @@ export function CoverLetter({
       setDraft(result.data.cover_letter_draft);
       setUndo(previous);
       setAddedBase({});
-      setNotFound([]);
       // 信換了，上一封信的比對結果不適用。
       setLetterChecklist({});
       setActiveLang(options.languages[0]);
@@ -212,13 +209,12 @@ export function CoverLetter({
     });
   }
 
-  // 「補充進求職信」：AI 只用履歷、經歷資料庫有的事實補；補上的條件右欄直接標成求職信補上，找不到的列在信上方。
+  // 「補充進求職信」：使用者勾了就等於確認自己具備，AI 每項都補（找不到事實的寫成能力陳述）；補上的條件右欄直接標成已寫到。
   function handleAddToLetter(items: GeneratedResume["jd_match_checklist"]) {
     if (!draft) return;
     const lang = activeLang;
     const before = draft[lang] ?? "";
     setMessage(null);
-    setNotFound([]);
     void run("add", async () => {
       const result = await addToCoverLetterAction(
         applicationId,
@@ -231,7 +227,6 @@ export function CoverLetter({
         return;
       }
       const added = new Set(result.added ?? []);
-      setNotFound(result.notFound ?? []);
       if (added.size === 0) {
         setMessage("沒有補進任何條件");
         return;
@@ -245,7 +240,18 @@ export function CoverLetter({
           added.has(i.item.trim()) && !i.covered ? { ...i, covered: true, source: "cover_letter" as const } : i,
         ),
       });
-      setMessage(`已補進 ${added.size} 項，新加的字標成綠底，記得按「儲存」`);
+      const skipped = items.length - added.size;
+      const noExample = result.noExample?.length ?? 0;
+      setMessage(
+        [
+          `已補進 ${added.size} 項`,
+          skipped > 0 && `${skipped} 項沒補進去，可以再按一次`,
+          noExample > 0 && `其中 ${noExample} 項沒有具體事例，寫成能力陳述，有實例可以用「跟 AI 聊」補`,
+          `新加的字標成綠底，記得按「儲存」`,
+        ]
+          .filter(Boolean)
+          .join("，"),
+      );
     });
   }
 
@@ -271,7 +277,6 @@ export function CoverLetter({
       }
       setCompleted(true);
       setAddedBase({});
-      setNotFound([]);
       setMessage("已定案");
       // 讓標題列的步驟列更新到「完成」。
       router.refresh();
@@ -410,20 +415,6 @@ export function CoverLetter({
         {addProgress !== null && (
           <ProgressBar value={addProgress} label="從履歷跟經歷資料庫找事實，補進求職信…" />
         )}
-        {notFound.length > 0 && (
-          <div className="alert alert-warning" role="status">
-            <p className="letter-notfound-title">這幾項在履歷跟經歷資料庫找不到事實，沒有補進信裡：</p>
-            <ul className="letter-notfound-list">
-              {notFound.map((n) => (
-                <li key={n.item}>
-                  <strong>{n.item}</strong>
-                  {n.reason && `：${n.reason}`}
-                </li>
-              ))}
-            </ul>
-            <p className="letter-notfound-title">有相關經驗的話，可以用「跟 AI 聊」告訴它。</p>
-          </div>
-        )}
 
         {draft ? (
           <>
@@ -481,7 +472,7 @@ export function CoverLetter({
               <ul>
                 <li>履歷＋求職信合起來涵蓋的 JD 條件比例</li>
                 <li>軟實力、工作條件也算，這兩類靠求職信補</li>
-                <li>求職信補上的用虛線打勾；生成時會自動比對，之後改了信要按「重新比對」</li>
+                <li>生成時會自動比對，之後改了信要按「重新比對」</li>
                 <li>信沒改，比對結果就不變</li>
               </ul>
             }

@@ -517,13 +517,13 @@ export async function reviseCoverLetterAction(
   }
 }
 
-/** 求職信頁「補充進求職信」：把使用者挑的 JD 條件、軟實力補進信裡（只用有事實的），回傳改好的信（不存檔）。 */
+/** 求職信頁「補充進求職信」：把使用者挑的 JD 條件、軟實力補進信裡（沒事實的寫成能力陳述），回傳改好的信（不存檔）。 */
 export async function addToCoverLetterAction(
   applicationId: string,
   language: string,
   letter: string,
   items: AddToLetterItem[],
-): Promise<{ error?: string; letter?: string; added?: string[]; notFound?: { item: string; reason: string }[] }> {
+): Promise<{ error?: string; letter?: string; added?: string[]; noExample?: string[] }> {
   if (items.length === 0) return { error: "沒有要補充的條件" };
   const supabase = await createClient();
   const {

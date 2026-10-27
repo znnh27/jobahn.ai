@@ -3383,16 +3383,6 @@ button.step-bar-link:focus-visible {
   border-radius: 2px;
 }
 
-/* 找不到事實、沒補進信裡的條件。 */
-.letter-notfound-title {
-  margin: 0;
-}
-.letter-notfound-list {
-  margin: var(--space-1) 0;
-  padding-left: 1.25em;
-  list-style: disc;
-}
-
 /* 還沒生成、正在生成時，信紙中間放說明或進度。 */
 .letter-page--empty {
   display: flex;
@@ -4138,8 +4128,7 @@ details[open] > summary > .disclosure-arrow {
   flex-shrink: 0;
   margin-top: 2px;
 }
-.ats-check--ok .ats-check-icon,
-.ats-check--letter .ats-check-icon {
+.ats-check--ok .ats-check-icon {
   color: var(--color-success-text);
 }
 .ats-check--gap .ats-check-icon {

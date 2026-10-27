@@ -14,9 +14,10 @@ import { InfoTip } from "@/app/InfoTip";
 //    跟 JD 條件一樣用打勾／驚嘆號，排在 JD 條件正下方（2026-10-25 Z 要求）。
 // 3. 工作條件（出差、外派…）：履歷頁不算分，問使用者能不能配合（給了 onAnswerCondition 才問）；求職信頁跟特質一樣算。
 // isCovered 決定「算不算寫到」：履歷頁只算履歷本身，求職信頁履歷＋求職信合起來算。
-// 求職信頁：求職信補上的項目用虛線圓框打勾，跟履歷本身寫到的（實線）分開；缺口說明是改履歷用的建議，求職信頁不顯示。
+// 求職信頁：求職信補上的項目跟履歷本身寫到的一樣算已寫到，只分已寫到、部分符合、沒寫到（2026-10-27 Z 要求，拿掉「求職信補上」狀態）；
+//    缺口說明是改履歷用的建議，求職信頁不顯示。
 // 求職信頁沒寫到、部分符合的條件跟還沒提到的特質，底下有「補充進求職信」、標題旁有「全部補充進求職信」：
-// 使用者自己挑要補哪幾項，AI 只用履歷、經歷資料庫裡有的事實補（2026-10-25 Z 要求）。
+// 使用者自己挑要補哪幾項（2026-10-25 Z 要求）；挑了就等於確認自己具備，AI 每項都補，找不到事實的寫成能力陳述、不編造細節（2026-10-27）。
 // 部分符合（科系要求商管、使用者輔修商管；或一項綁好幾個條件、做到一半以上）排在沒寫到的後面、已寫到的前面，算一半分數。
 // 每一條的狀態只用前面的 icon 表示，滑過 icon 才顯示狀態名稱，不另外標文字（2026-10-24 Z 要求）。
 // icon 是同一組圓框：已寫到打勾、部分符合橫線、沒寫到驚嘆號、判斷有問題問號（2026-10-25 Z 要求）。
@@ -63,13 +64,13 @@ export function JdChecklist({
   /** 每一條的狀態。soft＝履歷頁不算分的特質、工作條件還沒寫到，用灰色小圓點。 */
   const stateOf = (item: JdChecklistItem, scored: boolean): CheckState | "soft" => {
     if (item.invalid) return "invalid";
-    if (isCovered(item)) return letter && item.source === "cover_letter" ? "letter" : "ok";
+    if (isCovered(item)) return "ok";
     if (!scored) return "soft";
     return item.partial ? "partial" : "gap";
   };
 
-  // 要補的排上面：判斷有問題、沒寫到、部分符合、求職信補上、履歷寫到。
-  const ORDER: Record<CheckState | "soft", number> = { invalid: 0, gap: 1, partial: 2, soft: 2, letter: 3, ok: 4 };
+  // 要補的排上面：判斷有問題、沒寫到、部分符合、已寫到。
+  const ORDER: Record<CheckState | "soft", number> = { invalid: 0, gap: 1, partial: 2, soft: 2, ok: 3 };
   const sorted = requirements
     .map((item) => ({ item, state: stateOf(item, true) }))
     .sort((a, b) => ORDER[a.state] - ORDER[b.state]);
@@ -204,7 +205,7 @@ export function JdChecklist({
       <ul className="ats-checklist-list" lang={lang}>
         {conditions.map((item, i) => {
           const state = stateOf(item, letter);
-          const ok = state === "ok" || state === "letter";
+          const ok = state === "ok";
           return (
             <li key={i} className={`ats-check ats-check--${state}`}>
               <StatusIcon state={state} />
@@ -272,11 +273,10 @@ function Block({ title, action, children }: { title: string; action?: ReactNode;
   );
 }
 
-type CheckState = "ok" | "letter" | "gap" | "partial" | "invalid";
+type CheckState = "ok" | "gap" | "partial" | "invalid";
 
 const STATUS_TIP: Record<CheckState, string> = {
   ok: "已寫到",
-  letter: "求職信補上",
   gap: "沒寫到",
   partial: "部分符合",
   invalid: "判斷有問題，請重新評分",
@@ -284,7 +284,6 @@ const STATUS_TIP: Record<CheckState, string> = {
 
 const STATUS_ICON: Record<CheckState, ReactNode> = {
   ok: <CheckCircleIcon />,
-  letter: <CheckCircleIcon dashed />,
   gap: <AlertIcon />,
   partial: <MinusCircleIcon />,
   invalid: <QuestionCircleIcon />,

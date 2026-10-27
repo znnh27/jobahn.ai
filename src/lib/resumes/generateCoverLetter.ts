@@ -470,16 +470,18 @@ const ADD_SYSTEM_PROMPT = `你是求職信修改助手。使用者從 JD 條件�
 ${COVER_LETTER_RULES}
 
 補充規則：
-1. 每一項先到履歷、經歷資料庫找有沒有具體事實可以支撐。
-   - 有：在信裡最適合的段落加一兩句，或改寫一句既有的句子讓它涵蓋這一項；能併進既有的案例就併，不要每一項各開一段。
-   - 沒有：不要加、不要編，列進 not_found，reason 用繁體中文一句話說缺什麼事實。
+1. 清單裡每一項都是使用者親自勾選、按按鈕要求補的，等於使用者確認「我具備這一項」，每一項都要補進信裡，不能退回。
+   - 履歷、經歷資料庫有對應事實：在信裡最適合的段落加一兩句，或改寫一句既有的句子讓它涵蓋這一項；能併進既有的案例就併，不要每一項各開一段。
+   - 找不到對應事實：上面誠實原則 1、3 的「沒有事實不能寫」對這幾項不適用，使用者的確認就是依據。改寫成一句能力或做事原則的陳述（例如「我做事重視規範與原則，遇到灰色地帶會先確認界線再行動」），item 也列進 no_example。
+   - 寫成能力陳述時仍然不能編造具體細節：不能捏造專案、公司、數字、時間、事件，也不能說成是在某個既有專案裡做到的（歸屬錯了跟捏造一樣嚴重）。
+   - 誠實原則 5 只限制不能描述 AI 工具的細節，不是不能補；用不到工具細節就改寫成能力陳述。
 2. partial 是 true 的項目，履歷已經涵蓋一部分，只補 gap 裡寫的「缺：○○」那幾件。
-3. kind 是 "trait" 的項目（軟實力）：用具體事例帶出這個特質，不要只寫「我很主動積極」這種形容詞。
+3. kind 是 "trait" 的項目（軟實力）：有事例就用具體事例帶出這個特質，不要只寫「我很主動積極」這種形容詞；找不到事例的照規則 1 寫成做事原則的陳述（說怎麼做事，不是貼形容詞）。
 4. 只動為了補這幾項必須加的句子、或必須改的那一句，其他地方一字不改：不要順便潤飾、不要調整段落順序、不要刪掉原本的內容。
 5. 信裡的 {{SIGNATURE}} 記號一字不改留在原位。
 6. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來：
-{ "letter": string, "added": string[], "not_found": [{ "item": string, "reason": string }] }
-added、not_found 裡的 item 照抄清單裡的文字。`;
+{ "letter": string, "added": string[], "no_example": string[] }
+added 列出補進信裡的每一項（應該是清單全部），no_example 列出其中寫成能力陳述、沒有具體事例的項目；兩者都照抄清單裡的文字。`;
 
 export interface AddToLetterItem {
   item: string;
@@ -490,7 +492,7 @@ export interface AddToLetterItem {
 
 /**
  * 求職信頁 JD 條件清單的「補充進求職信」：使用者自己挑要補的條件（沒寫到、部分符合、軟實力），
- * AI 從履歷跟經歷資料庫找事實補進信裡，找不到事實的不加、說明缺什麼。
+ * 使用者勾選就等於確認自己具備，AI 每一項都要補：有事實用事例寫，找不到事實就寫成能力陳述（不編造細節）。
  * 不存檔，換進頁面上的草稿（新加的字標綠底、可以復原），使用者按「儲存」才存。
  */
 export async function addItemsToCoverLetter(params: {
@@ -500,7 +502,7 @@ export async function addItemsToCoverLetter(params: {
   language: string;
   letter: string;
   items: AddToLetterItem[];
-}): Promise<{ letter: string; added: string[]; notFound: { item: string; reason: string }[] }> {
+}): Promise<{ letter: string; added: string[]; noExample: string[] }> {
   const { supabase, userId, applicationId, language, letter, items } = params;
 
   const { data: application } = await supabase
@@ -546,7 +548,7 @@ export async function addItemsToCoverLetter(params: {
     supabase,
   });
 
-  let parsed: { letter?: string; added?: string[]; not_found?: { item: string; reason: string }[] };
+  let parsed: { letter?: string; added?: string[]; no_example?: string[] };
   try {
     parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
   } catch {
@@ -559,8 +561,7 @@ export async function addItemsToCoverLetter(params: {
   // 只認清單裡真的有的條件（AI 偶爾會改寫條件文字）。
   const asked = new Set(items.map((i) => i.item.trim()));
   const added = (parsed.added ?? []).map((i) => i.trim()).filter((i) => asked.has(i));
-  const notFound = (parsed.not_found ?? [])
-    .filter((n) => asked.has(n.item?.trim()))
-    .map((n) => ({ item: n.item.trim(), reason: toTraditional(n.reason ?? "") }));
-  return { letter: added.length > 0 ? restore(revised) : letter, added, notFound };
+  const addedSet = new Set(added);
+  const noExample = (parsed.no_example ?? []).map((i) => i.trim()).filter((i) => addedSet.has(i));
+  return { letter: added.length > 0 ? restore(revised) : letter, added, noExample };
 }
