@@ -3,25 +3,37 @@
 import { LangSwitch } from "@/app/LangSwitch";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   generateCoverLetterAction,
   recheckWithCoverLetterAction,
   addToCoverLetterAction,
-  saveCoverLetterDraftAction,
   autoSaveCoverLetterAction,
   finalizeCoverLetterAction,
   reopenCoverLetterAction,
+  proofreadLetterAction,
+  dismissProofreadAction,
 } from "../actions";
+import { ProofreadPanel } from "../ProofreadPanel";
+import { scrollToFirstMark } from "../ProofreadMarks";
+import {
+  applyToText,
+  issuesForCard,
+  nextCardKey,
+  proofreadCardKeys,
+  type ProofreadIssue,
+} from "@/lib/resumes/proofreadTypes";
 import { coveredByResume } from "@/lib/resumes/atsScore";
 import { JdChecklist } from "../JdChecklist";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { JdFitScore } from "../JdFitScore";
 import { StatusMessage } from "@/app/StatusMessage";
 import { useFlash } from "@/app/useFlash";
-import { CheckIcon } from "@/app/icons";
+import { CheckIcon, RedoIcon, UndoIcon } from "@/app/icons";
+import { useAutoSave } from "@/app/useAutoSave";
+import { SaveStatus } from "@/app/SaveStatus";
 import { CoverLetterChatPanel } from "./CoverLetterChatPanel";
 import { letterLength, letterLengthUnit } from "@/lib/text/letterLength";
 import { LetterEditor } from "./LetterEditor";
@@ -34,7 +46,7 @@ import {
 } from "./CoverLetterOptions";
 
 type ChecklistMap = Record<string, GeneratedResume["jd_match_checklist"]>;
-type Busy = "generate" | "recheck" | "add" | "save" | "finalize" | "reopen";
+type Busy = "generate" | "recheck" | "add" | "save" | "finalize" | "reopen" | "proofread";
 
 interface CoverLetterProps {
   applicationId: string;
@@ -97,7 +109,7 @@ export function CoverLetter({
     initialDraft ? (Object.keys(initialDraft)[0] ?? selectedLangs[0]) : selectedLangs[0],
   );
   const [message, setMessage] = useState<string | null>(null);
-  // 儲存、重新比對、複製這種簡短確認不進訊息列，按鈕本身變「✓ 已儲存」2 秒（見 useFlash）。
+  // 重新比對、複製這種簡短確認不進訊息列，按鈕本身變「✓ 已比對」2 秒（見 useFlash）。
   const { flashed, flash } = useFlash();
   const [busy, setBusy] = useState<Busy | null>(null);
   const isPending = busy !== null;
@@ -108,10 +120,19 @@ export function CoverLetter({
   // 這次生成參考了哪些公司網頁（列出來讓使用者自己確認查的是不是對的公司）。
   const [researchSources, setResearchSources] = useState<string[]>([]);
   // 「跟 AI 聊」面板：浮在右下角，邊聊邊看信。
-  // AI 改完、或重新產生之後，記下改之前的整份信（跟當時的比對結果），可以按「復原上一版」退回；
-  // 之後自己動手改了信，就不再提供復原（不然會連手動改的一起蓋掉）。
+  // AI 改完、或重新產生之後，記下改之前的整份信（跟當時的比對結果），可以按工具列的「上一步」退回、退回後按「下一步」再換回來；
+  // 之後自己動手改了信，就不再提供（不然會連手動改的一起蓋掉）。只記一步。
   const [chatOpen, setChatOpen] = useState(false);
-  const [undo, setUndo] = useState<{ draft: Record<string, string>; checklist: ChecklistMap } | null>(null);
+  // 「校稿」的建議清單：記下是哪個語言的，切到別的語言就不顯示。校稿時取代右欄的 JD 條件對照，跟「跟 AI 聊」不同時開。
+  // active 是被點選的那張卡（見 proofreadCardKeys），信紙上會標出它要改哪裡。
+  const [proofread, setProofread] = useState<{ lang: string; issues: ProofreadIssue[]; active: string | null } | null>(null);
+  const [undo, setUndoState] = useState<{ draft: Record<string, string>; checklist: ChecklistMap } | null>(null);
+  const [redo, setRedo] = useState<{ draft: Record<string, string>; checklist: ChecklistMap } | null>(null);
+  // 有新的變動：記下可以退回的那一版（或清掉），「下一步」的紀錄作廢。
+  const setUndo = (snapshot: { draft: Record<string, string>; checklist: ChecklistMap } | null) => {
+    setUndoState(snapshot);
+    setRedo(null);
+  };
   // 「重新產生」視窗：跟第一次產生一樣選語言、字數上限、要不要研究公司。
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   // 「補充進求職信」：記下第一次補充前的信（每個語言），跟現在的信比對，新加的字標綠底；只標最新一次，下一個動作就清掉（見 startAction）。
@@ -121,10 +142,13 @@ export function CoverLetter({
   const recheckProgress = useEstimatedProgress(busy === "recheck", 20000);
   // 補完會立刻比對一次（沒過再補、再比一次），比單純補充多抓一倍時間。
   const addProgress = useEstimatedProgress(busy === "add", 50000);
+  const proofreadProgress = useEstimatedProgress(busy === "proofread", 40000);
 
   async function run(kind: Busy, fn: () => Promise<void>) {
     setBusy(kind);
     try {
+      // 還沒存的修改先存完：重新比對、補充、定案會用到資料庫裡的信，也避免晚到的存檔蓋掉 AI 剛寫好的信。
+      await autosave.flush();
       await fn();
     } catch (e) {
       setMessage(`錯誤：${e instanceof Error ? e.message : "發生錯誤，請再試一次"}`);
@@ -142,7 +166,7 @@ export function CoverLetter({
   }
 
   function handleGenerate(options: AutoGenerate) {
-    // 重新產生時記下舊的那封，產生完可以按「復原上一版」拿回來。
+    // 重新產生時記下舊的那封，產生完可以按「上一步」拿回來。
     const previous = draft ? { draft, checklist: letterChecklist } : null;
     startAction();
     setResearching(options.research);
@@ -177,18 +201,26 @@ export function CoverLetter({
         return;
       }
       setLetterChecklist(recheck.data.cover_letter_checklist);
-      const notes = [previous ? "已重新產生，不滿意可以按「復原上一版」" : "", noResearch, companyNote.replace(/^。/, "")].filter(Boolean);
+      const notes = [previous ? "已重新產生，不滿意可以按「上一步」" : "", noResearch, companyNote.replace(/^。/, "")].filter(Boolean);
       if (notes.length > 0) setMessage(notes.join("。"));
     });
   }
 
-  // 補充、跟 AI 聊、復原上一版之後自動存檔（2026-10-27 Z 要求），存失敗才提醒手動按「儲存」。
+  // 全部自動存檔，沒有「儲存」按鈕（2026-10-28 Z 同意）：自己打字改的停 1 秒存，補充、跟 AI 聊、上一步這種一次換掉的馬上存。
+  // 工具列左邊顯示存檔狀態，存失敗可以按「重試」。
+  const saveLetter = useCallback(
+    (v: { draft: Record<string, string>; checklist?: ChecklistMap; checkedLangs?: string[] }) =>
+      autoSaveCoverLetterAction(applicationId, v.draft, v.checklist, v.checkedLangs),
+    [applicationId],
+  );
+  const autosave = useAutoSave(saveLetter);
+  /** 馬上存；回傳要接在訊息後面的字（存成功不用多說，工具列左邊會顯示「已自動儲存」）。 */
   async function autoSave(next: Record<string, string>, checklist?: ChecklistMap, checkedLangs?: string[]) {
-    const result = await autoSaveCoverLetterAction(applicationId, next, checklist, checkedLangs);
-    return result.error ? `，但自動儲存失敗（${result.error}），請按「儲存」` : "，已自動儲存";
+    const ok = await autosave.saveNow({ draft: next, checklist, checkedLangs });
+    return ok ? "" : "，但自動儲存失敗，請按左上的「重試」";
   }
 
-  // 「跟 AI 聊」改好的信換進草稿並自動存檔，改到的字標綠底，記下改之前的那一版，可以按「復原上一版」拿回來。
+  // 「跟 AI 聊」改好的信換進草稿並自動存檔，改到的字標綠底，記下改之前的那一版，可以按「上一步」拿回來。
   function applyChatRevision(lang: string, next: string) {
     if (!draft) return;
     const nextDraft = { ...draft, [lang]: next };
@@ -199,23 +231,34 @@ export function CoverLetter({
     setDraft(nextDraft);
     void run("save", async () => {
       const saved = await autoSave(nextDraft);
-      setMessage(`AI 改好了${saved}；不滿意可以按「復原上一版」`);
+      setMessage(`AI 改好了${saved}；不滿意可以按「上一步」`);
     });
   }
 
-  // 復原上一版：信跟右欄對照一起換回去，也自動存檔。
-  function undoRevision() {
-    if (!undo) return;
-    const previous = undo;
+  // 上一步／下一步：信跟右欄對照一起換回去，也自動存檔。畫面上的信換掉就是回饋，不另外顯示訊息（存失敗才會說）。
+  function swapRevision(target: { draft: Record<string, string>; checklist: ChecklistMap }) {
     startAction();
-    setDraft(previous.draft);
-    setLetterChecklist(previous.checklist);
-    if (!(activeLang in previous.draft)) setActiveLang(Object.keys(previous.draft)[0]);
-    setUndo(null);
+    setDraft(target.draft);
+    setLetterChecklist(target.checklist);
+    if (!(activeLang in target.draft)) setActiveLang(Object.keys(target.draft)[0]);
     void run("save", async () => {
-      const saved = await autoSave(previous.draft, previous.checklist);
-      setMessage(`已復原成上一版${saved}`);
+      const saved = await autoSave(target.draft, target.checklist);
+      if (saved) setMessage(saved.replace(/^，但/, ""));
     });
+  }
+
+  function undoRevision() {
+    if (!undo || !draft) return;
+    setUndoState(null);
+    setRedo({ draft, checklist: letterChecklist });
+    swapRevision(undo);
+  }
+
+  function redoRevision() {
+    if (!redo || !draft) return;
+    setRedo(null);
+    setUndoState({ draft, checklist: letterChecklist });
+    swapRevision(redo);
   }
 
   // 從履歷頁帶 ?generate= 過來：一進來就開始生成，並把網址上的參數拿掉，重新整理才不會再生成一次。
@@ -228,6 +271,87 @@ export function CoverLetter({
     handleGenerate(autoGenerate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleProofread() {
+    if (!draft) return;
+    const lang = activeLang;
+    startAction();
+    setChatOpen(false);
+    setProofread(null);
+    void run("proofread", async () => {
+      const result = await proofreadLetterAction(applicationId, lang, draft[lang] ?? "");
+      if (result.error || !result.issues) {
+        setMessage(`錯誤：${result.error ?? "校稿失敗，請再試一次"}`);
+        return;
+      }
+      if (result.issues.length === 0) {
+        setMessage("校稿完成，沒發現問題");
+        return;
+      }
+      setProofread({ lang, issues: result.issues, active: proofreadCardKeys(result.issues)[0] ?? null });
+      scrollToFirstMark();
+    });
+  }
+
+  /** 點選一張建議卡：信紙捲到它要改的地方。 */
+  function activateProofread(key: string) {
+    setProofread((p) => (p ? { ...p, active: key } : p));
+    scrollToFirstMark();
+  }
+
+  /** 處理掉一張卡（套用或略過）：從清單拿掉，選下一張；最後一張處理完就關掉、換回 JD 條件對照。 */
+  function dropProofreadCard(key: string) {
+    if (!proofread) return;
+    const before = proofreadCardKeys(proofread.issues);
+    const done = new Set(issuesForCard(proofread.issues, key).map((i) => i.id));
+    const issues = proofread.issues.filter((i) => !done.has(i.id));
+    if (issues.length === 0) {
+      setProofread(null);
+      return;
+    }
+    setProofread({ ...proofread, issues, active: nextCardKey(before, key, proofreadCardKeys(issues)) });
+    scrollToFirstMark();
+  }
+
+  /** 按「略過」「知道了」：記下來（之後校稿不再列），再從清單拿掉。 */
+  function skipProofread(key: string) {
+    if (!proofread) return;
+    const picked = issuesForCard(proofread.issues, key).map((i) => ({ category: i.category, quote: i.quote }));
+    void dismissProofreadAction(applicationId, "letter", proofread.lang, picked);
+    dropProofreadCard(key);
+  }
+
+  // 套用一張卡的校稿建議（格式卡一次好幾項）：改到的字標綠底（只標這一次）、可以按「上一步」、自動存檔。
+  // 原文已經被改掉的項目略過。
+  function applyProofread(key: string) {
+    if (!draft || !proofread) return;
+    const lang = proofread.lang;
+    const before = draft[lang] ?? "";
+    const picked = issuesForCard(proofread.issues, key);
+    dropProofreadCard(key);
+    let next = before;
+    let missed = 0;
+    for (const issue of picked) {
+      const applied = applyToText(next, issue);
+      if (applied !== null) next = applied;
+      else missed++;
+    }
+    startAction();
+    if (missed === picked.length) {
+      setMessage("這段已經改過了，找不到原文，略過這一項");
+      return;
+    }
+    const nextDraft = { ...draft, [lang]: next };
+    setUndo({ draft, checklist: letterChecklist });
+    setDraft(nextDraft);
+    setAddedBase({ [lang]: before });
+    void run("save", async () => {
+      const saved = await autoSave(nextDraft);
+      setMessage(
+        `已套用${picked.length > 1 ? ` ${picked.length - missed} 處` : ""}校稿建議${saved}；不滿意可以按「上一步」${missed > 0 ? `（${missed} 處原文已經改過，略過）` : ""}`,
+      );
+    });
+  }
 
   function handleRecheck() {
     if (!draft) return;
@@ -286,21 +410,11 @@ export function CoverLetter({
           noExample > 0 && `其中 ${noExample} 項沒有具體事例，寫成能力陳述，有實例可以用「跟 AI 聊」補`,
           failed.length > 0 &&
             `${failed.map((f) => `「${f.item}」`).join("、")}補了兩次還是沒通過比對（${failed.map((f) => f.reason).filter(Boolean).join("；")}）`,
-          `新加的字標成綠底，不滿意可以按「復原上一版」`,
+          `新加的字標成綠底，不滿意可以按「上一步」`,
         ]
           .filter(Boolean)
           .join("，"),
       );
-    });
-  }
-
-  function handleSave() {
-    if (!draft) return;
-    startAction();
-    void run("save", async () => {
-      const result = await saveCoverLetterDraftAction(applicationId, draft);
-      if (result.error) setMessage(`錯誤：${result.error}`);
-      else flash("save");
     });
   }
 
@@ -343,6 +457,8 @@ export function CoverLetter({
   }
 
   const draftLangs = draft ? selectedLangs.filter((l) => l in draft) : [];
+  // 校稿：右欄換成建議清單，信紙標出被點選的那張卡要改哪裡。
+  const showProofread = proofread !== null && proofread.lang === activeLang && !completed && draft !== null;
   const letterText = draft?.[activeLang] ?? "";
   const lengthLabel = `${activeLang === "zh" ? "共 " : ""}${letterLength(letterText, activeLang)} ${letterLengthUnit(activeLang)}`;
   const checklistLang = resumeLanguages.includes(activeLang) ? activeLang : resumeLanguages[0];
@@ -361,37 +477,54 @@ export function CoverLetter({
         {stepBar}
         {draft && (
           <div className="canvas-bar">
-            <LangSwitch
-              options={(draftLangs.length > 0 ? draftLangs : Object.keys(draft)).map((lang) => ({
-                value: lang,
-                label: LANG_LABEL[lang] ?? lang,
-              }))}
-              value={activeLang}
-              onChange={setActiveLang}
-            />
-            <span className="letter-length">{lengthLabel}</span>
+            {/* 左邊：語言、字數、上一步／下一步、存檔狀態，跟履歷頁一樣（2026-10-28）。 */}
+            <div className="canvas-bar-start">
+              <LangSwitch
+                options={(draftLangs.length > 0 ? draftLangs : Object.keys(draft)).map((lang) => ({
+                  value: lang,
+                  label: LANG_LABEL[lang] ?? lang,
+                }))}
+                value={activeLang}
+                onChange={setActiveLang}
+              />
+              <span className="letter-length">{lengthLabel}</span>
+              {!completed && (
+                <div className="canvas-history">
+                  <button
+                    type="button"
+                    className="icon-btn canvas-history-btn"
+                    onClick={undoRevision}
+                    disabled={isPending || !undo}
+                    title="上一步：回到 AI 改之前的信"
+                    aria-label="上一步"
+                  >
+                    <UndoIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn canvas-history-btn"
+                    onClick={redoRevision}
+                    disabled={isPending || !redo}
+                    title="下一步"
+                    aria-label="下一步"
+                  >
+                    <RedoIcon />
+                  </button>
+                </div>
+              )}
+              {!completed && <SaveStatus state={autosave.state} error={autosave.error} onRetry={() => void autosave.retry()} />}
+            </div>
             <div className="canvas-bar-actions">
               {!completed ? (
                 <>
-                  {/* 順序跟履歷頁一樣：儲存在最左邊、重新產生跟重新比對排在一起、主要按鈕「定案」在最右邊（2026-10-25 Z 要求）。 */}
-                  <button type="button" onClick={handleSave} disabled={isPending} className="btn btn-secondary">
-                    {busy === "save" && <Spinner />}
-                    {flashed === "save" ? (
-                      <>
-                        <CheckIcon /> 已儲存
-                      </>
-                    ) : (
-                      "儲存"
-                    )}
-                  </button>
-                  {undo && (
-                    <button type="button" onClick={undoRevision} disabled={isPending} className="btn btn-secondary">
-                      復原上一版
-                    </button>
-                  )}
+                  {/* 跟履歷頁一樣四顆：跟 AI 聊、重新產生、校稿、主要按鈕「定案」在最右邊（2026-10-28 Z 同意）。
+                      存檔改成自動、上一步在左邊，重新比對移到右欄 JD 條件對照卡片上。 */}
                   <button
                     type="button"
-                    onClick={() => setChatOpen((v) => !v)}
+                    onClick={() => {
+                      setChatOpen((v) => !v);
+                      setProofread(null);
+                    }}
                     disabled={isPending && !chatOpen}
                     className="btn btn-secondary"
                   >
@@ -405,14 +538,9 @@ export function CoverLetter({
                   >
                     重新產生
                   </button>
-                  <button type="button" onClick={handleRecheck} disabled={isPending} className="btn btn-secondary">
-                    {flashed === "recheck" ? (
-                      <>
-                        <CheckIcon /> 已比對
-                      </>
-                    ) : (
-                      "重新比對"
-                    )}
+                  <button type="button" onClick={handleProofread} disabled={isPending} className="btn btn-secondary">
+                    {busy === "proofread" && <Spinner />}
+                    校稿
                   </button>
                   <button type="button" onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
                     {busy === "finalize" && <Spinner />}
@@ -450,6 +578,9 @@ export function CoverLetter({
         {recheckProgress !== null && (
           <ProgressBar value={recheckProgress} label="用履歷＋求職信重新比對 JD…" />
         )}
+        {proofreadProgress !== null && (
+          <ProgressBar value={proofreadProgress} label="校稿中：檢查錯字、文法、AI 腔，跟經歷資料庫對事實…" />
+        )}
         {addProgress !== null && (
           <ProgressBar value={addProgress} label="補進求職信，補完立刻比對一次…" />
         )}
@@ -462,10 +593,13 @@ export function CoverLetter({
                 value={letterText}
                 base={completed ? null : (addedBase[activeLang] ?? null)}
                 readOnly={completed}
+                marks={showProofread ? issuesForCard(proofread.issues, proofread.active) : undefined}
                 onChange={(text) => {
-                  setDraft((prev) => (prev ? { ...prev, [activeLang]: text } : prev));
+                  const next = { ...draft, [activeLang]: text };
+                  setDraft(next);
                   setUndo(null);
                   clearHighlight();
+                  autosave.schedule({ draft: next });
                 }}
               />
             </div>
@@ -503,34 +637,61 @@ export function CoverLetter({
       </div>
 
       <div className="canvas-sidebar canvas-sidebar--match">
-        <div className="card card--sm">
-          <h2 className="heading-card">JD 條件對照</h2>
-          <JdFitScore
-            items={checklistItems.filter((i) => !i.invalid)}
-            note={
-              <ul>
-                <li>履歷＋求職信合起來涵蓋的 JD 條件比例</li>
-                <li>軟實力、工作條件也算，這兩類靠求職信補</li>
-                <li>生成時會自動比對，之後改了信要按「重新比對」</li>
-                <li>信沒改，比對結果就不變</li>
-              </ul>
-            }
+        {showProofread ? (
+          <ProofreadPanel
+            issues={proofread.issues}
+            activeKey={proofread.active}
+            disabled={isPending}
+            onActivate={activateProofread}
+            onApply={applyProofread}
+            onSkip={skipProofread}
+            onClose={() => setProofread(null)}
           />
-          <JdChecklist
-            items={checklistItems}
-            isCovered={(i) => i.covered}
-            scope="letter"
-            language={checklistLang}
-            onAddToLetter={completed || isPending || !draft ? undefined : handleAddToLetter}
-          />
-          {researchSources.length > 0 && <ResearchSources urls={researchSources} />}
-        </div>
+        ) : (
+            <div className="card card--sm">
+              {/* 「重新比對」放在卡片標題旁：它更新的就是這張卡（2026-10-28 從工具列移過來）。 */}
+              <div className="card-heading-row">
+                <h2 className="heading-card">JD 條件對照</h2>
+                {!completed && draft && (
+                  <button type="button" onClick={handleRecheck} disabled={isPending} className="btn btn-secondary btn--sm">
+                    {busy === "recheck" && <Spinner />}
+                    {flashed === "recheck" ? (
+                      <>
+                        <CheckIcon /> 已比對
+                      </>
+                    ) : (
+                      "重新比對"
+                    )}
+                  </button>
+                )}
+              </div>
+              <JdFitScore
+                items={checklistItems.filter((i) => !i.invalid)}
+                note={
+                  <ul>
+                    <li>履歷＋求職信合起來涵蓋的 JD 條件比例</li>
+                    <li>軟實力、工作條件也算，這兩類靠求職信補</li>
+                    <li>生成時會自動比對，之後改了信要按「重新比對」</li>
+                    <li>信沒改，比對結果就不變</li>
+                  </ul>
+                }
+              />
+              <JdChecklist
+                items={checklistItems}
+                isCovered={(i) => i.covered}
+                scope="letter"
+                language={checklistLang}
+                onAddToLetter={completed || isPending || !draft ? undefined : handleAddToLetter}
+              />
+              {researchSources.length > 0 && <ResearchSources urls={researchSources} />}
+            </div>
+        )}
       </div>
 
       {confirmRegenerate && (
         <ConfirmDialog
           title="重新產生求職信？"
-          message="AI 會依履歷、經歷資料庫跟 JD 從頭寫一封新的，畫面上現在的信會被換掉，包括你手動改過的地方。產生完不滿意，可以按「復原上一版」拿回現在這一封。"
+          message="AI 會依履歷、經歷資料庫跟 JD 從頭寫一封新的，畫面上現在的信會被換掉，包括你手動改過的地方。產生完不滿意，可以按「上一步」拿回現在這一封。"
           confirmLabel="重新產生"
           tone="primary"
           confirmDisabled={choiceInvalid(choice)}

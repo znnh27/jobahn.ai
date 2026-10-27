@@ -52,7 +52,7 @@ jobahn runs on your own computer with your own accounts. Nothing is sent to the 
 
 2. **Set up Supabase**
    - Create a project.
-   - Create the database tables. All the SQL lives in `supabase/migrations/` (`0001` → `0010`, run in that order). The easiest way is to copy all of it at once:
+   - Create the database tables. All the SQL lives in `supabase/migrations/` (`0001` → `0011`, run in that order). The easiest way is to copy all of it at once:
 
      ```bash
      cat supabase/migrations/*.sql | pbcopy                        # macOS

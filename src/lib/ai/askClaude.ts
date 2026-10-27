@@ -70,6 +70,9 @@ const MEMORY_FEATURES = new Set([
   "experience_bulk_scan",
   "experience_quality_check",
   "background_interview",
+  // 校稿要拿「AI 記住的事」對照事實（例如已經離職卻寫成目前任職）。
+  "resume_proofread",
+  "cover_letter_proofread",
 ]);
 
 export async function askClaude(input: AskClaudeParams): Promise<AskClaudeResult> {

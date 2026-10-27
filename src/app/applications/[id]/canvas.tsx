@@ -13,8 +13,20 @@ import {
   suggestTrimAction,
   measureResumesAction,
   saveLayoutAction,
+  proofreadResumeAction,
+  dismissProofreadAction,
   type TrimSuggestion,
 } from "./actions";
+import { ProofreadPanel } from "./ProofreadPanel";
+import { scrollToFirstMark } from "./ProofreadMarks";
+import {
+  applyToResume,
+  issuesForCard,
+  nextCardKey,
+  proofreadCardKeys,
+  resumeMarks,
+  type ProofreadIssue,
+} from "@/lib/resumes/proofreadTypes";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { ResumePageCanvas } from "./ResumePageCanvas";
 import { TrimDialog, applyTrimSuggestions, findMinimalTrim } from "./TrimDialog";
@@ -33,6 +45,8 @@ import { hasRequiredContact, type ResumeContact } from "@/lib/resumes/contact";
 import { ContactDialog } from "@/app/ContactForm";
 import { CheckIcon, CloseIcon, RedoIcon, UndoIcon } from "@/app/icons";
 import { useFlash } from "@/app/useFlash";
+import { useAutoSave } from "@/app/useAutoSave";
+import { SaveStatus } from "@/app/SaveStatus";
 import { useUndoShortcuts } from "@/app/useUndoShortcuts";
 import { SectionLabelsProvider } from "@/app/SectionLabels";
 import type { CustomSectionLabels } from "@/lib/resumes/sectionLabels";
@@ -85,7 +99,7 @@ const UNDO_LIMIT = 30;
 // 取捨建議最多請 AI 補幾輪（一輪不夠塞回一頁才會補下一輪）。
 const TRIM_MAX_ROUNDS = 3;
 
-type Busy = "generate" | "rescore" | "condition" | "save" | "finalize" | "reopen" | "trim";
+type Busy = "generate" | "rescore" | "condition" | "finalize" | "reopen" | "trim" | "proofread";
 
 const LANG_LABEL: Record<string, string> = { en: "英文", zh: "中文" };
 
@@ -172,7 +186,7 @@ export function Canvas({
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [activeLang, setActiveLang] = useState(languages[0]);
   const [message, setMessage] = useState<string | null>(null);
-  // 儲存、重新檢查評分這種簡短確認不進訊息列，按鈕本身變「✓ 已儲存」2 秒（見 useFlash）。
+  // 重新檢查評分這種簡短確認不進訊息列，按鈕本身變「✓ 已重新評分」2 秒（見 useFlash）。
   const { flashed, flash } = useFlash();
   // 記錄是哪個動作在跑，進度條的說明文字跟位置才對得上。
   const [busy, setBusy] = useState<Busy | null>(null);
@@ -209,6 +223,9 @@ export function Canvas({
   const [coverChoiceDialog, setCoverChoiceDialog] = useState(false);
   // 「跟 AI 聊」面板：浮在右下角，邊聊邊看畫布。
   const [chatOpen, setChatOpen] = useState(false);
+  // 「校稿」的建議清單：記下是哪個語言的，切到別的語言就不顯示。校稿時取代右欄的 JD 條件，跟「跟 AI 聊」不同時開。
+  // active 是被點選的那張卡（見 proofreadCardKeys），畫布上會標出它要改哪裡。
+  const [proofread, setProofread] = useState<{ lang: string; issues: ProofreadIssue[]; active: string | null } | null>(null);
   // 「重新產生履歷」會蓋掉畫布上的內容（含手動改的），先確認。
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);
   const [coverChoice, setCoverChoice] = useState<CoverLetterChoice>(() =>
@@ -224,10 +241,13 @@ export function Canvas({
   const conditionProgress = useEstimatedProgress(busy === "condition", 35000 * langCount);
   const finalizeProgress = useEstimatedProgress(busy === "finalize", 20000);
   const trimProgress = useEstimatedProgress(busy === "trim", 20000);
+  const proofreadProgress = useEstimatedProgress(busy === "proofread", 40000);
 
   async function run(kind: Busy, fn: () => Promise<void>) {
     setBusy(kind);
     try {
+      // 還沒存的修改先存完：定案、評分這些動作會讀資料庫裡的草稿，也避免晚到的存檔蓋掉 AI 剛寫好的內容。
+      await autosave.flush();
       await fn();
     } catch (e) {
       setMessage(`錯誤：${e instanceof Error ? e.message : "發生錯誤，請再試一次"}`);
@@ -304,7 +324,7 @@ export function Canvas({
     updateResume(activeLang, (r) => applyTrimSuggestions(r, picked));
     setCanvasVersion((v) => v + 1);
     setTrimPlan(null);
-    setMessage(`已套用 ${picked.length} 項取捨，可按「上一步」退回，記得儲存`);
+    setMessage(`已套用 ${picked.length} 項取捨，可按「上一步」退回`);
   }
 
   /** 調字級／間距：畫布馬上套用，停 0.5 秒後存檔（定案後也能調，下載的檔案會跟著變）。 */
@@ -324,14 +344,12 @@ export function Canvas({
     setFuture([]);
   }
 
-  // 跟 AI 聊改完、上一步／下一步之後自動存檔（2026-10-27 Z 要求：AI 改完沒存，離開就不見；上一步也要存，
-  // 重新整理才不會又跑回 AI 改的版本）。在背景存、不鎖按鈕；一個接一個存，連按上一步時最後存的一定是畫面上這一版。
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  // 全部自動存檔，沒有「儲存」按鈕（2026-10-28 Z 同意）：自己打字改的停 1 秒存（updateResume），
+  // 跟 AI 聊、上一步／下一步、套用校稿這種一次換掉的馬上存（autoSave）。在背景存、不鎖按鈕，工具列左邊顯示存檔狀態。
+  const saveDraft = useCallback((next: ResumeMap) => saveDraftAction(applicationId, next), [applicationId]);
+  const autosave = useAutoSave(saveDraft);
   function autoSave(next: ResumeMap) {
-    saveQueue.current = saveQueue.current.then(async () => {
-      const result = await saveDraftAction(applicationId, next);
-      if (result.error) setMessage(`錯誤：自動儲存失敗（${result.error}），請按「儲存」`);
-    });
+    void autosave.saveNow(next);
   }
 
   /** 換成上一步／下一步的內容：只換內容，字級跟間距維持現在的設定（排版設定是另外存的，不算一步）。 */
@@ -411,17 +429,26 @@ export function Canvas({
       setGaps(result.data.ats_gaps);
       setCanvasVersion((v) => v + 1);
       // 第一次生成不顯示「生成完成」，履歷出現在畫布上就是回饋（2026-10-27 Z 要求）；重新產生才提醒可以退回上一版。
-      if (previous) setMessage("已重新產生；想回到上一版可以按「上一步」再按「儲存」");
+      if (previous) setMessage("已重新產生；想回到上一版可以按「上一步」");
     });
   }
+
+  // 畫布上正在打字（還沒失焦）時是 true，見 ResumePageCanvas 的 LiveContext。
+  const liveEdit = useRef(false);
 
   function updateResume(lang: string, updater: (r: Resume) => Resume) {
     if (!draft) return;
     const next = { ...draft, [lang]: updater(draft[lang]) };
     // 失焦也會觸發一次提交，內容沒變就不記進上一步。
     if (JSON.stringify(next[lang]) === JSON.stringify(draft[lang])) return;
+    // 打字當下：只排程存檔，畫面狀態跟上一步等失焦再更新（重新渲染會讓游標跑掉）。
+    if (liveEdit.current) {
+      autosave.schedule(next);
+      return;
+    }
     remember(draft);
     setDraft(next);
+    autosave.schedule(next);
   }
 
   // 「跟 AI 聊」改好的整份履歷換進草稿並自動存檔：記進上一步、畫布重新掛載才看得到新內容。字級間距維持現在的設定。
@@ -432,7 +459,84 @@ export function Canvas({
     setDraft(nextDraft);
     setCanvasVersion((v) => v + 1);
     autoSave(nextDraft);
-    setMessage("AI 改好了，已自動儲存；不滿意可以按「上一步」");
+    setMessage("AI 改好了；不滿意可以按「上一步」");
+  }
+
+  function handleProofread() {
+    if (!draft) return;
+    const lang = activeLang;
+    setMessage(null);
+    setChatOpen(false);
+    setProofread(null);
+    void run("proofread", async () => {
+      const result = await proofreadResumeAction(applicationId, lang, draft[lang]);
+      if (result.error || !result.issues) {
+        setMessage(`錯誤：${result.error ?? "校稿失敗，請再試一次"}`);
+        return;
+      }
+      if (result.issues.length === 0) {
+        setMessage("校稿完成，沒發現問題");
+        return;
+      }
+      setProofread({ lang, issues: result.issues, active: proofreadCardKeys(result.issues)[0] ?? null });
+      scrollToFirstMark();
+    });
+  }
+
+  /** 點選一張建議卡：畫布捲到它要改的地方。 */
+  function activateProofread(key: string) {
+    setProofread((p) => (p ? { ...p, active: key } : p));
+    scrollToFirstMark();
+  }
+
+  /** 處理掉一張卡（套用或略過）：從清單拿掉，選下一張；最後一張處理完就關掉、換回 JD 條件。 */
+  function dropProofreadCard(key: string) {
+    if (!proofread) return;
+    const before = proofreadCardKeys(proofread.issues);
+    const done = new Set(issuesForCard(proofread.issues, key).map((i) => i.id));
+    const issues = proofread.issues.filter((i) => !done.has(i.id));
+    if (issues.length === 0) {
+      setProofread(null);
+      return;
+    }
+    setProofread({ ...proofread, issues, active: nextCardKey(before, key, proofreadCardKeys(issues)) });
+    scrollToFirstMark();
+  }
+
+  /** 按「略過」「知道了」：記下來（之後校稿不再列），再從清單拿掉。 */
+  function skipProofread(key: string) {
+    if (!proofread) return;
+    const picked = issuesForCard(proofread.issues, key).map((i) => ({ category: i.category, quote: i.quote }));
+    void dismissProofreadAction(applicationId, "resume", proofread.lang, picked);
+    dropProofreadCard(key);
+  }
+
+  // 套用一張卡的校稿建議（格式卡一次好幾項，算一步）：跟「跟 AI 聊」一樣記進上一步、畫布重新掛載、自動存檔。
+  // 原文已經被改掉的項目略過。
+  function applyProofread(key: string) {
+    if (!draft || !proofread) return;
+    const lang = proofread.lang;
+    const picked = issuesForCard(proofread.issues, key);
+    dropProofreadCard(key);
+    let next = draft[lang];
+    let missed = 0;
+    for (const issue of picked) {
+      const applied = applyToResume(next, issue);
+      if (applied) next = applied;
+      else missed++;
+    }
+    if (missed === picked.length) {
+      setMessage("這段已經改過了，找不到原文，略過這一項");
+      return;
+    }
+    const nextDraft = { ...draft, [lang]: next };
+    remember(draft);
+    setDraft(nextDraft);
+    setCanvasVersion((v) => v + 1);
+    autoSave(nextDraft);
+    setMessage(
+      `已套用${picked.length > 1 ? ` ${picked.length - missed} 處` : ""}校稿建議；不滿意可以按「上一步」${missed > 0 ? `（${missed} 處原文已經改過，略過）` : ""}`,
+    );
   }
 
   function handleRescore() {
@@ -473,16 +577,6 @@ export function Canvas({
       } else {
         setMessage("記下來了，之後的職缺遇到同樣的條件不會再問");
       }
-    });
-  }
-
-  function handleSave() {
-    if (!draft) return;
-    setMessage(null);
-    void run("save", async () => {
-      const result = await saveDraftAction(applicationId, draft);
-      if (result.error) setMessage(`錯誤：${result.error}`);
-      else flash("save");
     });
   }
 
@@ -567,6 +661,9 @@ export function Canvas({
   // 還沒有清單的舊資料才用資料庫存的分數。
   const langScore = computeAtsScore(checklist[activeLang] ?? []) ?? atsScore;
   const layout = readLayoutSettings(resume.layout, activeLang);
+  // 校稿：右欄換成建議清單，畫布標出被點選的那張卡要改哪裡。
+  const showProofread = proofread !== null && proofread.lang === activeLang && !finalized;
+  const marks = showProofread ? resumeMarks(resume, issuesForCard(proofread.issues, proofread.active)) : undefined;
 
   return (
     <SectionLabelsProvider initial={initialSectionLabels} onChange={() => setLabelsVersion((v) => v + 1)}>
@@ -607,6 +704,7 @@ export function Canvas({
                 </button>
               </div>
             )}
+            {!finalized && <SaveStatus state={autosave.state} error={autosave.error} onRetry={() => void autosave.retry()} />}
           </div>
           <div className="canvas-bar-actions">
             {finalized ? (
@@ -643,20 +741,14 @@ export function Canvas({
               </>
             ) : (
               <>
-                {/* 儲存固定在最左邊、重新產生跟重新檢查評分排在一起、主要按鈕「定案」在最右邊（2026-10-25 Z 要求，跟求職信頁一樣）。 */}
-                <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
-                  {busy === "save" && <Spinner />}
-                  {flashed === "save" ? (
-                    <>
-                      <CheckIcon /> 已儲存
-                    </>
-                  ) : (
-                    "儲存"
-                  )}
-                </button>
+                {/* 兩頁一樣四顆：跟 AI 聊、重新產生、校稿、主要按鈕「定案」在最右邊（2026-10-28 Z 同意）。
+                    存檔改成自動（狀態在左邊），重新檢查評分移到右欄 JD 符合度卡片上。 */}
                 <button
                   type="button"
-                  onClick={() => setChatOpen((v) => !v)}
+                  onClick={() => {
+                    setChatOpen((v) => !v);
+                    setProofread(null);
+                  }}
                   disabled={isPending && !chatOpen}
                   className="btn btn-secondary"
                 >
@@ -665,14 +757,9 @@ export function Canvas({
                 <button type="button" onClick={() => setConfirmRegenerate(true)} disabled={isPending} className="btn btn-secondary">
                   重新產生履歷
                 </button>
-                <button onClick={handleRescore} disabled={isPending} className="btn btn-secondary">
-                  {flashed === "rescore" ? (
-                    <>
-                      <CheckIcon /> 已重新評分
-                    </>
-                  ) : (
-                    "重新檢查評分"
-                  )}
+                <button type="button" onClick={handleProofread} disabled={isPending} className="btn btn-secondary">
+                  {busy === "proofread" && <Spinner />}
+                  校稿
                 </button>
                 <button onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
                   定案
@@ -694,6 +781,9 @@ export function Canvas({
         )}
         {finalizeProgress !== null && (
           <ProgressBar value={finalizeProgress} label="定案中，把這次用到的內容寫回經歷資料庫…" />
+        )}
+        {proofreadProgress !== null && (
+          <ProgressBar value={proofreadProgress} label="校稿中：檢查錯字、文法、AI 腔，跟經歷資料庫對事實…" />
         )}
         {trimProgress !== null && <ProgressBar value={trimProgress} label="AI 正在依 JD 判斷哪些內容可以精簡或刪掉…" />}
         {showOverflowAlert && trimProgress === null && (
@@ -732,6 +822,8 @@ export function Canvas({
           contact={contact}
           editable={!finalized}
           pageBreak={overflowPt > 0 ? (fit?.breakAt ?? null) : null}
+          marks={marks}
+          liveEdit={liveEdit}
           onEditContact={() => setContactDialog("edit")}
           onChangeSummary={(text) => updateResume(activeLang, (r) => ({ ...r, summary: text }))}
           onChangeSkills={(text) =>
@@ -786,41 +878,68 @@ export function Canvas({
       </div>
 
       <div className="canvas-sidebar canvas-sidebar--match">
-        <div className="card card--sm">
-          <h2 className="heading-card">
-            JD 符合度（{LANG_LABEL[activeLang]}）
-            <InfoTip label="JD 符合度怎麼算">
-              <ul>
-                <li>逐條比對 JD 條件，不是雇主 ATS 系統的分數</li>
-                <li>必要條件每項 2 分，加分條件每項 1 分</li>
-                <li>部分符合算一半</li>
-                <li>履歷內容沒改，分數就不變</li>
-              </ul>
-            </InfoTip>
-          </h2>
-          <p className="ats-score-value">
-            {langScore ?? "—"}
-            <span className="ats-score-max"> / 100</span>
-            {langScore !== null && (
-              <span className={`ats-band-tag ${getAtsBand(langScore).text}`}>
-                {getAtsBand(langScore).label}
-              </span>
-            )}
-          </p>
-          <AtsScoreLegend score={langScore} />
-          {/* 四段分數的說明直接攤開；公式收在標題旁的 ⓘ（2026-10-23 使用者要求縮起來）。 */}
-          <div className="ats-score-help">
-            <AtsScoreHelp score={langScore} />
-          </div>
-          <JdChecklist
-            items={checklist[activeLang] ?? []}
-            isCovered={coveredByResume}
-            language={activeLang}
-            legacyGaps={gaps[activeLang] ?? []}
-            onDig={finalized ? undefined : setGapDialogText}
-            onAnswerCondition={finalized || isPending ? undefined : handleAnswerCondition}
+        {showProofread ? (
+          <ProofreadPanel
+            issues={proofread.issues}
+            activeKey={proofread.active}
+            disabled={isPending}
+            onActivate={activateProofread}
+            onApply={applyProofread}
+            onSkip={skipProofread}
+            onClose={() => setProofread(null)}
           />
-        </div>
+        ) : (
+          <div className="card card--sm">
+            {/* 「重新檢查評分」放在卡片標題旁：它更新的就是這張卡的分數（2026-10-28 從工具列移過來）。 */}
+            <div className="card-heading-row">
+              <h2 className="heading-card">
+                JD 符合度（{LANG_LABEL[activeLang]}）
+                <InfoTip label="JD 符合度怎麼算">
+                  <ul>
+                    <li>逐條比對 JD 條件，不是雇主 ATS 系統的分數</li>
+                    <li>必要條件每項 2 分，加分條件每項 1 分</li>
+                    <li>部分符合算一半</li>
+                    <li>履歷內容沒改，分數就不變</li>
+                  </ul>
+                </InfoTip>
+              </h2>
+              {!finalized && (
+                <button type="button" onClick={handleRescore} disabled={isPending} className="btn btn-secondary btn--sm">
+                  {busy === "rescore" && <Spinner />}
+                  {flashed === "rescore" ? (
+                    <>
+                      <CheckIcon /> 已重新評分
+                    </>
+                  ) : (
+                    "重新評分"
+                  )}
+                </button>
+              )}
+            </div>
+            <p className="ats-score-value">
+              {langScore ?? "—"}
+              <span className="ats-score-max"> / 100</span>
+              {langScore !== null && (
+                <span className={`ats-band-tag ${getAtsBand(langScore).text}`}>
+                  {getAtsBand(langScore).label}
+                </span>
+              )}
+            </p>
+            <AtsScoreLegend score={langScore} />
+            {/* 四段分數的說明直接攤開；公式收在標題旁的 ⓘ（2026-10-23 使用者要求縮起來）。 */}
+            <div className="ats-score-help">
+              <AtsScoreHelp score={langScore} />
+            </div>
+            <JdChecklist
+              items={checklist[activeLang] ?? []}
+              isCovered={coveredByResume}
+              language={activeLang}
+              legacyGaps={gaps[activeLang] ?? []}
+              onDig={finalized ? undefined : setGapDialogText}
+              onAnswerCondition={finalized || isPending ? undefined : handleAnswerCondition}
+            />
+          </div>
+        )}
       </div>
 
       {chatOpen && !finalized && activeResume && (

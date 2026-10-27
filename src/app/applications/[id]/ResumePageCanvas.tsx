@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { ResumePaper } from "@/app/ResumePaper";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { contactParts, hasRequiredContact, pickName, type ResumeContact } from "@/lib/resumes/contact";
@@ -8,10 +8,38 @@ import { pdfKey, ptToPx, resolveMetrics, type PdfFit, type ResumeSectionKey } fr
 import { SectionTitle } from "@/app/SectionLabels";
 import { joinList } from "@/lib/resumes/background";
 import { cleanBulletText, insertLineBreak, isComposing, placeCaret, splitAtCaret } from "@/app/bulletEditing";
+import type { ProofreadIssue } from "@/lib/resumes/proofreadTypes";
+import { markedText } from "./ProofreadMarks";
 
 type Resume = GeneratedResume["resume"];
 type ExperienceEntry = Resume["work_experience"][number];
 
+
+/**
+ * 校稿時被點選的那張建議卡要標在哪幾格（key 是 proofreadTypes.ts 的格子代號，技能全部算 "skills"）。
+ * 有標記的那一格改成唯讀、顯示刪除線跟綠底，按套用或略過之後畫布重新掛載就回到可以編輯。
+ */
+const MarksContext = createContext<Map<string, ProofreadIssue[]>>(new Map());
+
+/**
+ * 打字當下就存檔（2026-10-28 拿掉「儲存」按鈕後）：每一格平常是失焦才把內容交出去（onCommit），
+ * 打完字沒點別的地方就重新整理會不見。打字時也呼叫同一個 onCommit，但先把 live 標成 true，
+ * 頁面看到 live 就只排程存檔、不更新畫面狀態（contentEditable 重新渲染游標會跑掉），失焦時才正式記進上一步。
+ */
+const LiveContext = createContext<RefObject<boolean> | null>(null);
+
+function useLiveCommit() {
+  const liveRef = useContext(LiveContext);
+  return (commit: () => void) => {
+    if (!liveRef) return;
+    liveRef.current = true;
+    try {
+      commit();
+    } finally {
+      liveRef.current = false;
+    }
+  };
+}
 
 /** 畫布寬 794px 對應 A4 寬（96 dpi），紙本身見 ResumePaper。 */
 const PAGE_WIDTH_PX = 794;
@@ -33,6 +61,10 @@ interface ResumePageCanvasProps {
   onChangeEducationField: (index: number, field: EducationField, value: string) => void;
   /** 把整段經歷從這份履歷拿掉（經歷資料庫不受影響）。 */
   onRemoveEntry: (section: ResumeSectionKey, index: number) => void;
+  /** 校稿：被點選的建議要標在哪幾格，沒有就不標。 */
+  marks?: Map<string, ProofreadIssue[]>;
+  /** 打字當下呼叫 onCommit 時設成 true（見 LiveContext）。 */
+  liveEdit?: RefObject<boolean>;
 }
 
 export function ResumePageCanvas({
@@ -49,6 +81,8 @@ export function ResumePageCanvas({
   onChangeEntryField,
   onChangeEducationField,
   onRemoveEntry,
+  marks,
+  liveEdit,
 }: ResumePageCanvasProps) {
   const name = pickName(contact, language);
   const parts = contactParts(contact, language);
@@ -78,6 +112,8 @@ export function ResumePageCanvas({
   }, [pageBreak, lineHeightPt]);
 
   return (
+    <LiveContext.Provider value={liveEdit ?? null}>
+    <MarksContext.Provider value={marks ?? EMPTY_MARKS}>
     <ResumePaper language={language} layout={resume.layout} pageRef={pageRef}>
       {breakTop !== null && (
         <div className="resume-page-break" style={{ top: breakTop }} aria-hidden="true">
@@ -119,6 +155,7 @@ export function ResumePageCanvas({
 
         <SectionHeader id="summary"><SectionTitle language={language} labelKey="summary" editable={editable} /></SectionHeader>
         <EditableParagraph
+          fieldId="summary"
           pdfKeyValue={pdfKey.summary()}
           value={resume.summary}
           editable={editable}
@@ -199,7 +236,7 @@ export function ResumePageCanvas({
         <SectionHeader id="skills"><SectionTitle language={language} labelKey="skills" editable={editable} /></SectionHeader>
         <div data-pdf-key={pdfKey.skills()}>
           <span className="resume-skills-label"><SectionTitle language={language} labelKey="computer" editable={editable} />{" "}</span>
-          <EditableSpan value={joinList(resume.skills, language)} editable={editable} onCommit={onChangeSkills} />
+          <EditableSpan fieldId="skills" value={joinList(resume.skills, language)} editable={editable} onCommit={onChangeSkills} />
         </div>
         {(resume.languages ?? []).length > 0 && (
           <div data-pdf-key={pdfKey.languages()}>
@@ -213,8 +250,12 @@ export function ResumePageCanvas({
         )}
       </div>
     </ResumePaper>
+    </MarksContext.Provider>
+    </LiveContext.Provider>
   );
 }
+
+const EMPTY_MARKS = new Map<string, ProofreadIssue[]>();
 
 function SectionHeader({ id, children }: { id: string; children: React.ReactNode }) {
   return (
@@ -273,7 +314,13 @@ function ExperienceBlock({
         )}
       </div>
       <div className="resume-row resume-row--role" data-pdf-key={pdfKey.role(section, index)}>
-        <EditableSpan className="resume-row-left" value={entry.role} editable={editable} onCommit={(v) => onChangeField("role", v)} />
+        <EditableSpan
+          fieldId={`${section}.${index}.role`}
+          className="resume-row-left"
+          value={entry.role}
+          editable={editable}
+          onCommit={(v) => onChangeField("role", v)}
+        />
         <EditableSpan
           className="resume-row-right"
           value={entry.period}
@@ -282,6 +329,7 @@ function ExperienceBlock({
         />
       </div>
       <EditableBulletList
+        fieldId={(j) => `${section}.${index}.bullets.${j}`}
         bulletKey={(j) => pdfKey.bullet(section, index, j)}
         bullets={entry.bullets}
         editable={editable}
@@ -292,16 +340,26 @@ function ExperienceBlock({
 }
 
 function EditableParagraph({
+  fieldId,
   pdfKeyValue,
   value,
   editable,
   onCommit,
 }: {
+  fieldId: string;
   pdfKeyValue: string;
   value: string;
   editable: boolean;
   onCommit: (text: string) => void;
 }) {
+  const marks = useContext(MarksContext).get(fieldId);
+  const live = useLiveCommit();
+  if (marks)
+    return (
+      <div key="marked" data-pdf-key={pdfKeyValue} className="resume-editable proofread-marked">
+        {markedText(value, marks)}
+      </div>
+    );
   return (
     <div
       data-pdf-key={pdfKeyValue}
@@ -310,6 +368,10 @@ function EditableParagraph({
       data-committed={value}
       suppressContentEditableWarning
       onBlur={(e) => onCommit(e.currentTarget.textContent ?? "")}
+      onInput={(e) => {
+        const text = e.currentTarget.textContent ?? "";
+        live(() => onCommit(text));
+      }}
       className={`resume-editable ${editable ? "resume-editable--editable" : ""}`}
     >
       {value}
@@ -318,16 +380,27 @@ function EditableParagraph({
 }
 
 function EditableSpan({
+  fieldId,
   value,
   editable,
   onCommit,
   className = "",
 }: {
+  /** 校稿標記用的格子代號；學歷、公司名這些不校稿的格子不用給。 */
+  fieldId?: string;
   value: string;
   editable: boolean;
   onCommit: (text: string) => void;
   className?: string;
 }) {
+  const marks = useContext(MarksContext).get(fieldId ?? "");
+  const live = useLiveCommit();
+  if (marks)
+    return (
+      <span key="marked" className={`resume-editable proofread-marked ${className}`}>
+        {markedText(value, marks)}
+      </span>
+    );
   return (
     <span
       contentEditable={editable}
@@ -335,6 +408,10 @@ function EditableSpan({
       data-committed={value}
       suppressContentEditableWarning
       onBlur={(e) => onCommit(e.currentTarget.textContent ?? "")}
+      onInput={(e) => {
+        const text = e.currentTarget.textContent ?? "";
+        live(() => onCommit(text));
+      }}
       className={`resume-editable ${editable ? "resume-editable--editable" : ""} ${className}`}
     >
       {value}
@@ -343,17 +420,21 @@ function EditableSpan({
 }
 
 function EditableBulletList({
+  fieldId,
   bulletKey,
   bullets,
   editable,
   onChange,
 }: {
+  fieldId: (index: number) => string;
   bulletKey: (index: number) => string;
   bullets: string[];
   editable: boolean;
   onChange: (bullets: string[]) => void;
 }) {
   const refs = useRef<Array<HTMLDivElement | null>>([]);
+  const marks = useContext(MarksContext);
+  const live = useLiveCommit();
   // 用 {index, token} 而不是單純的 index：token 每次都遞增成新物件，確保就算兩次都要 focus
   // 同一個 index，effect 依賴也一定會變化而重新觸發，不用在 effect 裡把狀態設回 null。
   const [focusRequest, setFocusRequest] = useState<{ index: number; atStart: boolean; token: number } | null>(null);
@@ -408,20 +489,28 @@ function EditableBulletList({
       {bullets.map((b, i) => (
         <div key={i} className="resume-bullet" data-pdf-key={bulletKey(i)}>
           <span className="resume-bullet-dot">{"•"}</span>
-          <div
-            ref={(el) => {
-              refs.current[i] = el;
-            }}
-            contentEditable={editable}
-            // 鍵盤 Cmd/Ctrl + Z 用：跟存好的內容一樣才算「沒在打字」（見 app/useUndoShortcuts.ts）。
-            data-committed={b}
-            suppressContentEditableWarning
-            onBlur={(e) => commitBulletText(i, e.currentTarget.textContent ?? "")}
-            onKeyDown={(e) => handleKeyDown(e, i)}
-            className={`resume-editable resume-bullet-text ${editable ? "resume-editable--editable" : ""}`}
-          >
-            {b}
-          </div>
+          {marks.has(fieldId(i)) ? (
+            <div className="resume-editable resume-bullet-text proofread-marked">{markedText(b, marks.get(fieldId(i))!)}</div>
+          ) : (
+            <div
+              ref={(el) => {
+                refs.current[i] = el;
+              }}
+              contentEditable={editable}
+              // 鍵盤 Cmd/Ctrl + Z 用：跟存好的內容一樣才算「沒在打字」（見 app/useUndoShortcuts.ts）。
+              data-committed={b}
+              suppressContentEditableWarning
+              onBlur={(e) => commitBulletText(i, e.currentTarget.textContent ?? "")}
+              onInput={(e) => {
+                const text = e.currentTarget.textContent ?? "";
+                live(() => commitBulletText(i, text));
+              }}
+              onKeyDown={(e) => handleKeyDown(e, i)}
+              className={`resume-editable resume-bullet-text ${editable ? "resume-editable--editable" : ""}`}
+            >
+              {b}
+            </div>
+          )}
         </div>
       ))}
     </div>

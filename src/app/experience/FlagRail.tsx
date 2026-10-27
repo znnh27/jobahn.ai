@@ -213,7 +213,7 @@ export function FlagRail({
             {entry && variant && (
               <button
                 type="button"
-                className="btn btn-secondary flag-card-btn"
+                className="btn btn-secondary btn--sm flag-card-btn"
                 onClick={(e) => {
                   e.stopPropagation();
                   onRefine({

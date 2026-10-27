@@ -387,6 +387,35 @@
   width: 100%;
 }
 
+/* 小按鈕：卡片裡的動作（校稿建議的套用／略過、經歷資料庫建議卡的「跟 AI 聊」）。
+   高 29px：上下 3px + 行高 21px + 邊框 2px，字比內文小一級，不會比卡片內容還搶眼（2026-10-28 Z 要求）。 */
+/* 卡片標題列：標題在左、小按鈕在右（例如 JD 符合度旁的「重新評分」）。 */
+.card-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* 工具列左邊的存檔狀態（SaveStatus.tsx），取代原本的「儲存」按鈕。 */
+.save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-xs);
+  color: var(--color-neutral-500);
+  white-space: nowrap;
+}
+.save-status--error {
+  color: var(--color-danger-text);
+}
+
+.btn--sm {
+  padding: calc(3px + var(--display-nudge)) var(--space-3) calc(3px - var(--display-nudge));
+  font-size: var(--font-sm);
+  gap: var(--space-1);
+}
+
 .btn-primary {
   background: var(--chrome-accent);
   color: var(--chrome-onaccent);
@@ -2145,6 +2174,125 @@
   }
 }
 
+/* 「校稿」結果：校稿時取代右欄的 JD 條件卡片，一項一張小卡。清單不自己捲動（有捲軸的容器會把選取卡片往左凸出的框跟陰影切掉）。 */
+.proofread-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.proofread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.proofread-count {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--color-neutral-500);
+}
+.proofread-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.proofread-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-neutral-200);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.proofread-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.proofread-item:focus-visible {
+  outline: 2px solid var(--chrome-secondary);
+}
+/* 被點選的那張：跟經歷資料庫的建議卡一樣，左邊框加粗、往左凸出一點，畫布上標的就是這張。 */
+.proofread-item--active {
+  border-color: var(--color-band-borderline);
+  border-left-width: 3px;
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.2);
+  transform: translateX(-4px);
+}
+
+/* 畫布（履歷、求職信）上被點選的建議：要刪的字刪除線、要加的字綠底，只提醒的整段黃底（ProofreadMarks.tsx）。
+   標著的那一格暫時不能編輯。 */
+.proofread-marked {
+  cursor: default;
+}
+.proofread-mark {
+  scroll-margin: 120px;
+}
+.proofread-mark-del {
+  color: var(--color-danger-text);
+  text-decoration: line-through;
+  background-color: var(--color-danger-bg);
+}
+.proofread-mark-ins {
+  text-decoration: none;
+  background-color: #dcfce7;
+  border-radius: 2px;
+}
+.proofread-mark-flag {
+  background-color: var(--color-warning-bg);
+  box-shadow: 0 0 0 1px #fde68a;
+  border-radius: 2px;
+}
+.letter-marked {
+  white-space: pre-wrap;
+}
+.proofread-item p {
+  margin: 0;
+}
+.proofread-item-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.proofread-tag {
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-xs);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+}
+.proofread-tag--typo {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+.proofread-tag--fact {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.proofread-tag--consistency {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+}
+.proofread-where {
+  font-size: var(--font-xs);
+  color: var(--color-neutral-500);
+}
+.proofread-reason {
+  color: var(--color-neutral-600);
+}
+.proofread-actions {
+  margin-top: var(--space-1);
+}
+
+.proofread-actions .btn {
+  white-space: nowrap;
+}
+
 /* ATS 評分卡：公式跟分數區間直接顯示在分數下面。 */
 .ats-score-help {
   margin-top: var(--space-2);
@@ -3097,6 +3245,10 @@
   padding: var(--space-3) var(--space-6) var(--space-6);
   background: var(--color-white);
   border-top: 1px solid var(--chrome-border);
+}
+/* 視窗裡的按鈕平分整個寬度（2026-10-28 Z 要求）；三顆直排時本來就是滿版。 */
+.confirm-card .btn-wrapper .btn {
+  flex: 1;
 }
 
 .confirm-error {

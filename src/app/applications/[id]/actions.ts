@@ -19,6 +19,8 @@ import {
   type AddToLetterItem,
   type CoverLetterOptions,
 } from "@/lib/resumes/generateCoverLetter";
+import { dismissProofreadIssues, proofreadLetter, proofreadResume } from "@/lib/resumes/proofread";
+import type { ProofreadIssue } from "@/lib/resumes/proofreadTypes";
 import { mergeContentIntoExperienceDb, removeVariantsFromSource } from "@/lib/experience/mergeIntoExperienceDb";
 import { measureResumePdf } from "@/lib/documents/measureResumePdf";
 import type { ResumeContact } from "@/lib/resumes/contact";
@@ -488,6 +490,66 @@ export async function reviseCoverLetterAction(
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "修改失敗，請再試一次" };
+  }
+}
+
+/** 「校稿」：檢查畫面上這份履歷（還沒存的修改也算），只回傳建議，不改內容也不存檔。 */
+export async function proofreadResumeAction(
+  applicationId: string,
+  language: string,
+  resume: GeneratedResume["resume"],
+): Promise<{ error?: string; issues?: ProofreadIssue[] }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    return { issues: await proofreadResume({ supabase, userId: user.id, applicationId, language, resume }) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "校稿失敗，請再試一次" };
+  }
+}
+
+/** 校稿按「略過」「知道了」：記下來，之後校稿不再列這幾項。失敗不影響畫面，只是下次可能又出現。 */
+export async function dismissProofreadAction(
+  applicationId: string,
+  kind: "resume" | "letter",
+  language: string,
+  issues: Array<Pick<ProofreadIssue, "category" | "quote">>,
+): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    await dismissProofreadIssues({ supabase, userId: user.id, applicationId, kind, language, issues });
+    return {};
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "記錄失敗" };
+  }
+}
+
+/** 「校稿」：檢查畫面上這封求職信，只回傳建議，不改內容也不存檔。 */
+export async function proofreadLetterAction(
+  applicationId: string,
+  language: string,
+  letter: string,
+): Promise<{ error?: string; issues?: ProofreadIssue[] }> {
+  if (!letter.trim()) return { error: "信是空的，沒有東西可以校稿" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    return { issues: await proofreadLetter({ supabase, userId: user.id, applicationId, language, letter }) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "校稿失敗，請再試一次" };
   }
 }
 
