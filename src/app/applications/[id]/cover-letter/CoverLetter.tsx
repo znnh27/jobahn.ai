@@ -166,21 +166,19 @@ export function CoverLetter({
       const companyNote = companyMismatch
         ? `。JD 裡沒寫公司名稱，信是照你填的「${companyMismatch}」寫的${sources && sources.length > 0 ? "，公司資料也是用這個名稱查的" : ""}，請確認公司是對的`
         : "";
-      const done =
-        sources === null
-          ? "求職信生成完成"
-          : sources.length > 0
-            ? `求職信生成完成（參考了 ${sources.length} 個公司相關網頁）`
-            : "求職信生成完成（查不到這間公司的具體資料，應徵動機改用職位內容來寫）";
+      // 生成成功本身不顯示訊息（信出現在信紙上就是回饋，2026-10-27 Z 要求，跟履歷頁一樣），
+      // 只在有要使用者注意的事時才說：查不到公司資料、JD 沒寫公司名稱、重新產生可以退回上一版、比對失敗。
+      const noResearch = sources !== null && sources.length === 0 ? "查不到這間公司的具體資料，應徵動機改用職位內容來寫" : "";
       // 生成完直接比對一次，右欄才看得到信補上了哪些條件（以前要自己按「重新比對」，沒按就只顯示履歷的結果）。
       // 之後手動改信、跟 AI 聊改過，還是按「重新比對」更新。
       const recheck = await recheckWithCoverLetterAction(applicationId, result.data.cover_letter_draft);
       if (recheck.error || !recheck.data) {
-        setMessage(`${done}，但比對職缺符合度失敗：${recheck.error ?? "請按「重新比對」再試一次"}${companyNote}`);
+        setMessage(`求職信生成完成，但比對職缺符合度失敗：${recheck.error ?? "請按「重新比對」再試一次"}${companyNote}`);
         return;
       }
       setLetterChecklist(recheck.data.cover_letter_checklist);
-      setMessage(`${previous ? `${done}，不滿意可以按「復原上一版」` : done}${companyNote}`);
+      const notes = [previous ? "已重新產生，不滿意可以按「復原上一版」" : "", noResearch, companyNote.replace(/^。/, "")].filter(Boolean);
+      if (notes.length > 0) setMessage(notes.join("。"));
     });
   }
 
