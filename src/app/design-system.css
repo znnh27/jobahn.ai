@@ -4146,7 +4146,7 @@ details[open] > summary > .disclosure-arrow {
 }
 
 /* 兩個清單的文字都左右對齊，右邊才不會參差不齊。 */
-/* 缺口說明：一句一行、縮排在左邊一條細線後面。展開的 JD 條件裡跟舊資料的「缺口說明」區塊共用。 */
+/* 缺口說明：一句一點。展開的 JD 條件裡跟舊資料的「缺口說明」區塊共用。 */
 .ats-gap-list {
   display: flex;
   flex-direction: column;
@@ -4162,15 +4162,17 @@ details[open] > summary > .disclosure-arrow {
   -webkit-hyphens: auto;
   hyphens: auto;
 }
+/* 一句一點，圓點用淡色，不搶內文。 */
 .ats-gap-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding-left: var(--space-3);
-  border-left: 2px solid var(--chrome-border);
-}
-.ats-gap-body p {
   margin: 0;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+.ats-gap-body li::marker {
+  color: var(--chrome-muted-light);
 }
 
 .ats-checklist-list {
@@ -4221,13 +4223,22 @@ details[open] > summary > .disclosure-arrow {
   font-size: var(--font-xs);
 }
 
-/* 可以展開的 JD 條件（第二層風琴）：整條條件文字可以點，箭頭在最右邊，預設收起來。 */
+/* 可以展開的 JD 條件（第二層風琴）：整條條件文字可以點，箭頭在最右邊，預設收起來。
+   跟第一層區塊標題分開：箭頭小一號、淡色，收起來朝右、展開朝下；滑過整列有淡底色，提示整列都能點。 */
 .ats-check-summary {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
+  /* 底色往外多留一點，文字位置不變。 */
+  margin: -2px calc(-1 * var(--space-1));
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   list-style: none;
+  transition: background 0.15s ease;
+}
+.ats-check-summary:hover {
+  background: var(--color-neutral-100);
 }
 .ats-check-summary::-webkit-details-marker {
   display: none;
@@ -4238,19 +4249,28 @@ details[open] > summary > .disclosure-arrow {
 }
 /* 箭頭對齊條件的第一行字。 */
 .ats-check-summary .disclosure-arrow {
-  margin-top: 6px;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-width: 1.5px;
+  border-color: var(--chrome-muted-light);
+  transform: rotate(-45deg);
 }
+.ats-check-details[open] > .ats-check-summary > .disclosure-arrow {
+  transform: rotate(45deg);
+}
+/* 展開的內容放在淡灰底卡片裡，跟清單的區隔靠底色、不靠線條。 */
 .ats-check-detail {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
   margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-100);
   font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--chrome-ink);
-  text-align: justify;
-  -webkit-hyphens: auto;
-  hyphens: auto;
 }
 .ats-check-actions {
   display: flex;

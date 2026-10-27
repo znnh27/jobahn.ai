@@ -11,6 +11,7 @@ import { readContact, type ResumeContact } from "./contact";
 import { readCustomSectionLabels, type CustomSectionLabels } from "./sectionLabels";
 import { normalize, readBackground, type LanguageBackground } from "./background";
 import { ensureBackgroundLanguage } from "./translateBackground";
+import { pinEntryFacts } from "./pinEntryFacts";
 import { resolveMetrics } from "./typography";
 import {
   BODY_PT_MAX,
@@ -301,9 +302,12 @@ export async function generateResumeForApplication(
     }
 
     // 這個語言還沒有學歷、技能、語言能力就先從另一個語言翻好存起來（只翻一次），
-    // 生成出來的學歷、語言能力一律照這份一字不改（pinBackground）。
+    // 生成出來的學歷、語言能力一律照這份一字不改（pinBackground）；經歷的地點、日期照經歷資料庫（pinEntryFacts）。
     const background = await ensureBackgroundLanguage({ supabase, userId, language: lang === "zh" ? "zh" : "en" });
-    const pin = (r: Resume) => pinBackground(r, background);
+    const pin = (r: Resume) => {
+      pinBackground(r, background);
+      return sourceLanguage === lang ? pinEntryFacts(r, langEntries) : r;
+    };
 
     const userPrompt = buildUserPrompt({
       jd: application.job_description,

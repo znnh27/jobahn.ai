@@ -21,7 +21,7 @@ import { InfoTip } from "@/app/InfoTip";
 // 每一條的狀態只用前面的 icon 表示，滑過 icon 才顯示狀態名稱，不另外標文字（2026-10-24 Z 要求）。
 // icon 是同一組圓框：已寫到打勾、部分符合橫線、沒寫到驚嘆號、判斷有問題問號（2026-10-25 Z 要求）。
 // 每個區塊的標題只寫名稱、不放統計數字，都可以收起來，預設展開（2026-10-25 Z 要求）。
-// 缺口說明一句一行、縮排在條件下面，比較好讀。舊資料的缺口清單沒有對應的條件，才另外列一個「缺口說明」區塊。
+// 缺口說明一句一點（圓點條列），縮排在條件下面，比較好讀（2026-10-27 Z 要求）。舊資料的缺口清單沒有對應的條件，才另外列一個「缺口說明」區塊。
 
 export function JdChecklist({
   items,
@@ -123,11 +123,11 @@ export function JdChecklist({
                     </summary>
                     <div className="ats-check-detail">
                       {showGap && item.gap && (
-                        <div className="ats-gap-body">
+                        <ul className="ats-gap-body">
                           {splitSentences(item.gap).map((line, j) => (
-                            <p key={j}>{line}</p>
+                            <li key={j}>{line}</li>
                           ))}
-                        </div>
+                        </ul>
                       )}
                       {canDig && (
                         <div className="ats-check-actions">
@@ -155,11 +155,11 @@ export function JdChecklist({
       <ul className="ats-gap-list" lang={lang}>
         {orphanGaps.map((gap, i) => (
           <li key={i} className="ats-gap">
-            <div className="ats-gap-body">
+            <ul className="ats-gap-body">
               {splitSentences(gap).map((line, j) => (
-                <p key={j}>{line}</p>
+                <li key={j}>{line}</li>
               ))}
-            </div>
+            </ul>
           </li>
         ))}
       </ul>
@@ -294,7 +294,7 @@ function StatusIcon({ state }: { state: CheckState | "soft" }) {
   );
 }
 
-/** 缺口說明一句一行（照句號切）。 */
+/** 缺口說明一句一點（照句號切）。 */
 function splitSentences(text: string): string[] {
   return text
     .split(/(?<=[。！？])/)

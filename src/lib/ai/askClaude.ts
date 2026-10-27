@@ -95,7 +95,8 @@ export async function askClaude(input: AskClaudeParams): Promise<AskClaudeResult
 
 async function withContext(params: AskClaudeParams): Promise<AskClaudeParams> {
   if (!MEMORY_FEATURES.has(params.feature)) return params;
-  const today = new Intl.DateTimeFormat("zh-TW", { timeZone: "Asia/Taipei", year: "numeric", month: "long", day: "numeric" }).format(new Date());
+  // 用 2026-10-27 這種寫法：以前寫成「2026年10月27日」，AI 會跟著把履歷的日期改成中文寫法（2026-10-27 Z 回報）。
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date());
   const dateBlock = `===== 今天的日期 =====\n今天是 ${today}（台北時間）。經歷的結束時間早於今天的，就是已經離職或結束的，不能寫成「目前」在那裡任職或進行中；結束時間寫 Present、至今的才是目前的。`;
   const memory = memoryBlock(await loadMemory(params.supabase ?? createServiceClient(), params.userId));
   return { ...params, systemPrompt: [params.systemPrompt, dateBlock, memory].filter(Boolean).join("\n\n") };
