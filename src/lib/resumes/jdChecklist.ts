@@ -39,11 +39,23 @@ export function detectJdLanguage(jd: string): "zh" | "en" {
   return cjk > 0 && cjk / (cjk + latin / 5) >= 0.3 ? "zh" : "en";
 }
 
+/**
+ * 不用問應徵者能不能配合的「工作條件」：只寫在哪裡上班、一般日班、「無需出差」這類否定句、待遇福利。
+ * 抽取規則已經叫 AI 不要列，但 AI 每次判斷不一定一樣，程式再擋一次（2026-10-27 Z 回報：只寫了工作地點也要確認能不能配合）。
+ * 有「需、須、常駐、派駐、外地、輪班、夜班、假日」這類要配合的字就保留，例如「工作地點：需常駐新竹客戶端」。
+ */
+export function isInfoOnlyCondition(item: string): boolean {
+  const text = item.trim();
+  if (/無需|不需|無須|毋須|免出差|不用出差|不必|no travel|not required|no need/i.test(text)) return true;
+  if (/需|須|必須|常駐|派駐|外地|外派|出差|輪班|夜班|大夜|假日|待命|加班|require|must|travel|relocat|shift|on-call|overtime/i.test(text)) return false;
+  return /^(工作|上班)(地點|地址|時段|時間)|^地點|^location|^work location|^office|日班|day shift|待遇|薪資|福利|salary|benefit/i.test(text);
+}
+
 /** 從已存的各語言清單挑一份當共用清單：優先挑跟 JD 同語言的那份，順序固定。 */
 function pickStored(stored: StoredChecklists, jdLang: "zh" | "en"): JdBaseItem[] | null {
   if (!stored) return null;
   for (const lang of [jdLang, jdLang === "en" ? "zh" : "en", ...Object.keys(stored)]) {
-    const list = stored[lang];
+    const list = stored[lang]?.filter((i) => !(i.kind === "condition" && isInfoOnlyCondition(i.item)));
     if (list && list.length > 0) {
       return list.map((i) => ({
         item: i.item,
@@ -101,7 +113,9 @@ const EXTRACT_SYSTEM_PROMPT = `你負責把 JD 拆成「應徵條件清單」，
 3. 上面列出來的項目，kind 依內容分：
    - "trait"：軟實力、人格特質、工作態度、價值觀，只講「是怎樣的人」、沒有具體的技能或經驗可以查證（例如主動積極、樂於挑戰、正直誠信、抗壓性高、細心負責、團隊合作、良好溝通能力、學習能力強）。
    - "requirement"：其他全部，包含經歷年資、技能工具、學歷科系、語言能力、證照，以及「用某種能力做某件具體的事」（例如「能以英文獨立進行商務會議與簡報」是語言能力，算 requirement）。一條裡同時有硬實力跟軟實力時，算 requirement。
-4. 另外掃過整份 JD（包含工作內容、職責、福利、其他說明），把「工作條件」各列一項，kind 標 "condition"：出差（國內／國外，有寫地點就保留）、外派、輪班、假日或夜間待命、常態加班、工作地點、遠端或進辦公室的規定、到職時間這類「要不要配合」的事，不是能力或經驗。
+4. 另外掃過整份 JD（包含工作內容、職責、福利、其他說明），把「需要應徵者額外配合」的工作條件各列一項，kind 標 "condition"，不是能力或經驗：
+   - 要列：需要出差（國內／國外，有寫地點就保留）、外派、輪班、夜班或假日班、假日或夜間待命、常態加班、須常駐客戶端或派駐外地、需要立即到職或限期到職。
+   - 不列：工作地點（只寫在哪裡上班）、一般日班的上班時段、「無需出差」「不用外派」這類不用配合的否定句、可以遠端的說明、休假制度、可上班日寫「不限」。這些是職缺資訊，不用問應徵者能不能配合。
    - item 照 JD 原文擷取那一句的重點（例如 JD 寫「需不定期出差至○○拜訪客戶」就列「需不定期出差至○○」），不改寫意思；JD 沒寫的工作條件不要列。
    - JD 寫「必須、需要、能配合」標 "required"；寫「有機會、可能、加分」標 "preferred"。
    - 已經在第 1 點的條件區段列過的同一件事，不要重複列，把那一項的 kind 改成 "condition" 就好。
@@ -140,6 +154,7 @@ async function extractJdItems(
   for (const raw of parsed.items ?? []) {
     const item = String(raw.item ?? "").trim().replace(/^[-•*·\s]+/, "").replace(/[.。;；]+$/, "");
     if (!item || seen.has(item)) continue;
+    if (raw.kind === "condition" && isInfoOnlyCondition(item)) continue;
     seen.add(item);
     items.push({
       item,
