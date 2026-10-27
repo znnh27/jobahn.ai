@@ -17,7 +17,7 @@ import {
   type ResumeLayoutSettings,
 } from "@/lib/resumes/typography";
 
-// 工具列上的「Aa」排版按鈕：點開調上下間距、內文字級、抬頭字級。履歷頁底下還會顯示量 PDF 的結果；
+// 工具列上的「Aa」排版按鈕：點開調上下間距、抬頭字級、內文字級（抬頭在上，跟履歷由上往下的順序一樣；2026-10-27 Z 要求）。履歷頁底下還會顯示量 PDF 的結果；
 // 經歷資料庫沒有下載檔案，不傳 fit 就不顯示。
 // 點面板以外的地方或按 Esc 就關閉。
 export function LayoutMenu({
@@ -91,39 +91,6 @@ export function LayoutMenu({
 
           <div className="layout-menu-row">
             <span className="layout-menu-label">
-              內文字級
-              <InfoTip label="內文字級的說明">
-                <ul>
-                  <li>只改列點和摘要的字</li>
-                  <li>標題、姓名會跟著等比放大縮小</li>
-                </ul>
-              </InfoTip>
-            </span>
-            <div className="layout-menu-stepper">
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="字級縮小"
-                disabled={layout.bodyPt <= BODY_PT_MIN}
-                onClick={() => stepBodyPt(-BODY_PT_STEP)}
-              >
-                <MinusIcon />
-              </button>
-              <span className="layout-menu-value">{layout.bodyPt} pt</span>
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="字級放大"
-                disabled={layout.bodyPt >= BODY_PT_MAX}
-                onClick={() => stepBodyPt(BODY_PT_STEP)}
-              >
-                <PlusIcon />
-              </button>
-            </div>
-          </div>
-
-          <div className="layout-menu-row">
-            <span className="layout-menu-label">
               抬頭字級
               <InfoTip label="抬頭字級的說明">
                 <ul>
@@ -150,6 +117,39 @@ export function LayoutMenu({
                 aria-label="抬頭字級放大"
                 disabled={contactPt >= CONTACT_PT_MAX}
                 onClick={() => stepContactPt(BODY_PT_STEP)}
+              >
+                <PlusIcon />
+              </button>
+            </div>
+          </div>
+
+          <div className="layout-menu-row">
+            <span className="layout-menu-label">
+              內文字級
+              <InfoTip label="內文字級的說明">
+                <ul>
+                  <li>只改列點和摘要的字</li>
+                  <li>標題、姓名會跟著等比放大縮小</li>
+                </ul>
+              </InfoTip>
+            </span>
+            <div className="layout-menu-stepper">
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="字級縮小"
+                disabled={layout.bodyPt <= BODY_PT_MIN}
+                onClick={() => stepBodyPt(-BODY_PT_STEP)}
+              >
+                <MinusIcon />
+              </button>
+              <span className="layout-menu-value">{layout.bodyPt} pt</span>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="字級放大"
+                disabled={layout.bodyPt >= BODY_PT_MAX}
+                onClick={() => stepBodyPt(BODY_PT_STEP)}
               >
                 <PlusIcon />
               </button>

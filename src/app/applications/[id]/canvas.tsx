@@ -453,7 +453,8 @@ export function Canvas({
       setGaps(result.data.ats_gaps);
       setKeywords(result.data.jd_keywords);
       setCanvasVersion((v) => v + 1);
-      setMessage(previous ? "已重新產生；想回到上一版可以按「上一步」再按「儲存」" : "生成完成");
+      // 第一次生成不顯示「生成完成」，履歷出現在畫布上就是回饋（2026-10-27 Z 要求）；重新產生才提醒可以退回上一版。
+      if (previous) setMessage("已重新產生；想回到上一版可以按「上一步」再按「儲存」");
     });
   }
 
