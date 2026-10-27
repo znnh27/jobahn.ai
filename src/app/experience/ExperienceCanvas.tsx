@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { cleanBulletText, insertLineBreak, isComposing, placeCaret, splitAtCaret } from "@/app/bulletEditing";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
+import { ChevronDownIcon, ChevronUpIcon } from "@/app/icons";
 import { ResumePaper } from "@/app/ResumePaper";
 import type { ResumeLayoutSettings } from "@/lib/resumes/typography";
 import { SectionTitle } from "../SectionLabels";
@@ -17,6 +18,7 @@ import {
   updateAchievementVariantAction,
   removeAchievementVariantAction,
   insertAchievementAfterAction,
+  moveEntryAction,
   type ScanFlag,
 } from "./actions";
 
@@ -30,6 +32,8 @@ export interface ExperienceEntry {
   periodVariants: { period: string; source: string[] }[];
   /** 排序用；上一步還原被刪掉的經歷時沿用原本的時間，位置才不會跑掉。 */
   createdAt?: string;
+  /** ↑↓ 調過的順序（migration 0012）；null 是沒調過，undefined 是還沒跑 migration。 */
+  sortOrder?: number | null;
   achievements: {
     id: string;
     /** reviewedText：上次通過檢查（或使用者按 ✕ 不改）時的文字；跟 text 不一樣就代表之後改過，要重新檢查。
@@ -111,10 +115,12 @@ export function ExperienceCanvas({
         {workEntries.length > 0 && (
           <>
             <div className="resume-section-header"><SectionTitle language={language} labelKey="experience" /></div>
-            {workEntries.map((entry) => (
+            {workEntries.map((entry, i) => (
               <EntryBlock
                 key={entry.id}
                 entry={entry}
+                canMoveUp={i > 0}
+                canMoveDown={i < workEntries.length - 1}
                 flagFor={flagFor}
                 onActivateFlag={onActivateFlag}
                 highlight={highlight}
@@ -127,10 +133,12 @@ export function ExperienceCanvas({
         {leadershipEntries.length > 0 && (
           <>
             <div className="resume-section-header"><SectionTitle language={language} labelKey="leadership" /></div>
-            {leadershipEntries.map((entry) => (
+            {leadershipEntries.map((entry, i) => (
               <EntryBlock
                 key={entry.id}
                 entry={entry}
+                canMoveUp={i > 0}
+                canMoveDown={i < leadershipEntries.length - 1}
                 flagFor={flagFor}
                 onActivateFlag={onActivateFlag}
                 highlight={highlight}
@@ -152,12 +160,17 @@ export function ExperienceCanvas({
 
 function EntryBlock({
   entry,
+  canMoveUp,
+  canMoveDown,
   flagFor,
   onActivateFlag,
   highlight,
   activeFlagKey,
 }: {
   entry: ExperienceEntry;
+  /** 同一區（正式工作／社團專案）裡上面、下面還有沒有經歷，決定 ↑↓ 能不能按。 */
+  canMoveUp: boolean;
+  canMoveDown: boolean;
   flagFor: (entryId: string, achievementId: string, variantIndex: number) => ScanFlag | undefined;
   onActivateFlag: (key: string) => void;
   highlight: HighlightTarget | null;
@@ -169,6 +182,16 @@ function EntryBlock({
   // 在某一點句尾按 Enter：先在它下面開一個空白的新一點，打了字、離開才存；沒打字就收掉。
   const [draft, setDraft] = useState<{ afterAchievementId: string; text: string } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [moving, startMove] = useTransition();
+
+  /** ↑↓：跟同一區的上一段或下一段對調，另一個語言的同一段也一起移（見 moveEntryAction）。 */
+  function move(direction: "up" | "down") {
+    setSaveError(null);
+    startMove(async () => {
+      const result = await moveEntryAction(entry.id, direction);
+      if (result.error) setSaveError(`調整順序失敗：${result.error}`);
+    });
+  }
 
   async function insertAfter(afterAchievementId: string, text: string, edit?: { achievementId: string; variantIndex: number; text: string }) {
     setSaveError(null);
@@ -217,6 +240,31 @@ function EntryBlock({
   return (
     // 右欄的註解欄（TagRail）用 data-entry-key 對齊到這段經歷。
     <div className="exp-entry resume-block" data-entry-key={entry.id}>
+      {/* ↑↓ 不是履歷內容：放在紙的左邊界外，滑到這段才出現（右邊是註解欄）。 */}
+      {(canMoveUp || canMoveDown) && (
+        <div className="exp-entry-move">
+          <button
+            type="button"
+            className="icon-btn exp-entry-move-btn"
+            onClick={() => move("up")}
+            disabled={!canMoveUp || moving}
+            title="往上移（中英文版一起移）"
+            aria-label={`把「${entry.orgName}」往上移`}
+          >
+            <ChevronUpIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-btn exp-entry-move-btn"
+            onClick={() => move("down")}
+            disabled={!canMoveDown || moving}
+            title="往下移（中英文版一起移）"
+            aria-label={`把「${entry.orgName}」往下移`}
+          >
+            <ChevronDownIcon />
+          </button>
+        </div>
+      )}
       <div className="resume-row">
         <EditableSpan
           className="resume-row-left"

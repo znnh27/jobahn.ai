@@ -1966,7 +1966,41 @@
 
 /* 畫布要跟正式履歷長得一樣：段落之間只用 .resume-block 的間距，不加分隔線。 */
 .exp-entry {
+  position: relative;
   margin-bottom: 0;
+}
+/* 經歷旁邊的 ↑↓（調整順序）：放在紙的左邊界外，滑到這段才出現，跟履歷頁的「刪除」同一個做法。 */
+.exp-entry-move {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  margin-right: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.exp-entry:hover .exp-entry-move,
+.exp-entry-move:focus-within {
+  opacity: 1;
+}
+.exp-entry-move-btn {
+  width: 24px;
+  height: 24px;
+  color: var(--chrome-muted-light);
+}
+.exp-entry-move-btn:hover:not(:disabled) {
+  color: var(--chrome-ink);
+}
+.exp-entry-move-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+@media (hover: none) {
+  .exp-entry-move {
+    opacity: 1;
+  }
 }
 
 .exp-role-row {

@@ -10,6 +10,7 @@ import { ensureBackgroundLanguage } from "@/lib/resumes/translateBackground";
 import { saveBackgroundAnswers, type BackgroundAnswers } from "@/lib/resumes/backgroundInterview";
 import { extractResumeText } from "@/lib/resumes/extractText";
 import { mergeContentIntoExperienceDb } from "@/lib/experience/mergeIntoExperienceDb";
+import { normPeriod, periodsOf } from "@/lib/experience/languageParity";
 import {
   stepElicitation,
   quickQualityCheck,
@@ -1109,6 +1110,74 @@ export async function setRuleMutedAction(ruleId: string, muted: boolean): Promis
   return { mutedRules };
 }
 
+/**
+ * 經歷旁邊的 ↑↓：跟同一區（正式工作／社團專案）的上一段或下一段對調，另一個語言的同一段經歷也一起移
+ * （2026-10-28 Z 要求）。另一個語言用「類型＋期間」配對（跟 languageParity 一樣），配不到就只移這個語言。
+ * 順序存在 sort_order（migration 0012），移動時整區重新編號 0、1、2…。
+ */
+export async function moveEntryAction(entryId: string, direction: "up" | "down"): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const { data, error } = await supabase
+    .from("experience_entries")
+    .select("id, language, entry_type, period_variants, sort_order, created_at")
+    .eq("user_id", user.id);
+  if (error) {
+    return { error: /sort_order/.test(error.message) ? "要先在 Supabase 跑 migration 0012 才能調整順序" : error.message };
+  }
+  type Row = { id: string; language: string; entry_type: string; period_variants: unknown; sort_order: number | null; created_at: string };
+  const rows = (data ?? []) as Row[];
+  const target = rows.find((r) => r.id === entryId);
+  if (!target) return { error: "找不到這段經歷" };
+
+  const isWork = (r: Row) => r.entry_type === "work";
+  // 跟畫面一樣的排法：調過的照 sort_order，沒調過的照建立時間排在後面。
+  const section = (language: string) =>
+    rows
+      .filter((r) => r.language === language && isWork(r) === isWork(target))
+      .sort(
+        (a, b) =>
+          (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER) ||
+          a.created_at.localeCompare(b.created_at),
+      );
+
+  const list = section(target.language);
+  const i = list.indexOf(target);
+  const j = direction === "up" ? i - 1 : i + 1;
+  if (j < 0 || j >= list.length) return {};
+  const neighbor = list[j];
+  [list[i], list[j]] = [list[j], list[i]];
+
+  // 另一個語言：把同一段經歷移到「鄰居那段」的前面（往上）或後面（往下）。
+  const otherLang = target.language === "zh" ? "en" : "zh";
+  const other = section(otherLang);
+  const counterpart = (r: Row) => {
+    const periods = new Set(periodsOf(r).map(normPeriod));
+    return other.find((o) => periodsOf(o).some((p) => periods.has(normPeriod(p))));
+  };
+  const otherTarget = counterpart(target);
+  const otherNeighbor = counterpart(neighbor);
+  let otherList: Row[] | null = null;
+  if (otherTarget && otherNeighbor && otherTarget !== otherNeighbor) {
+    otherList = other.filter((r) => r !== otherTarget);
+    const at = otherList.indexOf(otherNeighbor) + (direction === "up" ? 0 : 1);
+    otherList.splice(at, 0, otherTarget);
+  }
+
+  const renumber = (rs: Row[]) =>
+    rs.map((r, order) => supabase.from("experience_entries").update({ sort_order: order }).eq("id", r.id).eq("user_id", user.id));
+  const results = await Promise.all([...renumber(list), ...renumber(otherList ?? [])]);
+  const failed = results.find((r) => r.error);
+  if (failed?.error) return { error: failed.error.message };
+
+  revalidatePath("/experience");
+  return {};
+}
+
 /** 經歷資料庫「上一步／下一步」記下來的一份完整狀態：兩個語言的所有經歷，加上 Summary／學歷／技能／語言。 */
 export interface ExperienceSnapshot {
   entries: {
@@ -1121,6 +1190,8 @@ export interface ExperienceSnapshot {
     periodVariants: unknown;
     achievements: unknown;
     createdAt?: string;
+    /** ↑↓ 調過的順序；undefined 是還沒跑 migration 0012，還原時不寫這個欄位。 */
+    sortOrder?: number | null;
   }[];
   background: unknown;
 }
@@ -1155,6 +1226,7 @@ export async function restoreExperienceSnapshotAction(snapshot: ExperienceSnapsh
       period_variants: e.periodVariants,
       achievements: e.achievements,
       ...(e.createdAt ? { created_at: e.createdAt } : {}),
+      ...(e.sortOrder !== undefined ? { sort_order: e.sortOrder } : {}),
       updated_at: new Date().toISOString(),
     }));
   if (rows.length > 0) {

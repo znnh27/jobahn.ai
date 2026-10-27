@@ -49,7 +49,7 @@ const WRITING_RULES = `${BULLET_RULES}
    - 其他正式工作每段 1–3 條，越舊越少；每段至少 1 條，不能只留公司、職稱、期間。
    - 社團、專案每段最多 3 條。
    同一段裡的 bullet 依跟 JD 的相關度排序，最相關的放最前面（放不下時會從最後一條開始刪）。
-   社團、專案是次要內容，用來補足正式工作沒展現到、但 JD 需要的能力；放不放、放幾條看跟 JD 的關聯，不看新舊。leadership 陣列依跟 JD 的相關度排序，最相關的放最前面（不照時間排）。
+   社團、專案是次要內容，用來補足正式工作沒展現到、但 JD 需要的能力；放不放、放幾條主要看跟 JD 的關聯，相關度差不多時優先放比較新的。leadership 陣列依跟 JD 的相關度排序，最相關的放最前面；相關度差不多時，比較新的排前面。
 3. 履歷一定要剛好填滿一頁 A4，少於一頁會讓人覺得經歷太少：先把正式工作放到規則 2 的上限，還不滿一頁再放社團、專案；都放完還不滿，系統會放大字級和間距，不要超過上限硬塞。放不下時系統會依這個順序整條拿掉：(1) 最無關的社團、專案；(2) 其他正式工作多出來的 bullet（從最舊的那段先拿）；最近一份正式工作至少留 3 條。
 4. JD 原文用字要盡量真的出現在履歷裡（不是只有意思接近），但要放在具體案例的敘述裡（見規則 7），前提是使用者真的有對應的真實經歷可以支撐，不能為了關鍵字硬掰。「JD 關鍵字」清單是招募官會逐字搜尋的字：資料庫裡有對應事實的，寫的時候直接用清單上的原字（例如資料寫「跨部門溝通」、JD 關鍵字是 stakeholder management，就寫 stakeholder management）；沒有對應事實的就不要用。只換「詞」（技能、工具、方法、專有名詞），不搬 JD 的句子或句型（例如 JD 寫「而非僅執行既定 roadmap」，不能寫成「而非只是照規格執行」）。
 5. 同一段經歷可以依這份 JD 換敘事角度（例如投系統規劃職缺強調規劃，投行銷職缺強調成長數據），但底層事實跟程度不能變。
@@ -883,7 +883,7 @@ async function fitOnePage(params: {
     const raw = await ask(current, [
       `這份履歷只用了一頁 A4 的 ${Math.round(fit.fillRatio * 100)}%，下面還空著大約 ${askLines} 行（每行${charsPerLine}）。履歷一定要填滿一頁，少於一頁會讓人覺得經歷太少。請從經歷資料庫補上大約 ${askLines} 行的內容，不能超過：`,
       `- 每段條數上限：最近一份正式工作最多 ${LATEST_WORK_MAX} 條，其他正式工作最多 ${OTHER_WORK_MAX} 條而且越舊越少，社團、專案每段最多 ${LEADERSHIP_MAX} 條；超過的會被直接刪掉。`,
-      `- 先補還沒到上限的正式工作（最近的先補）；正式工作都到上限了，再補跟 JD 相關的社團、專案（整段沒放進來的也要加進來；leadership 依跟 JD 的相關度排，最相關的放最前面）。`,
+      `- 先補還沒到上限的正式工作（最近的先補）；正式工作都到上限了，再補跟 JD 相關的社團、專案（整段沒放進來的也要加進來；leadership 依跟 JD 的相關度排，最相關的放最前面，相關度差不多時比較新的排前面）。`,
       floorRule,
       `- 已經寫好的內容原則上不要改，只新增。`,
     ]);
@@ -927,10 +927,23 @@ function workByRecency(resume: Resume): number[] {
 }
 
 /**
+ * 正式工作一律由新到舊排（2026-10-28 Z 要求）：以前靠 AI 照資料庫順序輸出，沒有把關。
+ * 有一段認不出結束時間就整個不動，免得排錯位置。社團、專案照 AI 依 JD 相關度排的順序，不在這裡排。
+ */
+export function sortWorkByRecency(resume: Resume): Resume {
+  const work = resume.work_experience ?? [];
+  const ends = work.map((e) => periodEnd(e.period ?? ""));
+  if (ends.some((end) => end < 0)) return resume;
+  const order = work.map((_, i) => i).sort((a, b) => ends[b] - ends[a] || a - b);
+  return { ...resume, work_experience: order.map((i) => work[i]) };
+}
+
+/**
  * 套用每段條數上限：最近一份最多 4 條；其他正式工作最多 3 條，而且不能比比它新的那段多（越舊越少）；
  * 社團、專案每段最多 3 條。bullet 依跟 JD 的相關度排過，超過的從最後一條開始刪。
  */
-function enforceBulletCaps(resume: Resume): Resume {
+function enforceBulletCaps(input: Resume): Resume {
+  const resume = sortWorkByRecency(input);
   const work = (resume.work_experience ?? []).map((e) => ({ ...e, bullets: [...(e.bullets ?? [])] }));
   let newer = Number.POSITIVE_INFINITY;
   workByRecency(resume).forEach((i, rank) => {
@@ -1243,7 +1256,7 @@ export async function reviseResumeWithChat(params: {
   const parsed = parseJsonResponse<{ reply?: string; resume?: Resume; remember?: string[] }>(response.text);
   if (!parsed.resume) throw new Error("AI 沒有回傳改好的履歷，請換個說法再試一次");
   await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
-  const next = pinBackground(parsed.resume, background);
+  const next = sortWorkByRecency(pinBackground(parsed.resume, background));
   // 學歷 AI 本來就不能改；使用者在畫布上手動改過的話，沿用這份履歷目前的，不要被經歷資料庫的版本蓋回去。
   next.education = resume.education;
   if (language === "zh") polishChinese(next);

@@ -93,6 +93,7 @@ function toSnapshot(entries: ExperienceEntry[], background: ProfileBackground): 
       periodVariants: e.periodVariants,
       achievements: e.achievements,
       createdAt: e.createdAt,
+      sortOrder: e.sortOrder,
     })),
     background,
   };

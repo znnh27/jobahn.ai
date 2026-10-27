@@ -242,7 +242,7 @@ function other(lang: Lang): Lang {
   return lang === "zh" ? "en" : "zh";
 }
 
-function periodsOf(e: EntryRow): string[] {
+export function periodsOf(e: Pick<EntryRow, "period_variants">): string[] {
   if (!Array.isArray(e.period_variants)) return [];
   return e.period_variants
     .map((v) => (typeof v === "string" ? v : (v as { period?: unknown })?.period))
@@ -268,7 +268,7 @@ function firstSource(e: EntryRow): string {
 }
 
 /** 期間比對時忽略空白、大小寫、各種破折號。 */
-function normPeriod(p: string): string {
+export function normPeriod(p: string): string {
   return p.toLowerCase().replace(/[\s.]/g, "").replace(/[–—~～-]/g, "-");
 }
 
