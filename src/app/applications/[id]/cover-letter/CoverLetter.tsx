@@ -579,7 +579,7 @@ export function CoverLetter({
           <ProgressBar value={recheckProgress} label="用履歷＋求職信重新比對 JD…" />
         )}
         {proofreadProgress !== null && (
-          <ProgressBar value={proofreadProgress} label="校稿中：檢查錯字、文法、AI 腔，跟經歷資料庫對事實…" />
+          <ProgressBar value={proofreadProgress} label="校稿中：檢查錯字、文法，跟經歷資料庫對事實…" />
         )}
         {addProgress !== null && (
           <ProgressBar value={addProgress} label="補進求職信，補完立刻比對一次…" />

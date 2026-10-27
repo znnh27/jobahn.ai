@@ -83,10 +83,12 @@ function formatIssues(segments: Segment[]): ProofreadIssue[] {
 
 /** 經歷資料庫整理成 AI 看得懂的清單，每個版本標出來源（AI 潤飾的版本不能當事實依據）。 */
 function formatEntries(rows: Array<Record<string, unknown>>): string {
-  const texts = (value: unknown): string[] =>
+  // 職稱存成 { role }、期間存成 { period }（見 experience_entries）。以前只讀 text，職稱、期間整個是空的，
+  // AI 就把每一段的職稱都判成「資料庫找不到」（2026-10-28）。
+  const texts = (value: unknown, key: "role" | "period"): string[] =>
     Array.isArray(value)
       ? value
-          .map((v) => (typeof v === "string" ? v : typeof v?.text === "string" ? v.text : ""))
+          .map((v) => (typeof v === "string" ? v : typeof v?.[key] === "string" ? v[key] : typeof v?.text === "string" ? v.text : ""))
           .filter(Boolean)
       : [];
   return rows
@@ -98,7 +100,7 @@ function formatEntries(rows: Array<Record<string, unknown>>): string {
           .map((v) => `  - 第 ${i + 1} 件（來源：${v.source ?? "未標示"}）：${v.text}`),
       );
       return [
-        `【${row.entry_type === "work" ? "正式工作" : "社團、專案"}】${row.org_name}｜${texts(row.role_variants).join(" / ")}｜${texts(row.period_variants).join(" / ")}`,
+        `【${row.entry_type === "work" ? "正式工作" : "社團、專案"}】${row.org_name}｜${texts(row.role_variants, "role").join(" / ")}｜${texts(row.period_variants, "period").join(" / ")}`,
         ...lines,
       ].join("\n");
     })

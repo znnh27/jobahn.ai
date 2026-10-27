@@ -783,7 +783,7 @@ export function Canvas({
           <ProgressBar value={finalizeProgress} label="定案中，把這次用到的內容寫回經歷資料庫…" />
         )}
         {proofreadProgress !== null && (
-          <ProgressBar value={proofreadProgress} label="校稿中：檢查錯字、文法、AI 腔，跟經歷資料庫對事實…" />
+          <ProgressBar value={proofreadProgress} label="校稿中：檢查錯字、文法，跟經歷資料庫對事實…" />
         )}
         {trimProgress !== null && <ProgressBar value={trimProgress} label="AI 正在依 JD 判斷哪些內容可以精簡或刪掉…" />}
         {showOverflowAlert && trimProgress === null && (
