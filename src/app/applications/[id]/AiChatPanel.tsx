@@ -6,6 +6,7 @@ import { TypingIndicator } from "@/app/experience/TypingIndicator";
 
 // 「跟 AI 聊」面板（履歷頁、求職信頁共用）：浮在右下角、不擋住內容，邊聊邊看左邊的變化。
 // 這裡只管對話畫面；實際怎麼改、改完換到哪裡，由 onSend 決定（見 ResumeChatPanel、CoverLetterChatPanel）。
+// AI 的回覆照 CHAT_REPLY_FORMAT（lib/ai/chatReply.ts）分段：「- 」開頭顯示成圓點條列、空一行是分段（2026-10-27 Z 要求，整段擠在一起很難讀）。
 
 export interface ChatTurn {
   role: "user" | "assistant";
@@ -79,7 +80,7 @@ export function AiChatPanel({
         </div>
         {turns.map((t, i) => (
           <div key={i} className={`elicitation-bubble elicitation-bubble--${t.role === "user" ? "user" : "assistant"}`}>
-            <p>{t.text}</p>
+            {t.role === "assistant" ? <ChatText text={t.text} /> : <p className="chat-user-text">{t.text}</p>}
           </div>
         ))}
         {pending && <TypingIndicator />}
@@ -97,6 +98,57 @@ export function AiChatPanel({
         disabled={pending}
         placeholder={placeholder}
       />
+    </div>
+  );
+}
+
+type ChatBlock = { type: "p"; text: string } | { type: "ul"; items: string[] };
+
+const BULLET = /^(?:[-•・*]|\d+[.、)])\s*/;
+
+/**
+ * AI 回覆拆成段落跟條列：「- 」「1.」開頭的行是條列，其他每行一段，空行只是分隔。
+ * AI 沒照格式、整段沒換行又超過兩句時，照句號拆成一句一段，不要一整塊字。
+ */
+function toBlocks(text: string): ChatBlock[] {
+  const trimmed = text.replace(/\r\n/g, "\n").trim();
+  if (!trimmed.includes("\n")) {
+    const sentences = trimmed
+      .split(/(?<=[。！？!?])/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+    return (sentences.length > 2 ? sentences : [trimmed]).map((t) => ({ type: "p", text: t }));
+  }
+  const blocks: ChatBlock[] = [];
+  for (const raw of trimmed.split("\n")) {
+    const line = raw.trim();
+    const last = blocks[blocks.length - 1];
+    if (!line) continue;
+    if (BULLET.test(line)) {
+      const item = line.replace(BULLET, "");
+      if (last?.type === "ul") last.items.push(item);
+      else blocks.push({ type: "ul", items: [item] });
+    } else {
+      blocks.push({ type: "p", text: line });
+    }
+  }
+  return blocks;
+}
+
+function ChatText({ text }: { text: string }) {
+  return (
+    <div className="chat-text">
+      {toBlocks(text).map((b, i) =>
+        b.type === "p" ? (
+          <p key={i}>{b.text}</p>
+        ) : (
+          <ul key={i}>
+            {b.items.map((item, j) => (
+              <li key={j}>{item}</li>
+            ))}
+          </ul>
+        ),
+      )}
     </div>
   );
 }

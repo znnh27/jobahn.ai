@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
+import { CHAT_REPLY_FORMAT } from "@/lib/ai/chatReply";
 import { COVERAGE_RULES, readScoreBasis, type GeneratedResume } from "./generateResume";
 import { coveredByResume } from "./atsScore";
 import { buildContactLine, pickName, readContact } from "./contact";
@@ -450,7 +451,7 @@ ${COVER_LETTER_RULES}
 2. 只能用履歷、JD 裡有的事實。要求加的內容資料裡沒有，就不要編，在 reply 說明缺什麼、建議怎麼補。
 3. 信裡的 {{SIGNATURE}} 記號一字不改留在原位，系統會換成使用者的名字跟聯絡方式。
 4. 使用者要求縮短或加長時，reply 裡說明大概改成多少字。
-5. reply 用繁體中文一兩句話說明改了哪裡，口語、不要生硬。
+5. ${CHAT_REPLY_FORMAT}
 6. 「要保留的內容」列的 JD 條件，信裡目前有句子在回應它（多半是使用者按「補充」加進來的）。除非使用者這次明確要求刪改那一項，改信時這些句子都要留著：可以調整措辭、位置，但不能刪掉，也不能改到不再明確回應那項條件。
 7. ${REMEMBER_RULE}
 8. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來：{ "reply": string, "letter": string, "remember": string[] }`;

@@ -2346,6 +2346,31 @@
   color: var(--chrome-onaccent);
 }
 
+/* 「跟 AI 聊」的回覆：段落之間留一點空，條列用淡色圓點（跟 JD 條件的缺口說明同一種）。 */
+.chat-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.chat-text p,
+.chat-text ul {
+  margin: 0;
+}
+.chat-text ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-left: 1.2em;
+  list-style: disc;
+}
+.chat-text li::marker {
+  color: var(--chrome-muted-light);
+}
+/* 使用者自己打的換行照樣顯示。 */
+.chat-user-text {
+  white-space: pre-wrap;
+}
+
 .elicitation-bubble--full {
   max-width: 100%;
   align-self: stretch;

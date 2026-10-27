@@ -63,6 +63,8 @@ export function stripRuleRefs(text: string): string {
   return text
     .replace(/[（(]\s*(?:違反)?\s*(?:規則|rule)\s*\d+(?:\s*[、,，與和及&]\s*(?:規則|rule)?\s*\d+)*\s*[）)]/gi, "")
     .replace(/(?:依照|依|根據|按照)?\s*(?:違反|不符合|符合)?\s*(?:規則|rule)\s*\d+(?:\s*[、,，與和及&]\s*(?:規則|rule)?\s*\d+)*\s*(?:的要求|要求)?\s*[：:，,]?\s*/gi, "")
-    .replace(/\s{2,}/g, " ")
+    // 只壓連續的空格，換行留著（「跟 AI 聊」的回覆靠換行分段、條列）。
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
     .trim();
 }

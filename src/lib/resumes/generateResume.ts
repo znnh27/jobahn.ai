@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
+import { CHAT_REPLY_FORMAT } from "@/lib/ai/chatReply";
 import { BULLET_RULES, stripRuleRefs } from "@/lib/experience/bulletRules";
 import { ensureLanguageParity } from "@/lib/experience/languageParity";
 import { computeAtsScore, countsForResume, type JdImportance } from "./atsScore";
@@ -1226,7 +1227,8 @@ export async function reviseResumeWithChat(params: {
       `- 照使用者的要求修改目前的履歷，沒被要求的地方原則上不要動。`,
       `- 要新增內容時，只能用經歷資料庫裡有的事實（可以照寫作規則改寫）；資料庫裡沒有對應的事，就不要編，在 reply 說明缺什麼、建議到經歷資料庫補。`,
       `- ${REMEMBER_RULE}`,
-      `- 這次的輸出格式改成：{ "reply": string, "resume": 整份履歷（格式跟上面的履歷完全一樣）, "remember": string[] }。reply 用繁體中文一兩句話說明改了哪裡，不要提「規則 N」這類編號。`,
+      `- 這次的輸出格式改成：{ "reply": string, "resume": 整份履歷（格式跟上面的履歷完全一樣）, "remember": string[] }。reply 不要提「規則 N」這類編號。`,
+      CHAT_REPLY_FORMAT,
       `- 只輸出 JSON，不要有其他文字。`,
     ]
       .filter(Boolean)
