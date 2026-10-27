@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase/service";
+import { loadMemory, memoryBlock } from "./userMemory";
 
 // 雙模式共用函式：所有需要 AI 的功能（履歷解析、JD 比對生成、ATS 評分、求職信）
 // 都只能透過這個函式呼叫 Claude，不要在別的地方直接 new Anthropic() 或 spawn claude CLI。
@@ -50,8 +51,31 @@ export interface AskClaudeResult {
   estimatedCostUsd: number | null;
 }
 
-export async function askClaude(params: AskClaudeParams): Promise<AskClaudeResult> {
+/**
+ * 會寫出使用者看得到的內容（履歷、求職信、經歷 bullet、聊天回覆）的功能：指令裡自動帶上今天的日期跟「AI 記住的事」，
+ * 每個功能都不用自己記得去讀（2026-10-27 Z 要求：叫 AI 記住的事每次都要記住）。
+ * 今天的日期：以前沒給，AI 不知道現在幾月，經歷寫「– May. 2026」它還當成目前在職，求職信一直寫「我目前在○○擔任」。
+ * 解析上傳檔案、抽 JD 條件、比對評分這類判斷用的功能不帶，免得影響判斷。
+ */
+const MEMORY_FEATURES = new Set([
+  "resume_generate",
+  "resume_chat",
+  "resume_condition_summary",
+  "resume_fit_page",
+  "resume_trim",
+  "keyword_reword",
+  "cover_letter",
+  "cover_letter_add",
+  "cover_letter_chat",
+  "experience_elicitation",
+  "experience_bulk_scan",
+  "experience_quality_check",
+  "background_interview",
+]);
+
+export async function askClaude(input: AskClaudeParams): Promise<AskClaudeResult> {
   const provider = process.env.AI_PROVIDER === "api" ? "api" : "local-cli";
+  const params = await withContext(input);
 
   const startedAt = Date.now();
   const result =
@@ -68,6 +92,14 @@ export async function askClaude(params: AskClaudeParams): Promise<AskClaudeResul
   await logUsage(params.userId, params.feature, result);
 
   return result;
+}
+
+async function withContext(params: AskClaudeParams): Promise<AskClaudeParams> {
+  if (!MEMORY_FEATURES.has(params.feature)) return params;
+  const today = new Intl.DateTimeFormat("zh-TW", { timeZone: "Asia/Taipei", year: "numeric", month: "long", day: "numeric" }).format(new Date());
+  const dateBlock = `===== 今天的日期 =====\n今天是 ${today}（台北時間）。經歷的結束時間早於今天的，就是已經離職或結束的，不能寫成「目前」在那裡任職或進行中；結束時間寫 Present、至今的才是目前的。`;
+  const memory = memoryBlock(await loadMemory(params.supabase ?? createServiceClient(), params.userId));
+  return { ...params, systemPrompt: [params.systemPrompt, dateBlock, memory].filter(Boolean).join("\n\n") };
 }
 
 async function callLocalCli(params: AskClaudeParams): Promise<AskClaudeResult> {

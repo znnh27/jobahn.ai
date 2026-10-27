@@ -21,6 +21,7 @@ export interface ScrapedJob {
 
 const FIRECRAWL_SCRAPE = "https://api.firecrawl.dev/v1/scrape";
 const PASTE_INSTEAD = "這個網站不支援自動抓取（通常是要登入才看得到的網站），請直接複製職缺內容貼到下面";
+const BLOCKED_104 = "104 目前擋掉程式自動讀取職缺，不是職缺下架。請打開職缺頁，全選複製整頁貼到下面，AI 會自動整理";
 /** 已知抓不到的網站（要登入、Firecrawl 不支援），直接說，不浪費一次抓取。 */
 const UNSUPPORTED_HOSTS = ["linkedin.com", "facebook.com", "instagram.com", "threads.net"];
 /** 給 AI 篩選的頁面最多留多少字，避免 prompt 太長。 */
@@ -104,14 +105,17 @@ async function scrape104(jobId: string): Promise<ScrapedJob> {
     formats: ["rawHtml"],
     headers: { Referer: `https://www.104.com.tw/job/${jobId}` },
   });
+  // 104 擋掉程式讀取時會回「錯誤頁 - 104人力銀行」（HTTP 403），不是職缺下架（2026-10-27 實測：
+  // 職缺在瀏覽器看得到，程式讀職缺頁跟資料 API 都被擋），照實講，請使用者貼上 JD。
+  if (/錯誤頁\s*-\s*104/.test(data.rawHtml ?? "")) throw new Error(BLOCKED_104);
   const json = data.rawHtml?.match(/\{[\s\S]*\}/)?.[0];
   let job: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- 104 的回傳格式沒有公開型別
   try {
     job = JSON.parse(json ?? "").data;
   } catch {
-    throw new Error("104 的職缺資料讀不到，可能職缺已經下架，請直接貼上 JD 內容");
+    throw new Error(BLOCKED_104);
   }
-  if (!job?.jobDetail) throw new Error("104 的職缺資料讀不到，可能職缺已經下架，請直接貼上 JD 內容");
+  if (!job?.jobDetail) throw new Error("104 回傳的資料裡沒有這個職缺，可能已經下架。職缺還看得到的話，請直接複製 JD 內容貼到下面");
 
   const header = job.header ?? {};
   const detail = job.jobDetail ?? {};
@@ -178,26 +182,53 @@ async function scrapeGeneric(url: string, ctx: { supabase: SupabaseClient; userI
   if (!markdown) throw new Error("抓取成功，但頁面沒有可用的文字內容，請直接貼上 JD 內容");
   const pageText = markdownToText(markdown);
 
+  const extracted = await extractJob(pageText, ctx, url);
+  // AI 篩不了（額度用完、回傳格式不對）就退回只抓主要內容的版本，至少比整頁乾淨，使用者可以自己刪。
+  if (!extracted) return { text: pageText, companyName: null, jobTitle: null };
+  if (extracted === "blocked") {
+    throw new Error("這個頁面要登入才看得到完整的職缺內容（或不是職缺頁面），請直接複製職缺內容貼上");
+  }
+  return extracted;
+}
+
+/**
+ * 從網頁文字裡挑出職缺本身，順便找公司名稱、職稱。抓網頁、使用者整頁貼上都用這個。
+ * AI 失敗回傳 null（呼叫端自己決定退回什麼），判斷不是職缺內容回傳 "blocked"。
+ */
+async function extractJob(
+  pageText: string,
+  ctx: { supabase: SupabaseClient; userId: string },
+  url?: string,
+): Promise<ScrapedJob | "blocked" | null> {
   let parsed: { blocked?: boolean; company?: string | null; title?: string | null; text?: string };
   try {
     const response = await askClaude({
       userId: ctx.userId,
       feature: "job_scrape_extract",
       systemPrompt: EXTRACT_SYSTEM_PROMPT,
-      userPrompt: `===== 職缺網址 =====\n${url}\n\n===== 頁面內容 =====\n${pageText.slice(0, PAGE_CHAR_LIMIT)}`,
+      userPrompt: [url ? `===== 職缺網址 =====\n${url}` : "", `===== 頁面內容 =====\n${pageText.slice(0, PAGE_CHAR_LIMIT)}`]
+        .filter(Boolean)
+        .join("\n\n"),
       maxTokens: 4000,
       temperature: 0,
       supabase: ctx.supabase,
     });
     parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
   } catch {
-    // AI 篩不了（額度用完、回傳格式不對）就退回只抓主要內容的版本，至少比整頁乾淨，使用者可以自己刪。
-    return { text: pageText, companyName: null, jobTitle: null };
+    return null;
   }
-
-  if (parsed.blocked || !parsed.text?.trim()) {
-    throw new Error("這個頁面要登入才看得到完整的職缺內容（或不是職缺頁面），請直接複製職缺內容貼上");
-  }
+  if (parsed.blocked || !parsed.text?.trim()) return "blocked";
   const clean = (v: string | null | undefined) => (typeof v === "string" && v.trim() ? toTraditional(v.trim()) : null);
   return { text: parsed.text.trim(), companyName: clean(parsed.company), jobTitle: clean(parsed.title) };
+}
+
+/**
+ * 使用者在職缺頁全選複製、整頁貼進 JD 欄位（2026-10-27：104 擋掉程式讀取後的替代做法，任何求職網站都適用）：
+ * 跟抓網頁一樣請 AI 挑出職缺本身、公司名稱、職稱。整理不了就回傳 null，維持使用者貼的原文。
+ */
+export async function tidyPastedJobPage(
+  text: string,
+  ctx: { supabase: SupabaseClient; userId: string },
+): Promise<ScrapedJob | "blocked" | null> {
+  return extractJob(text, ctx);
 }

@@ -32,12 +32,14 @@ import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
 import type { GeneratedResume } from "@/lib/resumes/generateResume";
 import { hasRequiredContact, type ResumeContact } from "@/lib/resumes/contact";
 import { ContactDialog } from "@/app/ContactForm";
-import { CloseIcon, RedoIcon, UndoIcon } from "@/app/icons";
+import { CheckIcon, CloseIcon, RedoIcon, UndoIcon } from "@/app/icons";
+import { useFlash } from "@/app/useFlash";
 import { useUndoShortcuts } from "@/app/useUndoShortcuts";
 import { SectionLabelsProvider } from "@/app/SectionLabels";
 import type { CustomSectionLabels } from "@/lib/resumes/sectionLabels";
 import { computeAtsScore, coveredByResume } from "@/lib/resumes/atsScore";
 import { JdChecklist } from "./JdChecklist";
+import { StatusMessage } from "@/app/StatusMessage";
 import { matchKeywords } from "@/lib/resumes/keywordMatch";
 import type { RewordEdit } from "@/lib/resumes/rewordKeywords";
 import { inlineDiff } from "@/lib/text/inlineDiff";
@@ -186,6 +188,8 @@ export function Canvas({
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [activeLang, setActiveLang] = useState(languages[0]);
   const [message, setMessage] = useState<string | null>(null);
+  // 儲存、重新檢查評分這種簡短確認不進訊息列，按鈕本身變「✓ 已儲存」2 秒（見 useFlash）。
+  const { flashed, flash } = useFlash();
   // 記錄是哪個動作在跑，進度條的說明文字跟位置才對得上。
   const [busy, setBusy] = useState<Busy | null>(null);
   const isPending = busy !== null;
@@ -358,15 +362,25 @@ export function Canvas({
     setFuture([]);
   }
 
+  // 跟 AI 聊改完、上一步／下一步之後自動存檔（2026-10-27 Z 要求：AI 改完沒存，離開就不見；上一步也要存，
+  // 重新整理才不會又跑回 AI 改的版本）。在背景存、不鎖按鈕；一個接一個存，連按上一步時最後存的一定是畫面上這一版。
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  function autoSave(next: ResumeMap) {
+    saveQueue.current = saveQueue.current.then(async () => {
+      const result = await saveDraftAction(applicationId, next);
+      if (result.error) setMessage(`錯誤：自動儲存失敗（${result.error}），請按「儲存」`);
+    });
+  }
+
   /** 換成上一步／下一步的內容：只換內容，字級跟間距維持現在的設定（排版設定是另外存的，不算一步）。 */
   function restore(target: ResumeMap) {
     if (!draft) return;
-    setDraft(
-      Object.fromEntries(
-        Object.entries(target).map(([lang, r]) => [lang, { ...r, layout: draft[lang]?.layout ?? r.layout }]),
-      ),
+    const next = Object.fromEntries(
+      Object.entries(target).map(([lang, r]) => [lang, { ...r, layout: draft[lang]?.layout ?? r.layout }]),
     );
+    setDraft(next);
     setCanvasVersion((v) => v + 1);
+    autoSave(next);
   }
 
   function handleUndo() {
@@ -374,8 +388,8 @@ export function Canvas({
     if (!previous || !draft) return;
     setPast(past.slice(0, -1));
     setFuture((f) => [...f, draft]);
+    // 畫面上的內容換回去就是回饋，不另外顯示訊息（自動儲存失敗才會出現錯誤訊息）。
     restore(previous);
-    setMessage("已回到上一步");
   }
 
   function handleRedo() {
@@ -384,7 +398,6 @@ export function Canvas({
     setFuture(future.slice(0, -1));
     setPast((p) => [...p.slice(-(UNDO_LIMIT - 1)), draft]);
     restore(next);
-    setMessage("已回到下一步");
   }
 
   // Cmd/Ctrl + Z 上一步、Shift + Cmd/Ctrl + Z 下一步（正在某一格打字時先退打的字）。
@@ -481,13 +494,15 @@ export function Canvas({
     setMessage("換好了，記得按「儲存」；不滿意可以按「上一步」");
   }
 
-  // 「跟 AI 聊」改好的整份履歷換進草稿：記進上一步、畫布重新掛載才看得到新內容。字級間距維持現在的設定。
+  // 「跟 AI 聊」改好的整份履歷換進草稿並自動存檔：記進上一步、畫布重新掛載才看得到新內容。字級間距維持現在的設定。
   function applyChatRevision(lang: string, next: Resume) {
     if (!draft) return;
+    const nextDraft = { ...draft, [lang]: { ...next, layout: draft[lang]?.layout ?? next.layout } };
     remember(draft);
-    setDraft({ ...draft, [lang]: { ...next, layout: draft[lang]?.layout ?? next.layout } });
+    setDraft(nextDraft);
     setCanvasVersion((v) => v + 1);
-    setMessage("AI 改好了，記得按「儲存」；不滿意可以按「上一步」");
+    autoSave(nextDraft);
+    setMessage("AI 改好了，已自動儲存；不滿意可以按「上一步」");
   }
 
   function handleRescore() {
@@ -503,7 +518,7 @@ export function Canvas({
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
       setKeywords(result.data.jd_keywords);
-      setMessage("已重新評分");
+      flash("rescore");
     });
   }
 
@@ -538,7 +553,8 @@ export function Canvas({
     setMessage(null);
     void run("save", async () => {
       const result = await saveDraftAction(applicationId, draft);
-      setMessage(result.error ? `錯誤：${result.error}` : "已儲存");
+      if (result.error) setMessage(`錯誤：${result.error}`);
+      else flash("save");
     });
   }
 
@@ -581,7 +597,11 @@ export function Canvas({
           <p className="text-body">
             還沒有生成過履歷
             <InfoTip label="生成履歷的說明">
-              按下面的按鈕，AI 會依 JD 從經歷資料庫挑選內容、寫成履歷並評分。每個語言版本大約 3–5 分鐘（會一直補內容到剛好一頁）。
+              <ul>
+                <li>AI 會依 JD 從經歷資料庫挑選內容、寫成履歷並評分</li>
+                <li>每個語言版本大約 3–5 分鐘</li>
+                <li>會一直補內容，直到剛好一頁</li>
+              </ul>
             </InfoTip>
           </p>
           {generateProgress !== null ? (
@@ -660,12 +680,6 @@ export function Canvas({
               </div>
             )}
           </div>
-          {/* 提示訊息用小字塞在按鈕左邊的剩餘空間，最多兩行，不把按鈕擠到下一行。 */}
-          {message && (
-            <span className="canvas-bar-message" title={message}>
-              {message}
-            </span>
-          )}
           <div className="canvas-bar-actions">
             {finalized ? (
               <>
@@ -704,7 +718,13 @@ export function Canvas({
                 {/* 儲存固定在最左邊、重新產生跟重新檢查評分排在一起、主要按鈕「定案」在最右邊（2026-10-25 Z 要求，跟求職信頁一樣）。 */}
                 <button onClick={handleSave} disabled={isPending} className="btn btn-secondary">
                   {busy === "save" && <Spinner />}
-                  儲存
+                  {flashed === "save" ? (
+                    <>
+                      <CheckIcon /> 已儲存
+                    </>
+                  ) : (
+                    "儲存"
+                  )}
                 </button>
                 <button
                   type="button"
@@ -718,7 +738,13 @@ export function Canvas({
                   重新產生履歷
                 </button>
                 <button onClick={handleRescore} disabled={isPending} className="btn btn-secondary">
-                  重新檢查評分
+                  {flashed === "rescore" ? (
+                    <>
+                      <CheckIcon /> 已重新評分
+                    </>
+                  ) : (
+                    "重新檢查評分"
+                  )}
                 </button>
                 <button onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
                   定案
@@ -727,6 +753,7 @@ export function Canvas({
             )}
           </div>
         </div>
+        <StatusMessage message={message} onClose={() => setMessage(null)} />
 
         {generateProgress !== null && (
           <ProgressBar value={generateProgress} label="AI 正在依 JD 重新挑選經歷、產生履歷…" />

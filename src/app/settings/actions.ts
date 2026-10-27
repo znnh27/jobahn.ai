@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { ResumeContact } from "@/lib/resumes/contact";
+import { forgetNote, rememberNotes } from "@/lib/ai/userMemory";
 
 async function verifyAnthropicKey(key: string): Promise<boolean> {
   try {
@@ -102,5 +103,39 @@ export async function saveContactAction(
 
   revalidatePath("/settings");
   revalidatePath("/applications", "layout");
+  return { success: true };
+}
+
+/** 帳號設定「AI 記住的事」：直接新增一條。 */
+export async function addMemoryAction(text: string): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+  if (!text.trim()) return { error: "請輸入要記住的事" };
+  try {
+    const added = await rememberNotes(supabase, user.id, [text]);
+    if (added.length === 0) return { error: "這件事已經記住了" };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "記住失敗" };
+  }
+  revalidatePath("/settings");
+  return { success: true };
+}
+
+/** 帳號設定「AI 記住的事」：刪掉一條，之後 AI 就不會再照它做。 */
+export async function deleteMemoryAction(id: string): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+  try {
+    await forgetNote(supabase, user.id, id);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "刪除失敗" };
+  }
+  revalidatePath("/settings");
   return { success: true };
 }

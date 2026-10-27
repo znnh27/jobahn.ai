@@ -497,7 +497,11 @@ export function ExperiencePageClient({
               <span>
                 已關閉的提醒
                 <InfoTip label="已關閉提醒的說明">
-                  關掉的類別，檢查時不會再標記，生成履歷時一樣會照規則寫。恢復之後重新檢查就會再出現。
+                  <ul>
+                    <li>關掉的類別，檢查時不會再標記</li>
+                    <li>生成履歷時一樣會照規則寫</li>
+                    <li>恢復之後重新檢查，就會再出現</li>
+                  </ul>
                 </InfoTip>
               </span>
               {mutedRules.map((id) => (
@@ -534,7 +538,10 @@ export function ExperiencePageClient({
               <p className="flag-rail-summary">
                 還有 {visibleFlags.length} 條建議
                 <InfoTip label="建議的說明">
-                  每條按 ✓ 套用改寫、按 ✕ 忽略，或點「跟 AI 聊」補資訊。全部處理完，右欄會換回每條寫法的角度標籤。
+                  <ul>
+                    <li>每條按 ✓ 套用改寫、按 ✕ 忽略，或點「跟 AI 聊」補資訊</li>
+                    <li>全部處理完，右欄會換回每條寫法的角度標籤</li>
+                  </ul>
                 </InfoTip>
               </p>
               <FlagRail

@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useRef, useState, useTransition } from "react";
-import { createApplication, scrapeJobUrlAction } from "./actions";
+import { createApplication, scrapeJobUrlAction, tidyPastedJdAction } from "./actions";
 import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { companyMentionedInJd } from "@/lib/jobs/companyInJd";
@@ -10,6 +10,9 @@ import { InfoTip } from "../../InfoTip";
 type CreateResult = { error?: string };
 
 const initialState: CreateResult = {};
+
+// 貼上的文字超過這個字數，當成整頁全選複製（混著選單、推薦職缺），請 AI 整理；短的當成已經是 JD，不動。
+const TIDY_MIN_CHARS = 1500;
 
 export function NewApplicationForm() {
   const [state, formAction, isPending] = useActionState(
@@ -24,6 +27,11 @@ export function NewApplicationForm() {
   const [scrapedCompany, setScrapedCompany] = useState<string | null>(null);
   const [jobDescription, setJobDescription] = useState("");
   const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
+  // 整頁貼上 → AI 整理（2026-10-27：104 擋掉程式讀取後的替代做法）。留著原文，整理錯了可以還原。
+  const [jdMessage, setJdMessage] = useState<string | null>(null);
+  const [pastedOriginal, setPastedOriginal] = useState<string | null>(null);
+  const [isTidying, startTidyTransition] = useTransition();
+  const tidyProgress = useEstimatedProgress(isTidying, 20000);
   const [isScraping, startScrapeTransition] = useTransition();
   // 104 直接讀結構化資料比較快；其他網站還要請 AI 篩掉雜訊，比較久。
   const scrapeProgress = useEstimatedProgress(isScraping, /104\.com\.tw/.test(jobUrl) ? 8000 : 25000);
@@ -44,6 +52,52 @@ export function NewApplicationForm() {
     }
   }
 
+  /** 公司名稱、職稱只填空白的欄位，使用者已經打的不蓋掉。回傳填了哪幾欄。 */
+  function fillCompanyAndTitle(result: { companyName?: string | null; jobTitle?: string | null }): string[] {
+    const filled: string[] = [];
+    if (result.companyName && !companyName.trim()) {
+      setCompanyName(result.companyName);
+      setScrapedCompany(result.companyName);
+      filled.push("公司名稱");
+    }
+    if (result.jobTitle && !jobTitle.trim()) {
+      setJobTitle(result.jobTitle);
+      filled.push("職稱");
+    }
+    return filled;
+  }
+
+  // 在職缺頁全選複製、整頁貼上：先照貼上的放進欄位，再請 AI 挑出職缺本身，順便填公司名稱、職稱。
+  function handleJdPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = e.clipboardData.getData("text");
+    if (pasted.trim().length < TIDY_MIN_CHARS) return;
+    e.preventDefault();
+    setJobDescription(pasted);
+    setPastedOriginal(null);
+    setJdMessage(null);
+    startTidyTransition(async () => {
+      try {
+        const result = await tidyPastedJdAction(pasted);
+        if (result.notJob) {
+          setJdMessage("看起來不是職缺頁的內容，先保留你貼上的原文，送出前再確認一下");
+          return;
+        }
+        if (result.error || !result.text) {
+          setJdMessage(`錯誤：${result.error ?? "AI 整理失敗，先保留你貼上的原文"}`);
+          return;
+        }
+        setPastedOriginal(pasted);
+        setJobDescription(result.text);
+        const filled = fillCompanyAndTitle(result);
+        setJdMessage(
+          `已用 AI 挑出職缺內容${filled.length > 0 ? `，也幫你填好了${filled.join("、")}` : ""}。送出前再看一眼內容對不對`,
+        );
+      } catch {
+        setJdMessage("錯誤：AI 整理失敗，先保留你貼上的原文");
+      }
+    });
+  }
+
   function handleScrape() {
     setScrapeMessage(null);
     startScrapeTransition(async () => {
@@ -54,17 +108,9 @@ export function NewApplicationForm() {
           return;
         }
         setJobDescription(result.text);
-        // 公司名稱、職稱只填空白的欄位，使用者已經打的不蓋掉。
-        const filled: string[] = [];
-        if (result.companyName && !companyName.trim()) {
-          setCompanyName(result.companyName);
-          setScrapedCompany(result.companyName);
-          filled.push("公司名稱");
-        }
-        if (result.jobTitle && !jobTitle.trim()) {
-          setJobTitle(result.jobTitle);
-          filled.push("職稱");
-        }
+        setPastedOriginal(null);
+        setJdMessage(null);
+        const filled = fillCompanyAndTitle(result);
         setScrapeMessage(
           `抓取完成，JD 已帶入下方${filled.length > 0 ? `，也幫你填好了${filled.join("、")}` : ""}。送出前再看一眼內容對不對`,
         );
@@ -79,12 +125,13 @@ export function NewApplicationForm() {
     <form ref={formRef} action={formAction} onSubmit={handleSubmit} className="card form-stack">
       <div className="field">
         <label htmlFor="companyName" className="label">
-          公司名稱（選填）
+          公司名稱
         </label>
         <input
           id="companyName"
           name="companyName"
           type="text"
+          required
           className="input"
           value={companyName}
           onChange={(e) => setCompanyName(e.target.value)}
@@ -93,12 +140,13 @@ export function NewApplicationForm() {
 
       <div className="field">
         <label htmlFor="jobTitle" className="label">
-          職稱（選填）
+          職稱
         </label>
         <input
           id="jobTitle"
           name="jobTitle"
           type="text"
+          required
           className="input"
           value={jobTitle}
           onChange={(e) => setJobTitle(e.target.value)}
@@ -136,7 +184,13 @@ export function NewApplicationForm() {
         <label htmlFor="jobDescription" className="label">
           JD 內容
           <InfoTip label="JD 內容的說明">
-            貼上職缺頁面的文字，或用上面的連結自動抓取。建立後就不能修改（之後只能查看），履歷跟求職信都會照這份內容寫；貼錯的話要刪掉這筆重新新增。
+            <ul>
+              <li>貼上職缺頁面的文字，或用上面的連結自動抓取</li>
+              <li>可以在職缺頁全選複製整頁貼上，AI 會自動挑出職缺內容</li>
+              <li>履歷跟求職信都會照這份內容寫</li>
+              <li>建立後不能修改，之後只能查看</li>
+              <li>貼錯的話，要刪掉這筆重新新增</li>
+            </ul>
           </InfoTip>
         </label>
         <textarea
@@ -146,15 +200,42 @@ export function NewApplicationForm() {
           rows={10}
           value={jobDescription}
           onChange={(e) => setJobDescription(e.target.value)}
+          onPaste={handleJdPaste}
+          readOnly={isTidying}
           className="textarea"
         />
+        {tidyProgress !== null && <ProgressBar value={tidyProgress} label="AI 正在從貼上的內容挑出職缺…" />}
+        {jdMessage && (
+          <p className="hint-text">
+            {jdMessage}
+            {pastedOriginal && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="btn-link"
+                  onClick={() => {
+                    setJobDescription(pastedOriginal);
+                    setPastedOriginal(null);
+                    setJdMessage("已還原成你貼上的原文");
+                  }}
+                >
+                  還原成貼上的原文
+                </button>
+              </>
+            )}
+          </p>
+        )}
       </div>
 
       <fieldset>
         <legend className="label">
           要生成哪個語言版本
           <InfoTip label="語言版本的說明">
-            語言版本建立後不能再改。公司名稱跟職稱之後還可以在標題旁邊修改。
+            <ul>
+              <li>語言版本建立後不能再改</li>
+              <li>公司名稱跟職稱之後還可以在標題旁邊修改</li>
+            </ul>
           </InfoTip>
         </legend>
         <div className="checkbox-row">

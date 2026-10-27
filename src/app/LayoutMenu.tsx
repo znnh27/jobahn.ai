@@ -92,7 +92,12 @@ export function LayoutMenu({
           <div className="layout-menu-row">
             <span className="layout-menu-label">
               內文字級
-              <InfoTip label="內文字級的說明">只改列點和摘要的字，標題、姓名會跟著等比放大縮小。</InfoTip>
+              <InfoTip label="內文字級的說明">
+                <ul>
+                  <li>只改列點和摘要的字</li>
+                  <li>標題、姓名會跟著等比放大縮小</li>
+                </ul>
+              </InfoTip>
             </span>
             <div className="layout-menu-stepper">
               <button
@@ -121,7 +126,11 @@ export function LayoutMenu({
             <span className="layout-menu-label">
               抬頭字級
               <InfoTip label="抬頭字級的說明">
-                姓名下面那行聯絡資訊的字級。網址很長、斷行不好看時可以單獨調小；沒調的話跟著內文字級等比縮放。
+                <ul>
+                  <li>姓名下面那行聯絡資訊的字級</li>
+                  <li>網址很長、斷行不好看時，可以單獨調小</li>
+                  <li>沒調的話，跟著內文字級等比縮放</li>
+                </ul>
               </InfoTip>
             </span>
             <div className="layout-menu-stepper">

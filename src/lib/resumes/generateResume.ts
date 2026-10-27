@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
 import { BULLET_RULES, stripRuleRefs } from "@/lib/experience/bulletRules";
 import { ensureLanguageParity } from "@/lib/experience/languageParity";
 import { computeAtsScore, countsForResume, type JdImportance } from "./atsScore";
@@ -195,7 +196,8 @@ export interface JdChecklistItem {
   partial?: boolean | null;
   /** 工作條件：使用者回答能不能配合。null＝還沒回答。 */
   answer?: "yes" | "no" | null;
-  /** 有涵蓋時：履歷裡哪一句對應到這項。舊版格式留下來的欄位，現在不產生也不顯示。 */
+  /** 求職信對照（cover_letter_checklist）裡靠信補上的項目：信裡對應的那一句原文，句子沒變就不重新判斷（見 judgeLetterChecklist）。
+   *  履歷對照裡是舊版格式留下來的欄位，現在不產生也不顯示。不顯示在畫面上。 */
   evidence?: string | null;
   /** 沒涵蓋時：具體缺什麼、跟現有經驗差在哪、可以怎麼補。舊資料沒有這個欄位。 */
   gap?: string | null;
@@ -1217,7 +1219,8 @@ export async function reviseResumeWithChat(params: {
       `===== 這次要做的事 =====`,
       `- 照使用者的要求修改目前的履歷，沒被要求的地方原則上不要動。`,
       `- 要新增內容時，只能用經歷資料庫裡有的事實（可以照寫作規則改寫）；資料庫裡沒有對應的事，就不要編，在 reply 說明缺什麼、建議到經歷資料庫補。`,
-      `- 這次的輸出格式改成：{ "reply": string, "resume": 整份履歷（格式跟上面的履歷完全一樣） }。reply 用繁體中文一兩句話說明改了哪裡，不要提「規則 N」這類編號。`,
+      `- ${REMEMBER_RULE}`,
+      `- 這次的輸出格式改成：{ "reply": string, "resume": 整份履歷（格式跟上面的履歷完全一樣）, "remember": string[] }。reply 用繁體中文一兩句話說明改了哪裡，不要提「規則 N」這類編號。`,
       `- 只輸出 JSON，不要有其他文字。`,
     ]
       .filter(Boolean)
@@ -1226,8 +1229,9 @@ export async function reviseResumeWithChat(params: {
     supabase,
   });
 
-  const parsed = parseJsonResponse<{ reply?: string; resume?: Resume }>(response.text);
+  const parsed = parseJsonResponse<{ reply?: string; resume?: Resume; remember?: string[] }>(response.text);
   if (!parsed.resume) throw new Error("AI 沒有回傳改好的履歷，請換個說法再試一次");
+  await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
   const next = pinBackground(parsed.resume, background);
   // 學歷 AI 本來就不能改；使用者在畫布上手動改過的話，沿用這份履歷目前的，不要被經歷資料庫的版本蓋回去。
   next.education = resume.education;

@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
 import { toTraditional } from "@/lib/text/toTraditional";
 import { BULLET_EXAMPLE, BULLET_RULES, stripRuleRefs } from "./bulletRules";
 
@@ -65,10 +66,11 @@ ${BULLET_EXAMPLE}
 6. message 一律用繁體中文（台灣用語），絕對不要出現簡體字。drafts 的語言跟既有內容相同；全新經歷則依使用者回覆的語言，中文一律繁體。
 7. 不要編造使用者沒提過的具體數字或事實；真的問不到數字，用範圍/頻率/規模代替。
 8. 使用者看不到上面的寫作規則清單，message 裡不要提「規則 1」「規則 10」這類編號，直接用白話講。
-9. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
+9. ${REMEMBER_RULE}（「已記住：…」寫在 message 裡）
+10. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
 
 輸出格式：
-{ "status": "asking" | "ready", "message": string, "drafts": [{ "text": string, "angleLabel": string }] | null }
+{ "status": "asking" | "ready", "message": string, "drafts": [{ "text": string, "angleLabel": string }] | null, "remember": string[] }
 status 是 "asking" 時 drafts 給 null。`;
 
 export async function stepElicitation(params: {
@@ -112,6 +114,7 @@ export async function stepElicitation(params: {
   });
 
   const parsed = parseJsonResponse(response.text);
+  await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
   const drafts = readDrafts(parsed);
   // 潤飾、JD 缺口只能放一條，AI 萬一給了好幾條就只取第一條。
   const singleOnly = Boolean(context.seedText || context.jdContext);
@@ -131,6 +134,7 @@ interface RawResponse {
   status: "asking" | "ready";
   message: string;
   drafts?: unknown;
+  remember?: string[];
   /** 舊格式（只有一條）。 */
   draftText?: string | null;
   angleLabel?: string | null;

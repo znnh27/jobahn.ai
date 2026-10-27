@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
 import { COVERAGE_RULES, readScoreBasis, type GeneratedResume } from "./generateResume";
 import { coveredByResume } from "./atsScore";
 import { buildContactLine, pickName, readContact } from "./contact";
@@ -271,18 +272,113 @@ export async function generateCoverLetterForApplication(
   return { researchSources: options.research ? (research?.sources ?? []) : null, companyMismatch };
 }
 
+/**
+ * 求職信比對標準：「補充進求職信」寫的時候、「重新比對」判斷的時候用同一套（2026-10-27 Z 要求：
+ * 以前補充時寫的能力陳述直接打勾，重新比對卻用另一套標準判掉，補了等於沒補）。
+ */
+const LETTER_COVERAGE_RULES = `求職信比對標準（補充跟比對共用，補得進去就一定比得到）：
+1. 信裡要有一句明確回應這項條件的句子，讀的人一看就知道在講這件事；只沾到邊、要靠推論才連得上的不算。
+2. 有具體事例最好；沒有事例時，明確說自己具備這項能力或可以配合這個條件的句子也算（例如「我能以英文獨立進行簡報與合約溝通」「我熟悉用 GA 做成效追蹤分析」），這類句子是使用者自己按「補充」、確認自己具備後才寫進來的。
+3. 只表達學習意願、或承認還沒有經驗的句子不算（例如「我還沒有用過 Power BI，期待在工作中補齊」「相信能快速上手」）。
+4. kind 是 "trait" 的項目（軟實力）：具體事例，或說明自己怎麼做事的原則句都算（例如「我做事重視規範與原則，遇到灰色地帶會先確認界線再行動」）；只貼形容詞（例如「我積極主動」「我正直誠信」）不算。
+5. partial 是 true 的項目：履歷已經涵蓋一部分，gap 寫的「缺：○○」每一件，信裡都要有對應的句子才算；履歷已經有的部分不用再寫一次。
+6. 語言程度照後面通用判定標準 7 的對照表。`;
+
 const RECHECK_SYSTEM_PROMPT = `你是求職信比對助手。使用者會給你 JD、幾項「履歷沒寫到的 JD 條件」、跟一封求職信。
 
-你的任務：逐項判斷這封求職信有沒有補上這項條件。判斷要穩定：同一封信每次判斷結果都要一樣，只看信裡有沒有「明確、具體」對應到這項的內容。
-- partial 是 true 的項目，履歷已經涵蓋一部分，gap 寫了還缺什麼：求職信只要具體補上 gap 裡缺的那幾件就算 covered，不用把履歷已經有的部分再寫一次。
-- kind 是 "trait" 的項目（軟實力）：信裡有用具體的事例或行為帶出這個特質才算，只寫形容詞（例如「我積極主動」）不算。
+你的任務：逐項判斷這封求職信有沒有補上這項條件。判斷要穩定：同一封信每次判斷結果都要一樣。
+
+${LETTER_COVERAGE_RULES}
+
+下面是履歷用的通用判定標準；跟上面的求職信比對標準衝突時，以求職信比對標準為準：
 
 ${COVERAGE_RULES}
 
 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。item 文字照抄。輸出格式：
-{ "results": [{ "item": string, "covered": boolean }] }`;
+{ "results": [{ "item": string, "covered": boolean, "evidence": string, "reason": string }] }
+evidence：covered 是 true 時，從信裡逐字抄出回應這項的那一句（完整一句，一個字都不能改，系統會拿它去信裡比對）；covered 是 false 時給空字串。
+reason：covered 是 false 時，用繁體中文一句話說信裡還缺什麼；covered 是 true 時給空字串。`;
 
 type Checklist = GeneratedResume["jd_match_checklist"];
+
+/** 比對句子時忽略空白、換行的差異。 */
+const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+
+/**
+ * 用求職信比對標準判斷一封信：履歷寫到的固定打勾，履歷沒寫到的交給 AI 判斷信有沒有補上。
+ * 回傳這個語言完整的對照清單，跟沒補上的項目各缺什麼。「重新比對」跟「補充進求職信」都用這個。
+ *
+ * 句子當證據（2026-10-27 Z 要求：補了新的內容，之前補好、一個字都沒動的項目卻被判回沒寫到）：
+ * 通過時 AI 要抄出信裡對應的那一句存在 evidence；之後那一句還一字不差留在信裡，就直接維持打勾、不再問 AI。
+ * local-cli 模式關不掉 AI 的隨機性，同一句話每次判斷可能不一樣，只有句子被改掉、刪掉的項目才重新判斷。
+ */
+async function judgeLetterChecklist(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  jobDescription: string;
+  resumeItems: Checklist;
+  letter: string;
+  /** 上一次的對照結果（同一個語言），有證據句子、而且句子還在信裡的項目直接沿用。 */
+  previous?: Checklist | null;
+}): Promise<{ checklist: Checklist; reasons: Map<string, string> }> {
+  const { supabase, userId, jobDescription, resumeItems, letter, previous } = params;
+  const flatLetter = squash(letter);
+  const inLetter = (sentence: string | null | undefined) => !!sentence && flatLetter.includes(squash(sentence));
+
+  const evidence = new Map<string, string>();
+  for (const p of previous ?? []) {
+    if (p.covered && p.source === "cover_letter" && inLetter(p.evidence)) evidence.set(p.item.trim(), p.evidence as string);
+  }
+  const covered = new Set(evidence.keys());
+  const reasons = new Map<string, string>();
+  const missing = resumeItems.filter((i) => !coveredByResume(i) && !covered.has(i.item.trim()));
+
+  if (missing.length > 0 && letter.trim()) {
+    const response = await askClaude({
+      userId,
+      feature: "jd_recheck",
+      systemPrompt: RECHECK_SYSTEM_PROMPT,
+      userPrompt: [
+        `===== JD =====`,
+        jobDescription,
+        `===== 履歷沒寫到的 JD 條件 =====`,
+        JSON.stringify(
+          missing.map((i) => ({ item: i.item, kind: i.kind ?? "requirement", partial: !!i.partial, gap: i.partial ? i.gap : null })),
+          null,
+          2,
+        ),
+        `===== 求職信內容 =====`,
+        letter,
+      ].join("\n\n"),
+      maxTokens: 2000,
+      temperature: 0,
+      supabase,
+    });
+    const parsed = JSON.parse(
+      response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
+    ) as { results: { item: string; covered: boolean; evidence?: string; reason?: string }[] };
+    for (const r of parsed.results) {
+      const item = r.item.trim();
+      if (r.covered) {
+        covered.add(item);
+        // 抄錯字、找不到的句子不存，下次這項會再判斷一次。
+        if (inLetter(r.evidence)) evidence.set(item, (r.evidence as string).trim());
+      } else if (r.reason) reasons.set(item, toTraditional(r.reason));
+    }
+  }
+
+  const checklist = resumeItems.map((i) => {
+    if (coveredByResume(i)) return { ...i, covered: true, source: "resume" as const };
+    const byLetter = covered.has(i.item.trim());
+    return {
+      ...i,
+      covered: byLetter,
+      source: byLetter ? ("cover_letter" as const) : null,
+      evidence: byLetter ? (evidence.get(i.item.trim()) ?? null) : null,
+    };
+  });
+  return { checklist, reasons };
+}
 
 /**
  * 求職信頁的 JD 條件對照：履歷＋求職信合起來算。
@@ -320,45 +416,15 @@ export async function recheckJdMatchWithCoverLetter(
     const coverLetter = editedCoverLetterDraft[lang] ?? "";
     if (previous[lang] && basis.cover_letter[lang] === coverLetter) continue;
 
-    const resumeItems = resumeChecklists[resumeLang] ?? [];
-    const missing = resumeItems.filter((i) => !coveredByResume(i));
-    let letterCovers = new Set<string>();
-
-    if (missing.length > 0 && coverLetter.trim()) {
-      const userPrompt = [
-        `===== JD =====`,
-        application.job_description,
-        `===== 履歷沒寫到的 JD 條件 =====`,
-        JSON.stringify(
-          missing.map((i) => ({ item: i.item, kind: i.kind ?? "requirement", partial: !!i.partial, gap: i.partial ? i.gap : null })),
-          null,
-          2,
-        ),
-        `===== 求職信內容 =====`,
-        coverLetter,
-      ].join("\n\n");
-
-      const response = await askClaude({
-        userId,
-        feature: "jd_recheck",
-        systemPrompt: RECHECK_SYSTEM_PROMPT,
-        userPrompt,
-        maxTokens: 2000,
-        temperature: 0,
-        supabase,
-      });
-
-      const parsed = JSON.parse(
-        response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
-      ) as { results: { item: string; covered: boolean }[] };
-      letterCovers = new Set(parsed.results.filter((r) => r.covered).map((r) => r.item.trim()));
-    }
-
-    updated[lang] = resumeItems.map((i) => {
-      if (coveredByResume(i)) return { ...i, covered: true, source: "resume" as const };
-      const byLetter = letterCovers.has(i.item.trim());
-      return { ...i, covered: byLetter, source: byLetter ? ("cover_letter" as const) : null };
+    const { checklist } = await judgeLetterChecklist({
+      supabase,
+      userId,
+      jobDescription: application.job_description,
+      resumeItems: resumeChecklists[resumeLang] ?? [],
+      letter: coverLetter,
+      previous: previous[lang],
     });
+    updated[lang] = checklist;
     basis.cover_letter[lang] = coverLetter;
   }
 
@@ -385,11 +451,13 @@ ${COVER_LETTER_RULES}
 3. 信裡的 {{SIGNATURE}} 記號一字不改留在原位，系統會換成使用者的名字跟聯絡方式。
 4. 使用者要求縮短或加長時，reply 裡說明大概改成多少字。
 5. reply 用繁體中文一兩句話說明改了哪裡，口語、不要生硬。
-6. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來：{ "reply": string, "letter": string }`;
+6. 「要保留的內容」列的 JD 條件，信裡目前有句子在回應它（多半是使用者按「補充」加進來的）。除非使用者這次明確要求刪改那一項，改信時這些句子都要留著：可以調整措辭、位置，但不能刪掉，也不能改到不再明確回應那項條件。
+7. ${REMEMBER_RULE}
+8. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來：{ "reply": string, "letter": string, "remember": string[] }`;
 
 /**
  * 求職信頁的「跟 AI 聊」：照使用者的一句話改這個語言版本的信，回傳改好的整封信跟一句說明。
- * 不存檔、不重新比對，換進頁面上的草稿（可以復原），使用者按「儲存」才存。
+ * 這裡不存檔、不重新比對；頁面換進草稿後會自動存檔，可以按「復原上一版」拿回來。
  * 署名（名字＋聯絡方式）是程式放的，先換回記號再給 AI，改完再放回去，AI 不會改到聯絡方式。
  */
 export async function reviseCoverLetterWithChat(params: {
@@ -405,7 +473,7 @@ export async function reviseCoverLetterWithChat(params: {
 
   const { data: application } = await supabase
     .from("applications")
-    .select("job_description, resume_snapshot")
+    .select("job_description, resume_snapshot, cover_letter_checklist")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -417,6 +485,10 @@ export async function reviseCoverLetterWithChat(params: {
   const snapshot: Record<string, Resume> = application.resume_snapshot ?? {};
   const resumeLang = snapshot[language] ? language : Object.keys(snapshot)[0];
   const { layout: _layout, ...resume } = snapshot[resumeLang] ?? ({} as Resume); // eslint-disable-line @typescript-eslint/no-unused-vars
+  // 目前靠這封信補上的 JD 條件（補充完會自動存），改信時要保留（2026-10-27：聊天改信把補充的句子改掉，重新比對又變回沒寫到）。
+  const keep: string[] = ((application.cover_letter_checklist ?? {})[language] ?? [])
+    .filter((i: Checklist[number]) => i.covered && i.source === "cover_letter")
+    .map((i: Checklist[number]) => i.item);
 
   const response = await askClaude({
     userId,
@@ -430,6 +502,7 @@ export async function reviseCoverLetterWithChat(params: {
       JSON.stringify(resume, null, 2),
       `===== 目前的求職信 =====`,
       body,
+      keep.length > 0 ? `===== 要保留的內容（信裡回應這幾項 JD 條件的句子不能刪）=====\n${keep.map((i) => `- ${i}`).join("\n")}` : "",
       history.length > 0
         ? `===== 之前的對話 =====\n${history.map((t) => `${t.role === "user" ? "使用者" : "AI"}：${t.text}`).join("\n")}`
         : "",
@@ -442,7 +515,7 @@ export async function reviseCoverLetterWithChat(params: {
     supabase,
   });
 
-  let parsed: { reply?: string; letter?: string };
+  let parsed: { reply?: string; letter?: string; remember?: string[] };
   try {
     parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
   } catch {
@@ -451,6 +524,7 @@ export async function reviseCoverLetterWithChat(params: {
   let revised = (parsed.letter ?? "").trim();
   if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
   if (language === "zh") revised = toFullWidthPunctuation(toTraditional(revised));
+  await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
   return { reply: toTraditional(parsed.reply ?? "改好了。"), letter: restore(revised) };
 }
 
@@ -472,14 +546,18 @@ ${COVER_LETTER_RULES}
 補充規則：
 1. 清單裡每一項都是使用者親自勾選、按按鈕要求補的，等於使用者確認「我具備這一項」，每一項都要補進信裡，不能退回。
    - 履歷、經歷資料庫有對應事實：在信裡最適合的段落加一兩句，或改寫一句既有的句子讓它涵蓋這一項；能併進既有的案例就併，不要每一項各開一段。
-   - 找不到對應事實：上面誠實原則 1、3 的「沒有事實不能寫」對這幾項不適用，使用者的確認就是依據。改寫成一句能力或做事原則的陳述（例如「我做事重視規範與原則，遇到灰色地帶會先確認界線再行動」），item 也列進 no_example。
+   - 找不到對應事實：上面誠實原則 1、3 的「沒有事實不能寫」對這幾項不適用，使用者的確認就是依據。寫一句明確說自己具備這項的能力陳述（例如「我能以英文獨立進行簡報與合約溝通」），軟實力寫做事原則的陳述（例如「我做事重視規範與原則，遇到灰色地帶會先確認界線再行動」），item 也列進 no_example。不要寫成「期待學習」「還沒有經驗」這種句子，那樣等於沒補。
    - 寫成能力陳述時仍然不能編造具體細節：不能捏造專案、公司、數字、時間、事件，也不能說成是在某個既有專案裡做到的（歸屬錯了跟捏造一樣嚴重）。
    - 誠實原則 5 只限制不能描述 AI 工具的細節，不是不能補；用不到工具細節就改寫成能力陳述。
-2. partial 是 true 的項目，履歷已經涵蓋一部分，只補 gap 裡寫的「缺：○○」那幾件。
+2. partial 是 true 的項目，履歷已經涵蓋一部分，gap 裡寫的「缺：○○」每一件都要補到，履歷已經有的部分不用再寫。
 3. kind 是 "trait" 的項目（軟實力）：有事例就用具體事例帶出這個特質，不要只寫「我很主動積極」這種形容詞；找不到事例的照規則 1 寫成做事原則的陳述（說怎麼做事，不是貼形容詞）。
 4. 只動為了補這幾項必須加的句子、或必須改的那一句，其他地方一字不改：不要順便潤飾、不要調整段落順序、不要刪掉原本的內容。
-5. 信裡的 {{SIGNATURE}} 記號一字不改留在原位。
-6. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來：
+5. 補完之後系統會用下面的「求職信比對標準」檢查每一項，寫的句子一定要通過。有 previous_fail 的項目是上一輪補了但沒通過比對，previous_fail 寫了缺什麼：照它改寫或加強那一句，不要再寫一樣的句子。
+
+${LETTER_COVERAGE_RULES}
+
+6. 信裡的 {{SIGNATURE}} 記號一字不改留在原位。
+7. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來：
 { "letter": string, "added": string[], "no_example": string[] }
 added 列出補進信裡的每一項（應該是清單全部），no_example 列出其中寫成能力陳述、沒有具體事例的項目；兩者都照抄清單裡的文字。`;
 
@@ -493,7 +571,8 @@ export interface AddToLetterItem {
 /**
  * 求職信頁 JD 條件清單的「補充進求職信」：使用者自己挑要補的條件（沒寫到、部分符合、軟實力），
  * 使用者勾選就等於確認自己具備，AI 每一項都要補：有事實用事例寫，找不到事實就寫成能力陳述（不編造細節）。
- * 不存檔，換進頁面上的草稿（新加的字標綠底、可以復原），使用者按「儲存」才存。
+ * 補完用「重新比對」同一套標準檢查，沒過的再補一次；回傳的對照清單就是照這封信判斷的結果。
+ * 這裡不存檔；頁面換進草稿（新加的字標綠底）後連右欄對照一起自動存檔，可以按「復原上一版」拿回來。
  */
 export async function addItemsToCoverLetter(params: {
   supabase: SupabaseClient;
@@ -502,12 +581,18 @@ export async function addItemsToCoverLetter(params: {
   language: string;
   letter: string;
   items: AddToLetterItem[];
-}): Promise<{ letter: string; added: string[]; noExample: string[] }> {
+}): Promise<{
+  letter: string;
+  added: string[];
+  failed: { item: string; reason: string }[];
+  noExample: string[];
+  checklist: Checklist;
+}> {
   const { supabase, userId, applicationId, language, letter, items } = params;
 
   const { data: application } = await supabase
     .from("applications")
-    .select("job_description, resume_snapshot")
+    .select("job_description, resume_snapshot, jd_match_checklist, cover_letter_checklist")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -519,6 +604,10 @@ export async function addItemsToCoverLetter(params: {
   const snapshot: Record<string, Resume> = application.resume_snapshot ?? {};
   const resumeLang = snapshot[language] ? language : Object.keys(snapshot)[0];
   const { layout: _layout, ...resume } = snapshot[resumeLang] ?? ({} as Resume); // eslint-disable-line @typescript-eslint/no-unused-vars
+  const resumeItems: Checklist = (application.jd_match_checklist ?? {})[resumeLang] ?? [];
+  const jobDescription: string = application.job_description;
+  // 上一次的對照（補充完會自動存）：之前補好的項目，句子沒被動到就直接沿用，不會因為這次補別的又被判掉。
+  let previousChecklist: Checklist | null = (application.cover_letter_checklist ?? {})[language] ?? null;
 
   const { data: entryRows } = await supabase
     .from("experience_entries")
@@ -527,41 +616,84 @@ export async function addItemsToCoverLetter(params: {
   const allEntries = (entryRows ?? []) as Array<{ language: string } & Record<string, unknown>>;
   const entryLang = allEntries.some((e) => e.language === language) ? language : (allEntries[0]?.language ?? language);
 
-  const response = await askClaude({
-    userId,
-    feature: "cover_letter_add",
-    systemPrompt: ADD_SYSTEM_PROMPT,
-    userPrompt: [
-      LANGUAGE_INSTRUCTION[language] ?? `目標語言：${language}`,
-      `===== JD =====`,
-      application.job_description,
-      `===== 已定案的履歷內容 =====`,
-      JSON.stringify(resume, null, 2),
-      `===== 使用者經歷資料庫（${entryLang}；只能用這裡跟履歷有的事實）=====`,
-      JSON.stringify(allEntries.filter((e) => e.language === entryLang), null, 2),
-      `===== 要補進信裡的條件 =====`,
-      JSON.stringify(items, null, 2),
-      `===== 目前的求職信 =====`,
-      body,
-    ].join("\n\n"),
-    maxTokens: 4000,
-    supabase,
-  });
-
-  let parsed: { letter?: string; added?: string[]; no_example?: string[] };
-  try {
-    parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
-  } catch {
-    throw new Error("AI 回傳的內容不是有效的 JSON，請再試一次");
-  }
-  let revised = (parsed.letter ?? "").trim();
-  if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
-  if (language === "zh") revised = toFullWidthPunctuation(toTraditional(revised));
-
-  // 只認清單裡真的有的條件（AI 偶爾會改寫條件文字）。
   const asked = new Set(items.map((i) => i.item.trim()));
-  const added = (parsed.added ?? []).map((i) => i.trim()).filter((i) => asked.has(i));
-  const addedSet = new Set(added);
-  const noExample = (parsed.no_example ?? []).map((i) => i.trim()).filter((i) => addedSet.has(i));
-  return { letter: added.length > 0 ? restore(revised) : letter, added, noExample };
+  const noExample = new Set<string>();
+
+  /** 請 AI 把這幾項補進信裡（信是換掉署名的版本），回傳改好的信。 */
+  async function writeItems(current: string, list: Array<AddToLetterItem & { previous_fail?: string }>) {
+    const response = await askClaude({
+      userId,
+      feature: "cover_letter_add",
+      systemPrompt: ADD_SYSTEM_PROMPT,
+      userPrompt: [
+        LANGUAGE_INSTRUCTION[language] ?? `目標語言：${language}`,
+        `===== JD =====`,
+        jobDescription,
+        `===== 已定案的履歷內容 =====`,
+        JSON.stringify(resume, null, 2),
+        `===== 使用者經歷資料庫（${entryLang}；只能用這裡跟履歷有的事實）=====`,
+        JSON.stringify(allEntries.filter((e) => e.language === entryLang), null, 2),
+        `===== 要補進信裡的條件 =====`,
+        JSON.stringify(list, null, 2),
+        `===== 目前的求職信 =====`,
+        current,
+      ].join("\n\n"),
+      maxTokens: 4000,
+      supabase,
+    });
+
+    let parsed: { letter?: string; no_example?: string[] };
+    try {
+      parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
+    } catch {
+      throw new Error("AI 回傳的內容不是有效的 JSON，請再試一次");
+    }
+    let revised = (parsed.letter ?? "").trim();
+    if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
+    if (language === "zh") revised = toFullWidthPunctuation(toTraditional(revised));
+    for (const i of parsed.no_example ?? []) if (asked.has(i.trim())) noExample.add(i.trim());
+    return revised;
+  }
+
+  const judge = async (current: string) => {
+    const judged = await judgeLetterChecklist({
+      supabase,
+      userId,
+      jobDescription,
+      resumeItems,
+      letter: current,
+      previous: previousChecklist,
+    });
+    previousChecklist = judged.checklist;
+    return judged;
+  };
+  const failedIn = (checklist: Checklist) =>
+    items.filter((i) => !checklist.find((c) => c.item.trim() === i.item.trim())?.covered);
+
+  // 補完立刻用「重新比對」同一套標準檢查；沒通過的照比對說的缺口再補一次，補兩次還是沒過就照實回報。
+  // 這樣補完右欄看到的結果，就是之後按「重新比對」會看到的結果。
+  let current = await writeItems(body, items);
+  let result = await judge(current);
+  const retry = failedIn(result.checklist);
+  if (retry.length > 0) {
+    current = await writeItems(
+      current,
+      retry.map((i) => ({ ...i, previous_fail: result.reasons.get(i.item.trim()) ?? "信裡沒有明確回應這項的句子" })),
+    );
+    result = await judge(current);
+  }
+
+  const failed = failedIn(result.checklist).map((i) => ({
+    item: i.item.trim(),
+    reason: result.reasons.get(i.item.trim()) ?? "",
+  }));
+  const failedSet = new Set(failed.map((f) => f.item));
+  const added = [...asked].filter((i) => !failedSet.has(i));
+  return {
+    letter: current === body ? letter : restore(current),
+    added,
+    failed,
+    noExample: [...noExample].filter((i) => !failedSet.has(i)),
+    checklist: result.checklist,
+  };
 }

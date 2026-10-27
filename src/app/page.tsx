@@ -60,7 +60,7 @@ export default async function HomePage() {
   const { data: applications } = await supabase
     .from("applications")
     .select(
-      "id, company_name, job_title, status, ats_score, resume_language, created_at, job_source_url, submitted_at, interview_at, offer_at",
+      "id, company_name, job_title, status, ats_score, resume_language, created_at, job_source_url, submitted_at, replied_at, interview_at, offer_at",
     )
     .order("created_at", { ascending: false });
 

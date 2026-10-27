@@ -22,6 +22,7 @@ import { Celebration, type CelebrationKind } from "./Celebration";
 import {
   MILESTONES,
   computeFunnel,
+  FUNNEL_STEP_TIPS,
   currentStage,
   dateKeyToIso,
   formatTaipeiDate,
@@ -40,6 +41,7 @@ export type ApplicationRow = {
   created_at: string;
   job_source_url: string | null;
   submitted_at: string | null;
+  replied_at: string | null;
   interview_at: string | null;
   offer_at: string | null;
 };
@@ -53,7 +55,7 @@ function rowTitle(app: ApplicationRow) {
 // - 面試跟 Offer 連動：勾 Offer get! 會順便勾面試 get（同一天），取消面試 get 會一起取消 Offer get!。
 //   漏斗要跟著表格的勾選即時更新，所以跟表格放在同一個元件裡；招呼語（intro）、「應徵紀錄」標題（header）由頁面傳進來。
 // - 表格卡片，新的在上面（排序切換 2026-10-23 先拿掉了）。
-// - 表格不用左右滑：職缺連結併進「職缺」欄（名稱後面的 ↗）；三個進度合成「求職進度」一欄，點了才展開勾選；
+// - 表格不用左右滑：職缺連結併進「職缺」欄（名稱後面的 ↗）；四個進度合成「求職進度」一欄，點了才展開勾選；
 //   公司、職缺太長用「…」截斷，滑過看全名。
 // - 整列可點進詳情頁；連結、進度、下載、刪除這些地方點了不會跳頁。
 // - 進度點了馬上存（存勾選的時間），勾「面試 get」「Offer get!」會跳出吉祥物慶祝畫面。
@@ -101,16 +103,21 @@ export function ApplicationsTable({
     at: string | null,
   ) {
     const field = MILESTONES.find((m) => m.key === key)!.field;
-    // 面試跟 Offer 連動：拿到 Offer 一定面試過，沒面試就不會有 Offer。
-    // - 勾 Offer get! 時面試 get 還沒勾 → 面試用同一天一起勾起來。
-    // - 取消面試 get 時 Offer get! 有勾 → Offer 一起取消。
-    const linked: Partial<Record<MilestoneKey, string | null>> = { [key]: at };
-    if (key === "offer" && at !== null && !app.interview_at)
-      linked.interview = at;
-    if (key === "interview" && at === null && app.offer_at) linked.offer = null;
-
+    // 回覆、面試、Offer 連動：拿到 Offer 一定面試過，面試一定是公司回覆過。
+    // - 勾後面的關卡時，前面還沒勾的用同一天一起勾起來（例如直接勾面試 get，回覆 get 一起勾）。
+    // - 取消前面的關卡時，後面有勾的一起取消。
+    const CHAIN: MilestoneKey[] = ["replied", "interview", "offer"];
     const fieldOf = (k: MilestoneKey) =>
       MILESTONES.find((m) => m.key === k)!.field;
+    const linked: Partial<Record<MilestoneKey, string | null>> = { [key]: at };
+    const pos = CHAIN.indexOf(key);
+    if (pos >= 0) {
+      for (const k of at !== null ? CHAIN.slice(0, pos) : CHAIN.slice(pos + 1)) {
+        if (at !== null && !app[fieldOf(k)]) linked[k] = at;
+        if (at === null && app[fieldOf(k)]) linked[k] = null;
+      }
+    }
+
     const entries = Object.entries(linked) as [MilestoneKey, string | null][];
     const before = Object.fromEntries(
       entries.map(([k]) => [fieldOf(k), app[fieldOf(k)]]),
@@ -290,7 +297,7 @@ export function ApplicationsTable({
 }
 
 /**
- * 求職漏斗：一張卡片（#fffef9 底），三個大數字分在左、中、右，中間是拉滿的箭頭，
+ * 求職漏斗：一張卡片（#fffef9 底），四個大數字橫排，中間是拉滿的箭頭，
  * 箭頭上面是這一關對上一關的轉換率、下面是平均天數。沒有標題，接在招呼語下面。還沒資料時一樣顯示（0、—）。
  */
 function Funnel({ stages }: { stages: ReturnType<typeof computeFunnel> }) {
@@ -300,9 +307,11 @@ function Funnel({ stages }: { stages: ReturnType<typeof computeFunnel> }) {
         {stages.map((stage, i) => (
           <li key={stage.key} className="funnel-item">
             {i > 0 && (
+              // 滑過（手機點一下）顯示這段轉換率偏低要檢查什麼。
               <span
                 className="funnel-step"
-                aria-label={`轉換率 ${stage.rate ?? "—"}%，平均 ${stage.avgDays ?? "—"} 天`}
+                tabIndex={0}
+                aria-label={`轉換率 ${stage.rate ?? "—"}%，平均 ${stage.avgDays ?? "—"} 天。${(FUNNEL_STEP_TIPS[stage.key] ?? []).join("。")}`}
               >
                 <span className="funnel-step-rate">
                   {stage.rate === null ? "—" : `${stage.rate}%`}
@@ -311,6 +320,16 @@ function Funnel({ stages }: { stages: ReturnType<typeof computeFunnel> }) {
                 <span className="funnel-step-days">
                   {stage.avgDays === null ? "— 天" : `平均 ${stage.avgDays} 天`}
                 </span>
+                {FUNNEL_STEP_TIPS[stage.key] && (
+                  // 跟 ⓘ 說明一樣條列，一點一行。
+                  <span className="funnel-step-tip" role="tooltip">
+                    <ul>
+                      {FUNNEL_STEP_TIPS[stage.key]!.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </span>
+                )}
               </span>
             )}
             <span className="funnel-stage">
@@ -326,11 +345,12 @@ function Funnel({ stages }: { stages: ReturnType<typeof computeFunnel> }) {
 
 const STAGE_LABEL: Record<MilestoneKey, string> = {
   submitted: "已投遞",
+  replied: "已回覆",
   interview: "面試中",
   offer: "Offer get!",
 };
 
-/** 求職進度：平常只顯示目前走到哪（例如「已投遞・10/23」），點了才展開三個勾選項目跟日期。 */
+/** 求職進度：平常只顯示目前走到哪（例如「已投遞・10/23」），點了才展開四個勾選項目跟日期。 */
 function ProgressCell({
   app,
   onChange,

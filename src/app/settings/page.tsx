@@ -4,6 +4,8 @@ import { AppNav, getDisplayName } from "../AppNav";
 import { AnthropicKeyForm } from "./key-form";
 import { ContactForm } from "../ContactForm";
 import { readContact } from "@/lib/resumes/contact";
+import { readMemory } from "@/lib/ai/userMemory";
+import { MemoryForm } from "./memory-form";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -42,6 +44,8 @@ export default async function SettingsPage() {
           </div>
           <ContactForm initial={readContact(profile?.data)} />
         </div>
+
+        <MemoryForm notes={readMemory(profile?.data)} />
 
         <AnthropicKeyForm last4={settings?.anthropic_key_last4 ?? null} />
       </div>

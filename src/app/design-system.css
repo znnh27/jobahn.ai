@@ -185,19 +185,6 @@
   align-items: center;
   gap: var(--space-2);
 }
-.canvas-bar-message {
-  flex: 1;
-  min-width: 0;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  font-size: var(--font-xs);
-  line-height: 1.35;
-  color: var(--chrome-muted);
-  text-align: right;
-}
 
 /* 工具列是 A4 旁邊的次要操作，字跟按鈕都比全站小一號（14px、高 36px），不搶履歷的焦點。 */
 .canvas-bar .btn {
@@ -681,6 +668,47 @@
   font-weight: 500;
 }
 
+/* 動作完成後的訊息：工具列正下方整列顯示，字多就換行，要按 × 關。
+   一般訊息用中性色（白底灰框、灰色勾勾），不用綠色，免得跟 JD 條件「已寫到」的綠勾撞在一起；錯誤才用紅色。 */
+.status-message {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: 1px solid var(--color-neutral-200);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  color: var(--color-neutral-700);
+  font-size: var(--font-sm);
+}
+.status-message--error {
+  border-color: #fecaca;
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+.status-message-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--color-neutral-400);
+}
+.status-message--error .status-message-icon {
+  color: inherit;
+}
+.status-message-text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  line-height: 1.5;
+  padding-top: 1px;
+}
+.status-message .icon-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: var(--color-neutral-400);
+}
+
 .list-disc {
   margin-top: var(--space-1);
   display: flex;
@@ -907,8 +935,54 @@
   font-size: var(--font-xs);
   color: var(--chrome-muted);
 }
+/* 箭頭滑過（手機點一下＝focus）時，下面浮出這段轉換率偏低要檢查什麼。 */
+.funnel-step {
+  position: relative;
+  cursor: help;
+  border-radius: var(--radius-md);
+  outline: none;
+}
+.funnel-step:focus-visible {
+  box-shadow: 0 0 0 2px var(--chrome-accent);
+}
+.funnel-step-tip {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 50%;
+  z-index: 40;
+  width: 240px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-neutral-200);
+  border-radius: var(--radius-md);
+  background: var(--color-white);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  font-size: var(--font-xs);
+  line-height: 1.5;
+  color: var(--color-neutral-700);
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -4px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  pointer-events: none;
+}
+.funnel-step-tip ul {
+  margin: 0;
+  padding-left: 1.1em;
+  list-style: disc;
+}
+.funnel-step-tip li + li {
+  margin-top: 2px;
+}
+.funnel-step:hover .funnel-step-tip,
+.funnel-step:focus .funnel-step-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
 
-/* 手機：三關直排，箭頭改成往下。 */
+/* 手機：四關直排，箭頭改成往下。 */
 @media (max-width: 640px) {
   .funnel-stages {
     flex-direction: column;
@@ -1024,6 +1098,10 @@
   background: transparent;
   border-color: var(--color-neutral-200);
   color: var(--chrome-muted);
+}
+.stage-pill--replied {
+  background: #f3f0fa;
+  color: #5b4a86;
 }
 .stage-pill--interview {
   background: #eef2f6;
@@ -4203,10 +4281,13 @@ details[open] > summary > .disclosure-arrow {
   font-size: var(--font-sm);
 }
 
-/* 求職信頁：這次參考的公司網頁。整個框是下拉，箭頭在最右邊，點開才列網址，讓使用者自己確認查的是不是對的公司。 */
-.research-sources--plain {
-  background: var(--chrome-surface-tint);
-  color: var(--chrome-ink);
+/* 求職信頁右欄最下面：這次參考的公司網頁，一行灰色小字，點開才列網址（2026-10-27 從信紙上方移過來）。 */
+.research-sources {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--chrome-border);
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
 }
 .research-sources-summary {
   display: flex;
@@ -4234,12 +4315,8 @@ details[open] > summary > .disclosure-arrow {
   margin-top: 9px;
   transform: rotate(-135deg);
 }
-.research-sources-title {
-  margin: var(--space-2) 0 var(--space-1);
-  font-weight: 600;
-}
 .research-sources-list {
-  margin: 0;
+  margin: var(--space-2) 0 0;
   padding-left: var(--space-4);
   word-break: break-all;
 }
@@ -4667,4 +4744,54 @@ span:has(> .info-tip) {
   .celebration-confetti {
     display: none;
   }
+}
+
+/* 帳號設定「AI 記住的事」：一條一行，刪除鈕滑過才出現（跟經歷資料庫一樣）；下面是新增輸入框，按鈕在右。 */
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.memory-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-50);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+.memory-item-text {
+  flex: 1;
+  min-width: 0;
+}
+.memory-item-delete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+}
+.memory-item:hover .memory-item-delete,
+.memory-item-delete:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .memory-item-delete {
+    opacity: 1;
+  }
+}
+.memory-add {
+  display: flex;
+  gap: var(--space-2);
+}
+.memory-add .input {
+  flex: 1;
+  min-width: 0;
+}
+.memory-add .btn {
+  flex-shrink: 0;
 }

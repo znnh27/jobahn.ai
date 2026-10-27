@@ -109,7 +109,10 @@ export function CoverLetterOptionsFields({
           <span>
             先上網研究這間公司
             <InfoTip label="研究公司的說明">
-              讓「為什麼想加入」這段寫得更具體。大約多等 15 秒，也會多用一點 AI 和 Firecrawl 額度。
+              <ul>
+                <li>讓「為什麼想加入」這段寫得更具體</li>
+                <li>大約多等 15 秒，也會多用一點 AI 和 Firecrawl 額度</li>
+              </ul>
             </InfoTip>
           </span>
         </label>

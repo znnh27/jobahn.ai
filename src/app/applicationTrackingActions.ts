@@ -5,10 +5,11 @@ import { createClient } from "@/lib/supabase/server";
 import { normalizeJobUrl } from "@/lib/jobs/jobUrl";
 import type { MilestoneKey } from "@/lib/jobs/milestones";
 
-// 首頁應徵紀錄表格：求職進度（投出去、面試 get、Offer get!）跟職缺連結，點了就存。
+// 首頁應徵紀錄表格：求職進度（投出去、回覆 get、面試 get、Offer get!）跟職缺連結，點了就存。
 
 const COLUMNS: Record<MilestoneKey, string> = {
   submitted: "submitted_at",
+  replied: "replied_at",
   interview: "interview_at",
   offer: "offer_at",
 };

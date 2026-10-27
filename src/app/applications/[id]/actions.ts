@@ -7,6 +7,7 @@ import {
   generateResumeForApplication,
   rescoreResumeForApplication,
   reviseResumeWithChat,
+  readScoreBasis,
   type GeneratedResume,
   type ResumeChatTurn,
 } from "@/lib/resumes/generateResume";
@@ -487,7 +488,7 @@ export async function suggestKeywordRewordingAction(
   }
 }
 
-/** 求職信頁「跟 AI 聊」：照使用者的一句話改這個語言版本的信，回傳改好的信（不存檔，按儲存才存）。 */
+/** 求職信頁「跟 AI 聊」：照使用者的一句話改這個語言版本的信，回傳改好的信（這裡不存檔，頁面換進草稿後用 autoSaveCoverLetterAction 自動存）。 */
 export async function reviseCoverLetterAction(
   applicationId: string,
   language: string,
@@ -517,13 +518,20 @@ export async function reviseCoverLetterAction(
   }
 }
 
-/** 求職信頁「補充進求職信」：把使用者挑的 JD 條件、軟實力補進信裡（沒事實的寫成能力陳述），回傳改好的信（不存檔）。 */
+/** 求職信頁「補充進求職信」：把使用者挑的 JD 條件、軟實力補進信裡（沒事實的寫成能力陳述），補完立刻比對，回傳改好的信跟這封信的對照清單（這裡不存檔，頁面換進草稿後用 autoSaveCoverLetterAction 自動存）。 */
 export async function addToCoverLetterAction(
   applicationId: string,
   language: string,
   letter: string,
   items: AddToLetterItem[],
-): Promise<{ error?: string; letter?: string; added?: string[]; noExample?: string[] }> {
+): Promise<{
+  error?: string;
+  letter?: string;
+  added?: string[];
+  failed?: { item: string; reason: string }[];
+  noExample?: string[];
+  checklist?: GeneratedResume["jd_match_checklist"];
+}> {
   if (items.length === 0) return { error: "沒有要補充的條件" };
   const supabase = await createClient();
   const {
@@ -554,6 +562,44 @@ export async function saveCoverLetterDraftAction(
     .eq("id", applicationId)
     .eq("user_id", user.id);
 
+  if (error) return { error: error.message };
+  return { success: true };
+}
+
+/**
+ * 求職信頁補充、跟 AI 聊、復原上一版之後自動存檔（2026-10-27 Z 要求：改完沒存，重新整理或離開就不見）。
+ * - checklist 有給就連右欄對照一起存（沒給＝對照不動）。
+ * - checkedLangs：這幾個語言的對照就是照現在這封信判斷的（例如補充時 AI 直接標好的），記進 score_basis，
+ *   之後信沒改就按「重新比對」會沿用，不會被 AI 重判翻掉。
+ */
+export async function autoSaveCoverLetterAction(
+  applicationId: string,
+  draft: Record<string, string>,
+  checklist?: Record<string, GeneratedResume["jd_match_checklist"]>,
+  checkedLangs: string[] = [],
+): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  const update: Record<string, unknown> = { cover_letter_draft: draft };
+  if (checklist) update.cover_letter_checklist = Object.keys(checklist).length > 0 ? checklist : null;
+  if (checkedLangs.length > 0) {
+    const { data: application } = await supabase
+      .from("applications")
+      .select("score_basis")
+      .eq("id", applicationId)
+      .eq("user_id", user.id)
+      .single();
+    if (!application) return { error: "找不到這筆應徵紀錄" };
+    const basis = readScoreBasis(application.score_basis);
+    for (const lang of checkedLangs) basis.cover_letter[lang] = draft[lang] ?? "";
+    update.score_basis = basis;
+  }
+
+  const { error } = await supabase.from("applications").update(update).eq("id", applicationId).eq("user_id", user.id);
   if (error) return { error: error.message };
   return { success: true };
 }
@@ -598,10 +644,13 @@ export async function updateApplicationTitleAction(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "請先登入" };
+  // 跟新增應徵一樣必填。
+  if (!companyName.trim()) return { error: "請填公司名稱" };
+  if (!jobTitle.trim()) return { error: "請填職稱" };
 
   const { error } = await supabase
     .from("applications")
-    .update({ company_name: companyName.trim() || null, job_title: jobTitle.trim() || null })
+    .update({ company_name: companyName.trim(), job_title: jobTitle.trim() })
     .eq("id", applicationId)
     .eq("user_id", user.id);
 
