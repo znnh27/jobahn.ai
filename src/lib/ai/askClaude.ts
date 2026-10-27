@@ -63,7 +63,6 @@ const MEMORY_FEATURES = new Set([
   "resume_condition_summary",
   "resume_fit_page",
   "resume_trim",
-  "keyword_reword",
   "cover_letter",
   "cover_letter_add",
   "cover_letter_chat",

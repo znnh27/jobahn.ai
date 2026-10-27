@@ -11,7 +11,6 @@ import {
   finalizeResumeAction,
   reopenResumeAction,
   suggestTrimAction,
-  suggestKeywordRewordingAction,
   measureResumesAction,
   saveLayoutAction,
   type TrimSuggestion,
@@ -40,9 +39,6 @@ import type { CustomSectionLabels } from "@/lib/resumes/sectionLabels";
 import { computeAtsScore, coveredByResume } from "@/lib/resumes/atsScore";
 import { JdChecklist } from "./JdChecklist";
 import { StatusMessage } from "@/app/StatusMessage";
-import { matchKeywords } from "@/lib/resumes/keywordMatch";
-import type { RewordEdit } from "@/lib/resumes/rewordKeywords";
-import { inlineDiff } from "@/lib/text/inlineDiff";
 import { InfoTip } from "@/app/InfoTip";
 import { ResumeChatPanel } from "./ResumeChatPanel";
 import { splitList } from "@/lib/resumes/background";
@@ -77,10 +73,6 @@ interface CanvasProps {
   stepBar: ReactNode;
   /** 使用者改過的區塊標題（全帳號共用）。 */
   initialSectionLabels: Record<"zh" | "en", CustomSectionLabels>;
-  /** JD 關鍵字（關鍵字命中用）；舊的應徵還沒挑過是 null，重新評分時會補挑。 */
-  initialKeywords: string[] | null;
-  /** JD 是中文還是英文：關鍵字只比對同語言的履歷版本。 */
-  jdLanguage: "zh" | "en";
   /** 從新增應徵按「下一步：生成履歷」過來（?generate=1）：一進來就開始生成。 */
   autoGenerate?: boolean;
 }
@@ -138,15 +130,6 @@ function AtsScoreLegend({ score }: { score: number | null }) {
 }
 
 /** 四段分數各代表什麼，直接顯示在分數下面；目前落在的那一段加粗、上色。分數怎麼算放在標題旁的 ⓘ。 */
-/** 「換成 JD 用字」的修改在履歷的哪裡：摘要、某段經歷的第幾條、技能。 */
-function rewordWhere(edit: RewordEdit, resume: Resume | null): string {
-  const loc = edit.location;
-  if (loc.section === "summary") return "專業摘要";
-  if (loc.section === "skills") return "技能（加上這一項）";
-  const org = resume?.[loc.section]?.[loc.entry]?.org ?? "";
-  return `${org} 第 ${loc.bullet + 1} 條`;
-}
-
 function AtsScoreHelp({ score }: { score: number | null }) {
   const current = score !== null ? getAtsBand(score) : null;
   return (
@@ -177,8 +160,6 @@ export function Canvas({
   researchAvailable,
   stepBar,
   initialSectionLabels,
-  initialKeywords,
-  jdLanguage,
   autoGenerate = false,
 }: CanvasProps) {
   const router = useRouter();
@@ -187,7 +168,6 @@ export function Canvas({
   const [checklist, setChecklist] = useState<ChecklistMap>(initialChecklist);
   const [atsScore, setAtsScore] = useState<number | null>(initialAtsScore);
   const [gaps, setGaps] = useState<GapsMap>(initialGaps);
-  const [keywords, setKeywords] = useState<string[] | null>(initialKeywords);
   const [finalized, setFinalized] = useState(initialFinalized);
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [activeLang, setActiveLang] = useState(languages[0]);
@@ -207,28 +187,6 @@ export function Canvas({
   // 記下這次量的是哪一份內容，內容一變就知道結果過期了（顯示「計算中」）。
   const [fitState, setFitState] = useState<{ lang: string; resume: Resume; fit: PdfFit } | null>(null);
   const activeResume = draft?.[activeLang] ?? null;
-  // 關鍵字命中：在瀏覽器裡用程式比對，畫布上改一個字就會更新。
-  // 關鍵字只比對跟 JD 同語言的版本（英文 JD 的字本來就不會出現在中文履歷裡）。
-  const keywordMatch =
-    keywords?.length && activeResume && activeLang === jdLanguage ? matchKeywords(keywords, activeResume) : null;
-  const jdLangLabel = LANG_LABEL[jdLanguage] ?? jdLanguage;
-  const keywordNote =
-    activeLang !== jdLanguage
-      ? languages.includes(jdLanguage)
-        ? `JD 是${jdLangLabel}，切到${jdLangLabel}版履歷看關鍵字`
-        : `JD 是${jdLangLabel}，這份沒有${jdLangLabel}版履歷，關鍵字沒辦法逐字比對`
-      : !keywords?.length
-        ? "按「重新檢查評分」後會列出 JD 關鍵字"
-        : null;
-  // 「換成 JD 用字」：AI 找出有事實的那一句、只改用字，前後對照給使用者勾選，套用才換進畫布（可以按上一步退回）。
-  const [reword, setReword] = useState<{
-    keywords: string[];
-    loading: boolean;
-    error: string | null;
-    edits: RewordEdit[];
-    picked: boolean[];
-    notFound: { keyword: string; reason: string }[];
-  } | null>(null);
   const fit = fitState?.lang === activeLang ? fitState.fit : null;
   const measuring = activeResume !== null && fitState?.resume !== activeResume;
   const overflowPt = fit?.overflowPt ?? 0;
@@ -451,7 +409,6 @@ export function Canvas({
       setChecklist(result.data.jd_match_checklist);
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
-      setKeywords(result.data.jd_keywords);
       setCanvasVersion((v) => v + 1);
       // 第一次生成不顯示「生成完成」，履歷出現在畫布上就是回饋（2026-10-27 Z 要求）；重新產生才提醒可以退回上一版。
       if (previous) setMessage("已重新產生；想回到上一版可以按「上一步」再按「儲存」");
@@ -465,50 +422,6 @@ export function Canvas({
     if (JSON.stringify(next[lang]) === JSON.stringify(draft[lang])) return;
     remember(draft);
     setDraft(next);
-  }
-
-  async function handleReword(words: string[], item: string | null) {
-    if (!activeResume) return;
-    setReword({ keywords: words, loading: true, error: null, edits: [], picked: [], notFound: [] });
-    // 已經用到的關鍵字一起傳過去：改用字時不能把它們改掉。
-    const result = await suggestKeywordRewordingAction(
-      applicationId,
-      activeLang,
-      activeResume,
-      words,
-      item,
-      keywordMatch?.matched ?? [],
-    );
-    setReword({
-      keywords: words,
-      loading: false,
-      error: result.error ?? null,
-      edits: result.edits ?? [],
-      picked: (result.edits ?? []).map(() => true),
-      notFound: result.notFound ?? [],
-    });
-  }
-
-  function applyReword() {
-    if (!reword) return;
-    const chosen = reword.edits.filter((_, i) => reword.picked[i]);
-    updateResume(activeLang, (r) => {
-      const next: Resume = JSON.parse(JSON.stringify(r));
-      for (const e of chosen) {
-        const loc = e.location;
-        if (loc.section === "summary") next.summary = e.after;
-        else if (loc.section === "skills") {
-          if (!next.skills.some((s) => s.toLowerCase() === e.after.toLowerCase())) next.skills = [...next.skills, e.after];
-        } else {
-          const bullets = next[loc.section][loc.entry]?.bullets;
-          if (bullets && bullets[loc.bullet] === e.before) bullets[loc.bullet] = e.after;
-        }
-      }
-      return next;
-    });
-    setCanvasVersion((v) => v + 1);
-    setReword(null);
-    setMessage("換好了，記得按「儲存」；不滿意可以按「上一步」");
   }
 
   // 「跟 AI 聊」改好的整份履歷換進草稿並自動存檔：記進上一步、畫布重新掛載才看得到新內容。字級間距維持現在的設定。
@@ -534,7 +447,6 @@ export function Canvas({
       setChecklist(result.data.jd_match_checklist);
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
-      setKeywords(result.data.jd_keywords);
       flash("rescore");
     });
   }
@@ -553,7 +465,6 @@ export function Canvas({
       setChecklist(result.data.jd_match_checklist);
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
-      setKeywords(result.data.jd_keywords);
       if (willing) {
         remember(previous);
         setDraft(result.data.resume_draft);
@@ -908,9 +819,6 @@ export function Canvas({
             legacyGaps={gaps[activeLang] ?? []}
             onDig={finalized ? undefined : setGapDialogText}
             onAnswerCondition={finalized || isPending ? undefined : handleAnswerCondition}
-            keywords={keywordMatch}
-            keywordNote={keywordNote}
-            onReword={finalized || isPending ? undefined : handleReword}
           />
         </div>
       </div>
@@ -1020,83 +928,6 @@ export function Canvas({
           onCancel={() => setCoverLangDialog(false)}
         >
           <CoverLetterOptionsFields value={coverChoice} onChange={setCoverChoice} researchAvailable={researchAvailable} />
-        </ConfirmDialog>
-      )}
-
-      {reword && (
-        <ConfirmDialog
-          title="換成 JD 用字"
-          wide
-          message={
-            reword.loading
-              ? `正在履歷裡找跟「${reword.keywords.join("、")}」講同一件事的句子…`
-              : reword.edits.length > 0
-                ? "只改用字、不改事實。勾選要套用的修改："
-                : "履歷裡找不到講同一件事的句子，不建議硬補。真的有相關經驗的話，可以讓 AI 幫你挖掘這段經驗。"
-          }
-          confirmLabel={reword.edits.length > 0 ? "套用" : "知道了"}
-          tone="primary"
-          pending={reword.loading}
-          error={reword.error}
-          confirmDisabled={reword.edits.length > 0 && !reword.picked.some(Boolean)}
-          onConfirm={reword.edits.length > 0 ? applyReword : () => setReword(null)}
-          onCancel={() => setReword(null)}
-        >
-          {reword.edits.length > 0 && (
-            <ul className="trim-list">
-              {reword.edits.map((e, i) => (
-                <li key={i}>
-                  <label className="trim-item">
-                    <input
-                      type="checkbox"
-                      checked={reword.picked[i]}
-                      onChange={(ev) =>
-                        setReword((prev) =>
-                          prev ? { ...prev, picked: prev.picked.map((p, j) => (j === i ? ev.target.checked : p)) } : prev,
-                        )
-                      }
-                    />
-                    <span className="trim-item-body">
-                      <span className="reword-meta">
-                        <span className="trim-item-tag">{e.keyword}</span>
-                        <span className="reword-where">{rewordWhere(e, activeResume)}</span>
-                      </span>
-                      {/* 只顯示改完的那一句：刪掉的字劃線、加上的字標色，一眼看出改了哪裡。 */}
-                      <span className="reword-diff">
-                        {e.location.section === "skills" ? (
-                          <ins className="reword-ins">{e.after}</ins>
-                        ) : (
-                          inlineDiff(e.before, e.after).map((part, k) =>
-                            part.type === "del" ? (
-                              <del key={k} className="reword-del">
-                                {part.text}
-                              </del>
-                            ) : part.type === "ins" ? (
-                              <ins key={k} className="reword-ins">
-                                {part.text}
-                              </ins>
-                            ) : (
-                              <span key={k}>{part.text}</span>
-                            ),
-                          )
-                        )}
-                      </span>
-                      {e.reason && <span className="trim-item-reason">{e.reason}</span>}
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          )}
-          {!reword.loading && reword.notFound.length > 0 && (
-            <ul className="reword-notfound">
-              {reword.notFound.map((n) => (
-                <li key={n.keyword}>
-                  <strong>{n.keyword}</strong>：{n.reason || "履歷裡找不到講同一件事的句子"}
-                </li>
-              ))}
-            </ul>
-          )}
         </ConfirmDialog>
       )}
 

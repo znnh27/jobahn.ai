@@ -3048,7 +3048,7 @@
 .confirm-card {
   width: 100%;
   max-width: 420px;
-  /* 內容太長（例如「換成 JD 用字」列了很多修改）時，視窗不超出畫面，裡面自己捲動。 */
+  /* 內容太長（例如列了很多修改）時，視窗不超出畫面，裡面自己捲動。 */
   max-height: calc(100vh - 2 * var(--space-4));
   overflow-y: auto;
   display: flex;
@@ -3059,7 +3059,7 @@
   background: var(--color-white);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
 }
-/* 內容比較多的視窗（例如「換成 JD 用字」的前後對照）用寬一點的版本。 */
+/* 內容比較多的視窗（例如前後對照）用寬一點的版本。 */
 .confirm-card--wide {
   max-width: 720px;
 }
@@ -4087,7 +4087,7 @@ button.step-bar-link:focus-visible {
    有寫到：綠色勾勾；沒寫到：橘色驚嘆號。要補的排上面。
    ============================================================ */
 
-/* 「JD 條件」「JD 關鍵字」「缺口說明」這些區塊，同一個樣式：上面一條分隔線、同樣的標題。
+/* 「JD 條件」「缺口說明」這些區塊，同一個樣式：上面一條分隔線、同樣的標題。
    每個區塊都是 <details>，點標題列可以收起來，箭頭在最右邊。 */
 .ats-block {
   margin-top: var(--space-4);
@@ -4116,7 +4116,7 @@ button.step-bar-link:focus-visible {
   flex: 1;
   min-width: 0;
 }
-/* 標題旁的小動作（「一鍵換成 JD 用字」），跟「讓 AI 幫你挖掘這段經驗」同一種小字連結。 */
+/* 標題旁的小動作（求職信頁「全部補充進求職信」），跟「讓 AI 幫你挖掘這段經驗」同一種小字連結。 */
 .ats-block-action {
   flex-shrink: 0;
   font-size: var(--font-xs);
@@ -4146,7 +4146,7 @@ details[open] > summary > .disclosure-arrow {
 }
 
 /* 兩個清單的文字都左右對齊，右邊才不會參差不齊。 */
-/* 缺口說明：每一條先列對應的 JD 條件（粗體），缺口內文一句一行、縮排在左邊一條細線後面。 */
+/* 缺口說明：一句一行、縮排在左邊一條細線後面。展開的 JD 條件裡跟舊資料的「缺口說明」區塊共用。 */
 .ats-gap-list {
   display: flex;
   flex-direction: column;
@@ -4161,10 +4161,6 @@ details[open] > summary > .disclosure-arrow {
   /* 英文清單（ul 有 lang="en"）左右對齊時自動斷字，字距才不會被拉得很開。 */
   -webkit-hyphens: auto;
   hyphens: auto;
-}
-.ats-gap-item {
-  margin: 0 0 var(--space-1);
-  font-weight: 600;
 }
 .ats-gap-body {
   display: flex;
@@ -4222,6 +4218,44 @@ details[open] > summary > .disclosure-arrow {
 
 .ats-check-dig {
   margin-top: var(--space-1);
+  font-size: var(--font-xs);
+}
+
+/* 可以展開的 JD 條件（第二層風琴）：整條條件文字可以點，箭頭在最右邊，預設收起來。 */
+.ats-check-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  cursor: pointer;
+  list-style: none;
+}
+.ats-check-summary::-webkit-details-marker {
+  display: none;
+}
+.ats-check-summary .ats-check-item {
+  flex: 1;
+  min-width: 0;
+}
+/* 箭頭對齊條件的第一行字。 */
+.ats-check-summary .disclosure-arrow {
+  margin-top: 6px;
+}
+.ats-check-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: var(--font-sm);
+  line-height: 1.6;
+  color: var(--chrome-ink);
+  text-align: justify;
+  -webkit-hyphens: auto;
+  hyphens: auto;
+}
+.ats-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
   font-size: var(--font-xs);
 }
 
@@ -4335,79 +4369,6 @@ details[open] > summary > .disclosure-arrow {
 .ats-check--invalid .ats-check-item {
   color: var(--chrome-muted);
 }
-/* 「換成 JD 用字」視窗：只顯示改完的那一句，刪掉的字淡紅劃線、加上的字淡綠底。 */
-.reword-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.reword-where {
-  font-size: var(--font-xs);
-  color: var(--chrome-muted);
-}
-.reword-diff {
-  font-size: var(--font-sm);
-  line-height: 1.6;
-  color: var(--chrome-text);
-}
-.reword-del {
-  color: var(--color-danger-text);
-  text-decoration: line-through;
-  background: var(--color-danger-bg);
-  border-radius: 2px;
-}
-.reword-ins {
-  color: var(--color-success-text);
-  text-decoration: none;
-  font-weight: 600;
-  background: var(--color-success-bg);
-  border-radius: 2px;
-}
-
-/* 「換成 JD 用字」視窗：找不到對應句子的關鍵字。 */
-.reword-notfound {
-  margin: var(--space-2) 0 0;
-  padding-left: var(--space-4);
-  font-size: var(--font-sm);
-  color: var(--chrome-muted);
-}
-
-/* 關鍵字小標籤：缺的用虛線框排前面，有的用淡色加勾勾排後面。 */
-.keyword-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.keyword-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 1px var(--space-2);
-  border-radius: 999px;
-  font-size: var(--font-xs);
-  line-height: 1.6;
-}
-.keyword-chip--missing {
-  border: 1px dashed var(--color-neutral-300);
-  color: var(--chrome-text);
-}
-.keyword-chip--matched {
-  border: 1px solid transparent;
-  background: var(--color-neutral-100);
-  color: var(--chrome-muted);
-}
-.keyword-chip--matched svg {
-  color: var(--color-success-text);
-}
-.keyword-note {
-  margin: 0;
-  font-size: var(--font-xs);
-  color: var(--chrome-muted);
-}
-
 /* 取捨建議視窗：套用後是不是剛好一頁（每勾一條都重新量）。 */
 .trim-status {
   margin: 0;

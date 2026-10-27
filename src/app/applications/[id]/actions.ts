@@ -19,7 +19,6 @@ import {
   type AddToLetterItem,
   type CoverLetterOptions,
 } from "@/lib/resumes/generateCoverLetter";
-import { suggestKeywordRewording, type RewordEdit } from "@/lib/resumes/rewordKeywords";
 import { mergeContentIntoExperienceDb, removeVariantsFromSource } from "@/lib/experience/mergeIntoExperienceDb";
 import { measureResumePdf } from "@/lib/documents/measureResumePdf";
 import type { ResumeContact } from "@/lib/resumes/contact";
@@ -70,7 +69,6 @@ type GenerateResult = {
     jd_match_checklist: ChecklistMap;
     ats_score: number | null;
     ats_gaps: GapsMap;
-    jd_keywords: string[] | null;
   };
 };
 
@@ -81,7 +79,7 @@ async function fetchApplicationScoringFields(
 ) {
   const { data } = await supabase
     .from("applications")
-    .select("resume_draft, jd_match_checklist, ats_score, ats_gaps, jd_keywords")
+    .select("resume_draft, jd_match_checklist, ats_score, ats_gaps")
     .eq("id", applicationId)
     .eq("user_id", userId)
     .single();
@@ -109,7 +107,6 @@ export async function generateAction(applicationId: string): Promise<GenerateRes
         jd_match_checklist: fresh.jd_match_checklist,
         ats_score: fresh.ats_score,
         ats_gaps: fresh.ats_gaps,
-        jd_keywords: fresh.jd_keywords,
       },
     };
   } catch (e) {
@@ -171,7 +168,6 @@ export async function rescoreAction(
         jd_match_checklist: fresh.jd_match_checklist,
         ats_score: fresh.ats_score,
         ats_gaps: fresh.ats_gaps,
-        jd_keywords: fresh.jd_keywords,
       },
     };
   } catch (e) {
@@ -206,7 +202,6 @@ export async function answerWorkConditionAction(
         jd_match_checklist: fresh.jd_match_checklist,
         ats_score: fresh.ats_score,
         ats_gaps: fresh.ats_gaps,
-        jd_keywords: fresh.jd_keywords,
       },
     };
   } catch (e) {
@@ -463,28 +458,6 @@ export async function recheckWithCoverLetterAction(
     return { success: true, data: { cover_letter_checklist: checklist } };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "重新比對失敗" };
-  }
-}
-
-/** 履歷頁 JD 條件清單的「換成 JD 用字」：找出履歷裡有事實的那一句、只改用字。回傳建議，不存檔。 */
-export async function suggestKeywordRewordingAction(
-  applicationId: string,
-  language: string,
-  resume: GeneratedResume["resume"],
-  keywords: string[],
-  item: string | null,
-  keep: string[] = [],
-): Promise<{ error?: string; edits?: RewordEdit[]; notFound?: { keyword: string; reason: string }[] }> {
-  if (keywords.length === 0) return { error: "沒有要換的關鍵字" };
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "請先登入" };
-  try {
-    return await suggestKeywordRewording({ supabase, userId: user.id, applicationId, language, resume, keywords, item, keep });
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "分析失敗，請再試一次" };
   }
 }
 

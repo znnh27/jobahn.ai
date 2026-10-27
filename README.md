@@ -52,7 +52,7 @@ jobahn runs on your own computer with your own accounts. Nothing is sent to the 
 
 2. **Set up Supabase**
    - Create a project.
-   - Create the database tables. All the SQL lives in `supabase/migrations/` (`0001` → `0009`, run in that order). The easiest way is to copy all of it at once:
+   - Create the database tables. All the SQL lives in `supabase/migrations/` (`0001` → `0010`, run in that order). The easiest way is to copy all of it at once:
 
      ```bash
      cat supabase/migrations/*.sql | pbcopy                        # macOS
@@ -155,7 +155,7 @@ jobahn 跑在你自己的電腦上，用你自己的帳號，資料不會經過�
 1. **下載並安裝**：`git clone` 這個 repo，進到資料夾後執行 `npm install`。
 2. **設定 Supabase**
    - 建立專案。
-   - 建立資料表：SQL 都在 `supabase/migrations/`（`0001` 到 `0009`，要照順序執行）。最簡單的做法是用上方英文版的指令一次複製全部內容，貼到 Supabase 後台的 **SQL Editor**，按 **Run**。如果跳出「含有破壞性操作」的警告，按確認就好：那是 `0006` 在刪除一個 `0002` 建立、但 app 已經不再使用的 storage bucket。看到「Success. No rows returned」就代表完成。
+   - 建立資料表：SQL 都在 `supabase/migrations/`（`0001` 到 `0010`，要照順序執行）。最簡單的做法是用上方英文版的指令一次複製全部內容，貼到 Supabase 後台的 **SQL Editor**，按 **Run**。如果跳出「含有破壞性操作」的警告，按確認就好：那是 `0006` 在刪除一個 `0002` 建立、但 app 已經不再使用的 storage bucket。看到「Success. No rows returned」就代表完成。
    - 到 **Authentication → Sign In / Providers → Email** 關掉 **Confirm email**。Supabase 內建的寄信服務每小時只能寄幾封，註冊驗證信不一定收得到。想保留信箱驗證的話，改到 **Authentication → Emails** 設定自己的 SMTP 寄信服務。
 3. **環境變數**：把 `.env.local.example` 複製成 `.env.local` 並填好，各欄位說明見上方英文版的表格。Supabase 的金鑰改過名字：`NEXT_PUBLIC_SUPABASE_ANON_KEY` 填 **Publishable key**（`sb_publishable_` 開頭），`SUPABASE_SERVICE_ROLE_KEY` 填 **Secret key**（`sb_secret_` 開頭），兩個都在 **Project Settings → API Keys**。比較舊的專案叫 `anon` 和 `service_role`，也可以用。
 4. **啟動**：執行 `npm run dev`，打開 <http://localhost:3000>，註冊後會直接登入，上傳履歷（或直接打字輸入第一段經歷）就可以開始用。

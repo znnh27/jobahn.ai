@@ -1,15 +1,14 @@
 import type { JdChecklistItem } from "@/lib/resumes/generateResume";
-import type { KeywordMatch } from "@/lib/resumes/keywordMatch";
 import type { ReactNode } from "react";
-import { AlertIcon, CheckCircleIcon, CheckIcon, MinusCircleIcon, QuestionCircleIcon } from "@/app/icons";
+import { AlertIcon, CheckCircleIcon, MinusCircleIcon, QuestionCircleIcon } from "@/app/icons";
 import { InfoTip } from "@/app/InfoTip";
 
 // JD 條件對照，履歷頁跟求職信頁共用，分三段（2026-10-24 Z 定案）：
 // 1. JD 條件（硬實力）：算分。每一條打勾或驚嘆號，要補的排上面、已經寫到的排下面；
-//    沒寫到、部分符合的條件底下是「讓 AI 幫你挖掘這段經驗」。
+//    履歷頁的條件是兩層風琴（2026-10-27 Z 要求）：沒寫到、部分符合的那幾條才能展開、預設收起來，
+//    展開是缺口說明跟「讓 AI 幫你挖掘這段經驗」。
 //    AI 判斷有問題（判定沒寫到卻說不出缺什麼）的項目標出來、不算分，請使用者重新評分。
-//    JD 關鍵字（有沒有逐字用到 JD 的字）統一放在條件清單下面一個區塊，不分散到每一條（2026-10-24 Z 要求），
-//    一個「一鍵換成 JD 用字」處理全部沒用到的字：AI 只在履歷有對應事實的句子改用字，找不到就說找不到。
+//    不顯示 JD 關鍵字（2026-10-27 Z 拿掉「JD 關鍵字」區塊跟「換成 JD 用字」，覺得跟 JD 條件打架）。
 // 2. 求職信可以補充的特質（軟實力）：履歷證明不了，履歷頁不算分、用灰色小圓點；求職信頁看求職信有沒有用例子帶出來，
 //    跟 JD 條件一樣用打勾／驚嘆號，排在 JD 條件正下方（2026-10-25 Z 要求）。
 // 3. 工作條件（出差、外派…）：履歷頁不算分，問使用者能不能配合（給了 onAnswerCondition 才問）；求職信頁跟特質一樣算。
@@ -22,7 +21,7 @@ import { InfoTip } from "@/app/InfoTip";
 // 每一條的狀態只用前面的 icon 表示，滑過 icon 才顯示狀態名稱，不另外標文字（2026-10-24 Z 要求）。
 // icon 是同一組圓框：已寫到打勾、部分符合橫線、沒寫到驚嘆號、判斷有問題問號（2026-10-25 Z 要求）。
 // 每個區塊的標題只寫名稱、不放統計數字，都可以收起來，預設展開（2026-10-25 Z 要求）。
-// 缺口說明每一條先列對應的 JD 條件，缺口內文一句一行、縮排在下面，比較好讀。
+// 缺口說明一句一行、縮排在條件下面，比較好讀。舊資料的缺口清單沒有對應的條件，才另外列一個「缺口說明」區塊。
 
 export function JdChecklist({
   items,
@@ -30,11 +29,8 @@ export function JdChecklist({
   scope = "resume",
   legacyGaps = [],
   language,
-  keywords,
-  keywordNote,
   onDig,
   onAnswerCondition,
-  onReword,
   onAddToLetter,
 }: {
   items: JdChecklistItem[];
@@ -45,14 +41,8 @@ export function JdChecklist({
   legacyGaps?: string[];
   /** JD 條件是用哪種語言寫的。英文左右對齊時要能自動斷字，字距才不會被拉得很開。 */
   language?: string;
-  /** JD 關鍵字有沒有逐字出現在履歷裡（只有履歷頁、而且履歷跟 JD 同語言才有）。 */
-  keywords?: KeywordMatch | null;
-  /** 沒辦法比對關鍵字的原因（例如這份沒有跟 JD 同語言的履歷），顯示在關鍵字的位置。 */
-  keywordNote?: string | null;
   onDig?: (item: string) => void;
   onAnswerCondition?: (item: string, willing: boolean) => void;
-  /** 「一鍵換成 JD 用字」：這些關鍵字沒有逐字出現，請 AI 在履歷裡找有事實的句子改用字。 */
-  onReword?: (keywords: string[], item: string | null) => void;
   /** 求職信頁「補充進求職信」：把這幾項補進信裡。 */
   onAddToLetter?: (items: JdChecklistItem[]) => void;
 }) {
@@ -75,14 +65,10 @@ export function JdChecklist({
     .map((item) => ({ item, state: stateOf(item, true) }))
     .sort((a, b) => ORDER[a.state] - ORDER[b.state]);
 
-  const itemGaps = sorted
-    .filter(({ item, state }) => (state === "gap" || state === "partial") && !!item.gap)
-    .map(({ item }) => ({ item: item.item as string | null, gap: item.gap as string }));
-  // 舊資料的缺口清單沒有對應的條件名稱。
-  const gaps = itemGaps.length > 0 ? itemGaps : legacyGaps.map((gap) => ({ item: null, gap }));
+  // 舊資料的缺口清單：那時候每一條還沒有自己的缺口說明，只能另外列。
+  const hasItemGaps = requirements.some((item) => !!item.gap);
+  const orphanGaps = hasItemGaps ? [] : legacyGaps;
 
-  const missingKeywords = keywords?.missing ?? [];
-  const keywordTotal = keywords ? keywords.matched.length + keywords.missing.length : 0;
   const lang = language === "en" ? "en" : undefined;
 
   // 求職信頁可以補的：沒寫到、部分符合（判斷有問題的不算）。
@@ -109,66 +95,68 @@ export function JdChecklist({
   );
 
   const requirementBlock = requirements.length > 0 && (
-    <Block title="JD 條件" action={letter && addAll(sorted.filter(({ state }) => canAdd(state)).map(({ item }) => item))}>
+    <Block
+      title="JD 條件"
+      action={letter && addAll(sorted.filter(({ state }) => canAdd(state)).map(({ item }) => item))}
+    >
       <ul className="ats-checklist-list" lang={lang}>
-        {sorted.map(({ item, state }, i) => (
-          <li key={i} className={`ats-check ats-check--${state}`}>
-            <StatusIcon state={state} />
-            <div className="ats-check-body">
-              <p className="ats-check-item">
-                {item.item}
-                {state === "invalid" && <span className="ats-check-tag">判斷有問題，請重新檢查評分</span>}
-              </p>
-              {(state === "gap" || state === "partial") && onDig && (
-                <button type="button" className="link-muted ats-check-dig" onClick={() => onDig(item.item)}>
-                  讓 AI 幫你挖掘這段經驗
-                </button>
-              )}
-              {canAdd(state) && addOne(item)}
-            </div>
-          </li>
-        ))}
+        {sorted.map(({ item, state }, i) => {
+          const text = (
+            <>
+              {item.item}
+              {state === "invalid" && <span className="ats-check-tag">判斷有問題，請重新檢查評分</span>}
+            </>
+          );
+          // 求職信頁不展開：缺口說明是改履歷用的。
+          const showGap = !letter && (state === "gap" || state === "partial");
+          const canDig = showGap && !!onDig;
+          const expandable = showGap && (!!item.gap || canDig);
+          return (
+            <li key={i} className={`ats-check ats-check--${state}`}>
+              <StatusIcon state={state} />
+              <div className="ats-check-body">
+                {expandable ? (
+                  <details className="ats-check-details">
+                    <summary className="ats-check-summary">
+                      <span className="ats-check-item">{text}</span>
+                      <span className="disclosure-arrow" aria-hidden="true" />
+                    </summary>
+                    <div className="ats-check-detail">
+                      {showGap && item.gap && (
+                        <div className="ats-gap-body">
+                          {splitSentences(item.gap).map((line, j) => (
+                            <p key={j}>{line}</p>
+                          ))}
+                        </div>
+                      )}
+                      {canDig && (
+                        <div className="ats-check-actions">
+                          <button type="button" className="link-muted" onClick={() => onDig(item.item)}>
+                            讓 AI 幫你挖掘這段經驗
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                ) : (
+                  <p className="ats-check-item">{text}</p>
+                )}
+                {canAdd(state) && addOne(item)}
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </Block>
   );
 
-  const keywordBlock = (keywordTotal > 0 || keywordNote) && (
-    <Block
-      title="JD 關鍵字"
-      action={
-        !keywordNote &&
-        missingKeywords.length > 0 &&
-        onReword && (
-          <button
-            type="button"
-            className="link-muted ats-block-action"
-            onClick={(e) => {
-              // 按鈕在可收合的標題列裡，不要順便把區塊收起來。
-              e.preventDefault();
-              onReword(missingKeywords, null);
-            }}
-          >
-            一鍵換成 JD 用字
-          </button>
-        )
-      }
-    >
-      {keywordNote ? (
-        <p className="keyword-note">{keywordNote}</p>
-      ) : (
-        <KeywordChips matched={keywords!.matched} missing={missingKeywords} />
-      )}
-    </Block>
-  );
-
-  const gapBlock = !letter && gaps.length > 0 && (
+  const gapBlock = !letter && orphanGaps.length > 0 && (
     <Block title="缺口說明">
       <ul className="ats-gap-list" lang={lang}>
-        {gaps.map((g, i) => (
+        {orphanGaps.map((gap, i) => (
           <li key={i} className="ats-gap">
-            {g.item && <p className="ats-gap-item">{g.item}</p>}
             <div className="ats-gap-body">
-              {splitSentences(g.gap).map((line, j) => (
+              {splitSentences(gap).map((line, j) => (
                 <p key={j}>{line}</p>
               ))}
             </div>
@@ -251,7 +239,6 @@ export function JdChecklist({
   ) : (
     <>
       {requirementBlock}
-      {keywordBlock}
       {gapBlock}
       {traitBlock}
       {conditionBlock}
@@ -313,23 +300,4 @@ function splitSentences(text: string): string[] {
     .split(/(?<=[。！？])/)
     .map((t) => t.trim())
     .filter(Boolean);
-}
-
-/** JD 關鍵字：沒用到的虛線框排前面，有逐字用到的淡灰底加勾排後面。 */
-function KeywordChips({ matched, missing }: { matched: string[]; missing: string[] }) {
-  return (
-    <ul className="keyword-list">
-      {missing.map((k) => (
-        <li key={k} className="keyword-chip keyword-chip--missing" title="履歷裡沒有逐字用到這個字">
-          {k}
-        </li>
-      ))}
-      {matched.map((k) => (
-        <li key={k} className="keyword-chip keyword-chip--matched" title="履歷裡有用到這個字">
-          <CheckIcon size={12} />
-          {k}
-        </li>
-      ))}
-    </ul>
-  );
 }
