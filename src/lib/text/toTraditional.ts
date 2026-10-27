@@ -7,7 +7,9 @@ const convert = OpenCC.Converter({ from: "cn", to: "tw" });
 
 // 簡繁共用的字 OpenCC 也會轉成另一個字（台→臺、儀表板→儀錶板），台灣一般不這樣寫。
 // 原文就是這些字的，轉完換回原文。
-const KEEP_AS_IS = new Set(["台", "表"]);
+// 只→隻、干→幹、了→瞭：AI 輸出的繁體「而不是只完成」被轉成「而不是隻完成」（2026-10-27 PressLogic 求職信），
+// 「干擾」變「幹擾」、「了解」變「瞭解」，一樣換回原文。
+const KEEP_AS_IS = new Set(["台", "表", "只", "干", "了"]);
 
 export function toTraditional(text: string): string;
 export function toTraditional(text: string | null): string | null;

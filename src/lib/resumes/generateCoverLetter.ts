@@ -11,13 +11,15 @@ import { companyMentionedInJd, searchableCompanyName } from "@/lib/jobs/companyI
 import { letterLength, letterLengthUnit } from "@/lib/text/letterLength";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { toTraditional } from "@/lib/text/toTraditional";
+import { addCjkSpacing } from "@/lib/text/cjkSpacing";
+import { NATURAL_WRITING_RULES } from "@/lib/text/naturalWriting";
 
 type Resume = GeneratedResume["resume"];
 
 // 寫作規則來自作者長期人工修改求職信後整理的寫作準則。
 // 例子都換成通用的，不放使用者本人的經歷（這套 prompt 所有使用者共用）。
 const COVER_LETTER_RULES = `求職信結構（四段式，篇幅半頁到一頁）：
-1. 開頭自我介紹：姓名、目前背景一句話帶過、從哪裡得知這個職缺（資料裡沒有就略過，不要編）、簡短的應徵動機（1 到 2 句）。
+1. 開頭自我介紹：姓名、目前背景一句話帶過、從哪裡得知這個職缺（資料裡沒有就略過，不要編）、簡短的應徵動機（1 到 2 句）。開頭不寫特質、做事習慣（JD 要的特質放到第三段用事例帶出來）。
 2. 應徵動機：為什麼是「這間公司」，不是泛用的「為什麼是這個產業」。有提供公司研究素材時，從裡面挑 1 到 2 個具體、只有這間公司才有的特色（特有的用詞、制度、做法，例如「扁平組織讓新人也能發言」「學徒制文化」「橫跨上百個城市的據點網絡」；不是「創新」「以客戶為中心」這種每間公司都會講的空話），跟使用者的實際經歷或做事風格連結成一句自然的話，不要生硬地並列「公司特色」加「我的特質」。沒有素材、或素材裡找不到夠具體的內容時，改寫以這個職位工作內容為主的動機，絕對不能編造公司特色。
 3. 個人亮點：2 到 3 個具體案例，最好對應履歷裡已經寫的內容，用不同的語氣重新敘事（不是逐字複製履歷 bullet），並明確扣回 JD 的資格要求。逐條核對 JD 符合度清單，重要的資格都要在信裡找得到呼應。
    履歷沒寫到、或部分符合的條件，是求職信最該補的地方：到經歷資料庫找有沒有對應的事實（履歷只有一頁，很多經歷沒放進去），有就寫進來；部分符合的照 gap 寫的「缺：○○」優先補缺的那幾件。經歷資料庫也找不到的，才照誠實原則 3 處理。
@@ -27,7 +29,7 @@ const COVER_LETTER_RULES = `求職信結構（四段式，篇幅半頁到一頁�
 誠實原則（最重要）：
 1. 每一句都要有履歷或資料裡的事實支撐。不能為了對應 JD 關鍵字編造、誇大，也不能把某個方法或技巧套到錯誤的專案上（方法歸屬錯了跟捏造一樣嚴重）。
 2. 不要用「上線」「發布」、launched、released 這類暗示正式產品發表的字眼，除非資料裡明確寫了已經正式上線；個人專案、小範圍測試的產品用「開發」「實測」這類中性說法。
-3. JD 要求、但使用者完全沒有相關經歷的，不要假裝有。可以在結尾段誠實承認，用展現熱情、期待成長的語氣（例如「這正是吸引我的地方，我期待在這樣的環境裡快速學習」），不要用消極被動的語氣（例如「這點我心裡有數，也做好了準備」）。
+3. JD 要求、但使用者完全沒有相關經歷的，不要假裝有，也不用在信裡主動提：結尾不寫自己還缺什麼經驗（例如「我還沒有○○的經驗，但這正是吸引我的地方」），沒有的就不提（2026-10-28 Z 要求）。
 4. 團隊合作、獨立作業這類特質有時是互斥的重點，每次都要看這份 JD 實際要的是什麼再決定強調哪一個，而且只能寫資料裡看得出來的特質，不能憑空推論。
 5. 如果要用「使用者正在開發一個 AI 工具」這件事當佐證去補缺口，只能提到「有在開發一個 AI 工具」這個事實本身，絕對不要描述這個工具的細節、功能、或用途。
 
@@ -38,7 +40,9 @@ const COVER_LETTER_RULES = `求職信結構（四段式，篇幅半頁到一頁�
 4. 不要把 JD 原文的關鍵字直接放在句子開頭當宣稱（例如「我擅長假設驅動的問題解決」），要讓這個能力從具體案例的敘述裡自然浮現。
 5. 一個句子講一件事，太長就拆成兩句，不要把因果關係、時間順序全部揉在同一句。
 6. 非技術職缺不用過度技術化的詞，換成一般人看得懂的說法。
-7. 同一個資訊（例如某段經歷的公司名稱、某個特質）在同一段裡不要出現兩次。`;
+7. 同一個資訊（例如某段經歷的公司名稱、某個特質）在同一段裡不要出現兩次。
+
+${NATURAL_WRITING_RULES}`;
 
 const SYSTEM_PROMPT = `你是求職信寫作助手。使用者會給你：JD、已經定案的履歷內容、使用者的經歷資料庫（履歷沒放進去的經歷跟成就也在裡面）、JD 符合度清單（標記履歷還缺少哪些條件），有時還有剛上網查到的公司研究素材。
 
@@ -71,7 +75,7 @@ function traitSection(items: GeneratedResume["jd_match_checklist"]): string | nu
   if (traits.length === 0) return null;
   return `===== 這份 JD 要的特質（軟實力，履歷證明不了，交給求職信）=====
 履歷或經歷資料庫裡找得到具體事例的特質都要寫到，用事例自然帶出來（例如「主動」就講他自己發起的改善），不要直接寫「我很主動積極」這種形容詞。
-可以併進第三段的案例裡，一個案例帶出一兩個特質，不用每個特質各寫一段；有字數上限時，優先寫 JD 寫在前面、事例最有力的。資料裡看不出來的特質不要硬寫。
+可以併進第三段的案例裡，一個案例帶出一兩個特質，不用每個特質各寫一段；有字數上限時，優先寫 JD 寫在前面、事例最有力的。資料裡看不出來的特質不要硬寫，也不要寫成「我做事習慣○○」這種自我描述句帶過，更不能放在開頭（去 AI 腔規則 4）。
 ${traits.join("\n")}`;
 }
 
@@ -257,7 +261,7 @@ export async function generateCoverLetterForApplication(
       ).text.trim();
     }
 
-    if (lang === "zh") text = toFullWidthPunctuation(toTraditional(text));
+    if (lang === "zh") text = addCjkSpacing(toFullWidthPunctuation(toTraditional(text)));
     draft[lang] = placeSignature(text, signature);
   }
 
@@ -302,8 +306,9 @@ reason：covered 是 false 時，用繁體中文一句話說信裡還缺什麼�
 
 type Checklist = GeneratedResume["jd_match_checklist"];
 
-/** 比對句子時忽略空白、換行的差異。 */
-const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+/** 比對句子時忽略空白、換行的差異。整個拿掉不留一格：中文信補了中英文之間的空格（2026-10-28），
+ *  之前存的證據句子沒有空格，一樣要比得到。 */
+const squash = (text: string) => text.replace(/\s+/g, "");
 
 /**
  * 用求職信比對標準判斷一封信：履歷寫到的固定打勾，履歷沒寫到的交給 AI 判斷信有沒有補上。
@@ -524,7 +529,7 @@ export async function reviseCoverLetterWithChat(params: {
   }
   let revised = (parsed.letter ?? "").trim();
   if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
-  if (language === "zh") revised = toFullWidthPunctuation(toTraditional(revised));
+  if (language === "zh") revised = addCjkSpacing(toFullWidthPunctuation(toTraditional(revised)));
   await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
   return { reply: toTraditional(parsed.reply ?? "改好了。"), letter: restore(revised) };
 }
@@ -533,7 +538,7 @@ export async function reviseCoverLetterWithChat(params: {
  * 署名（名字＋聯絡方式）是程式放的：給 AI 之前換回 {{SIGNATURE}} 記號，改完再放回去，AI 不會改到聯絡方式。
  * 原本的信找不到署名（使用者自己改掉了）就不硬加。
  */
-function maskSignature(letter: string, contact: ReturnType<typeof readContact>, language: string) {
+export function maskSignature(letter: string, contact: ReturnType<typeof readContact>, language: string) {
   const signature = [pickName(contact, language), buildContactLine(contact, language)].filter(Boolean).join("\n");
   const at = signature ? letter.lastIndexOf(signature) : -1;
   const body = at >= 0 ? `${letter.slice(0, at)}${SIGNATURE_MARK}${letter.slice(at + signature.length)}` : letter;
@@ -551,7 +556,7 @@ ${COVER_LETTER_RULES}
    - 寫成能力陳述時仍然不能編造具體細節：不能捏造專案、公司、數字、時間、事件，也不能說成是在某個既有專案裡做到的（歸屬錯了跟捏造一樣嚴重）。
    - 誠實原則 5 只限制不能描述 AI 工具的細節，不是不能補；用不到工具細節就改寫成能力陳述。
 2. partial 是 true 的項目，履歷已經涵蓋一部分，gap 裡寫的「缺：○○」每一件都要補到，履歷已經有的部分不用再寫。
-3. kind 是 "trait" 的項目（軟實力）：有事例就用具體事例帶出這個特質，不要只寫「我很主動積極」這種形容詞；找不到事例的照規則 1 寫成做事原則的陳述（說怎麼做事，不是貼形容詞）。
+3. kind 是 "trait" 的項目（軟實力）：有事例就用具體事例帶出這個特質，不要只寫「我很主動積極」這種形容詞；找不到事例的照規則 1 寫成做事原則的陳述（說怎麼做事，不是貼形容詞）；這是使用者自己按補充要求的，不受去 AI 腔規則 4 限制，但一樣不能放在開頭第一段。
 4. 只動為了補這幾項必須加的句子、或必須改的那一句，其他地方一字不改：不要順便潤飾、不要調整段落順序、不要刪掉原本的內容。
 5. 補完之後系統會用下面的「求職信比對標準」檢查每一項，寫的句子一定要通過。有 previous_fail 的項目是上一輪補了但沒通過比對，previous_fail 寫了缺什麼：照它改寫或加強那一句，不要再寫一樣的句子。
 
@@ -651,7 +656,7 @@ export async function addItemsToCoverLetter(params: {
     }
     let revised = (parsed.letter ?? "").trim();
     if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
-    if (language === "zh") revised = toFullWidthPunctuation(toTraditional(revised));
+    if (language === "zh") revised = addCjkSpacing(toFullWidthPunctuation(toTraditional(revised)));
     for (const i of parsed.no_example ?? []) if (asked.has(i.trim())) noExample.add(i.trim());
     return revised;
   }
