@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   generateAction,
   rescoreAction,
@@ -81,6 +81,8 @@ interface CanvasProps {
   initialKeywords: string[] | null;
   /** JD 是中文還是英文：關鍵字只比對同語言的履歷版本。 */
   jdLanguage: "zh" | "en";
+  /** 從新增應徵按「下一步：生成履歷」過來（?generate=1）：一進來就開始生成。 */
+  autoGenerate?: boolean;
 }
 
 type Resume = GeneratedResume["resume"];
@@ -177,8 +179,10 @@ export function Canvas({
   initialSectionLabels,
   initialKeywords,
   jdLanguage,
+  autoGenerate = false,
 }: CanvasProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [draft, setDraft] = useState<ResumeMap | null>(initialDraft);
   const [checklist, setChecklist] = useState<ChecklistMap>(initialChecklist);
   const [atsScore, setAtsScore] = useState<number | null>(initialAtsScore);
@@ -412,6 +416,18 @@ export function Canvas({
   }
 
   // 第一次生成履歷前，沒有姓名跟 Email 就先跳視窗請使用者填，填完才開始生成。
+  // 從新增應徵過來（?generate=1）：一進來就開始生成，把網址上的參數拿掉，重新整理才不會再生成一次。
+  // 還沒填履歷抬頭的話，requestGenerate 會先跳出抬頭表單，填完就接著生成。
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || !autoGenerate) return;
+    autoStarted.current = true;
+    // 用瀏覽器原生的 replaceState：router.replace 碰上馬上開始的生成請求會沒生效，網址留著參數，重新整理就會再生成一次。
+    window.history.replaceState(null, "", pathname);
+    requestGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function requestGenerate() {
     if (!hasRequiredContact(contact)) {
       setContactDialog("generate");

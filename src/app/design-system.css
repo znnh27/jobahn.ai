@@ -625,18 +625,9 @@
   margin-top: 2px;
 }
 
-.input-row {
-  display: flex;
-  gap: var(--space-2);
-  margin-top: var(--space-1);
-}
-
-.input-row .input {
-  margin-top: 0;
-}
-.input-row .btn {
-  flex-shrink: 0;
-  white-space: nowrap;
+/* 欄位標題下方直接顯示的操作說明（例如 JD 欄位怎麼貼），跟輸入框之間留一點距離。 */
+.field-hint {
+  margin-bottom: var(--space-1);
 }
 
 /* ============================================================
@@ -4793,5 +4784,33 @@ span:has(> .info-tip) {
   min-width: 0;
 }
 .memory-add .btn {
+  flex-shrink: 0;
+}
+
+/* 新增應徵最上面的「從職缺頁帶入」：淺色底跟下面的表單分開，看得出是輔助工具；貼上框只有 3 行高。
+   下面一列左邊是整理失敗的錯誤，右邊是「AI 整理」按鈕。 */
+.quick-import {
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--chrome-surface-soft);
+}
+.quick-import .progress {
+  margin-top: var(--space-3);
+}
+.quick-import-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+.quick-import-actions .text-error {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.quick-import-actions .btn {
   flex-shrink: 0;
 }

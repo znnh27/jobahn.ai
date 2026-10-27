@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useRef, useState, useTransition } from "react";
-import { createApplication, scrapeJobUrlAction, tidyPastedJdAction } from "./actions";
+import { createApplication, tidyPastedJdAction } from "./actions";
 import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { companyMentionedInJd } from "@/lib/jobs/companyInJd";
@@ -11,9 +11,6 @@ type CreateResult = { error?: string };
 
 const initialState: CreateResult = {};
 
-// 貼上的文字超過這個字數，當成整頁全選複製（混著選單、推薦職缺），請 AI 整理；短的當成已經是 JD，不動。
-const TIDY_MIN_CHARS = 1500;
-
 export function NewApplicationForm() {
   const [state, formAction, isPending] = useActionState(
     async (_prev: CreateResult, formData: FormData) => createApplication(formData),
@@ -22,19 +19,17 @@ export function NewApplicationForm() {
   const [jobUrl, setJobUrl] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [jobTitle, setJobTitle] = useState("");
-  // 抓取時帶回來的公司名稱：跟 JD 出自同一個職缺頁，送出時不用再檢查 JD 裡有沒有這個名稱
+  // AI 整理時帶回來的公司名稱：跟 JD 出自同一個職缺頁，送出時不用再檢查 JD 裡有沒有這個名稱
   // （104 的 JD 內文常常不寫公司名，不然每次都會跳「可能貼錯公司」）。
   const [scrapedCompany, setScrapedCompany] = useState<string | null>(null);
   const [jobDescription, setJobDescription] = useState("");
-  const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
-  // 整頁貼上 → AI 整理（2026-10-27：104 擋掉程式讀取後的替代做法）。留著原文，整理錯了可以還原。
-  const [jdMessage, setJdMessage] = useState<string | null>(null);
-  const [pastedOriginal, setPastedOriginal] = useState<string | null>(null);
+  // 最上面「從職缺頁帶入」：整頁貼上 → 按「AI 整理」才整理（2026-10-27 Z 要求：不要貼上就自動讀取），
+  // 整理完填進下面空白的欄位。貼上框的內容不送出、整理完也保留，整理錯了可以直接再按一次。
+  // 整理成功不另外說明（欄位填好就是回饋），只有失敗才顯示錯誤。
+  const [pagePaste, setPagePaste] = useState("");
+  const [tidyError, setTidyError] = useState<string | null>(null);
   const [isTidying, startTidyTransition] = useTransition();
   const tidyProgress = useEstimatedProgress(isTidying, 20000);
-  const [isScraping, startScrapeTransition] = useTransition();
-  // 104 直接讀結構化資料比較快；其他網站還要請 AI 篩掉雜訊，比較久。
-  const scrapeProgress = useEstimatedProgress(isScraping, /104\.com\.tw/.test(jobUrl) ? 8000 : 25000);
   const formRef = useRef<HTMLFormElement>(null);
   // JD 裡找不到填的公司名稱時，送出前先確認（可能 JD 貼錯公司）。按「仍要建立」後才真的送出。
   const [mismatchCompany, setMismatchCompany] = useState<string | null>(null);
@@ -52,77 +47,73 @@ export function NewApplicationForm() {
     }
   }
 
-  /** 公司名稱、職稱只填空白的欄位，使用者已經打的不蓋掉。回傳填了哪幾欄。 */
-  function fillCompanyAndTitle(result: { companyName?: string | null; jobTitle?: string | null }): string[] {
-    const filled: string[] = [];
+  /** 只填空白的欄位，使用者已經打的不蓋掉（2026-10-27 Z 選的）。 */
+  function fillEmptyFields(result: { text?: string; companyName?: string | null; jobTitle?: string | null }) {
     if (result.companyName && !companyName.trim()) {
       setCompanyName(result.companyName);
       setScrapedCompany(result.companyName);
-      filled.push("公司名稱");
     }
-    if (result.jobTitle && !jobTitle.trim()) {
-      setJobTitle(result.jobTitle);
-      filled.push("職稱");
-    }
-    return filled;
+    if (result.jobTitle && !jobTitle.trim()) setJobTitle(result.jobTitle);
+    if (result.text && !jobDescription.trim()) setJobDescription(result.text);
   }
 
-  // 在職缺頁全選複製、整頁貼上：先照貼上的放進欄位，再請 AI 挑出職缺本身，順便填公司名稱、職稱。
-  function handleJdPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const pasted = e.clipboardData.getData("text");
-    if (pasted.trim().length < TIDY_MIN_CHARS) return;
-    e.preventDefault();
-    setJobDescription(pasted);
-    setPastedOriginal(null);
-    setJdMessage(null);
+  // 「AI 整理」：從整頁貼上的內容挑出職缺本身、公司名稱、職稱，填進下面空白的欄位。
+  function handleTidy() {
+    setTidyError(null);
     startTidyTransition(async () => {
       try {
-        const result = await tidyPastedJdAction(pasted);
+        const result = await tidyPastedJdAction(pagePaste);
         if (result.notJob) {
-          setJdMessage("看起來不是職缺頁的內容，先保留你貼上的原文，送出前再確認一下");
+          setTidyError("看起來不是職缺頁的內容");
           return;
         }
         if (result.error || !result.text) {
-          setJdMessage(`錯誤：${result.error ?? "AI 整理失敗，先保留你貼上的原文"}`);
+          setTidyError(result.error ?? "AI 整理失敗，可以再按一次");
           return;
         }
-        setPastedOriginal(pasted);
-        setJobDescription(result.text);
-        const filled = fillCompanyAndTitle(result);
-        setJdMessage(
-          `已用 AI 挑出職缺內容${filled.length > 0 ? `，也幫你填好了${filled.join("、")}` : ""}。送出前再看一眼內容對不對`,
-        );
-      } catch {
-        setJdMessage("錯誤：AI 整理失敗，先保留你貼上的原文");
-      }
-    });
-  }
-
-  function handleScrape() {
-    setScrapeMessage(null);
-    startScrapeTransition(async () => {
-      try {
-        const result = await scrapeJobUrlAction(jobUrl);
-        if (result.error || !result.text) {
-          setScrapeMessage(`錯誤：${result.error}`);
-          return;
-        }
-        setJobDescription(result.text);
-        setPastedOriginal(null);
-        setJdMessage(null);
-        const filled = fillCompanyAndTitle(result);
-        setScrapeMessage(
-          `抓取完成，JD 已帶入下方${filled.length > 0 ? `，也幫你填好了${filled.join("、")}` : ""}。送出前再看一眼內容對不對`,
-        );
+        fillEmptyFields(result);
       } catch {
         // 請求本身失敗（斷網、逾時）也要告訴使用者，不然進度條消失後什麼都沒發生。
-        setScrapeMessage("錯誤：抓取失敗，請檢查網路後再試一次，或直接把 JD 貼到下面");
+        setTidyError("AI 整理失敗，請檢查網路後再試一次");
       }
     });
   }
 
   return (
     <form ref={formRef} action={formAction} onSubmit={handleSubmit} className="card form-stack">
+      {/* 從職缺頁帶入（選填）：整頁貼上、按「AI 整理」，填好下面空白的欄位。操作說明直接顯示，不收進 ⓘ（2026-10-27 Z 要求）。
+          貼上框沒有 name，內容不會送出。 */}
+      <section className="quick-import" aria-labelledby="quick-import-title">
+        <label htmlFor="pagePaste" id="quick-import-title" className="label">
+          從職缺頁帶入（選填）
+        </label>
+        <p className="hint-text field-hint">
+          在職缺頁按 ⌘A 或 Ctrl+A 全選、複製後貼在這裡，再按「AI 整理」，會自動填好下面的欄位。
+        </p>
+        <textarea
+          id="pagePaste"
+          rows={3}
+          value={pagePaste}
+          onChange={(e) => setPagePaste(e.target.value)}
+          readOnly={isTidying}
+          placeholder="請在這裡貼上網頁全部內容"
+          className="textarea"
+        />
+        {tidyProgress !== null && <ProgressBar value={tidyProgress} label="AI 正在從貼上的內容挑出職缺…" />}
+        <div className="quick-import-actions">
+          {tidyError && <p className="text-error">{tidyError}</p>}
+          <button
+            type="button"
+            onClick={handleTidy}
+            disabled={isTidying || !pagePaste.trim()}
+            className="btn btn-secondary"
+          >
+            {isTidying && <Spinner />}
+            AI 整理
+          </button>
+        </div>
+      </section>
+
       <div className="field">
         <label htmlFor="companyName" className="label">
           公司名稱
@@ -155,29 +146,17 @@ export function NewApplicationForm() {
 
       <div className="field">
         <label htmlFor="jobUrl" className="label">
-          職缺連結（選填，自動抓取內容）
+          職缺連結（選填）
         </label>
-        <div className="input-row">
-          <input
-            id="jobUrl"
-            name="jobUrl"
-            type="url"
-            value={jobUrl}
-            onChange={(e) => setJobUrl(e.target.value)}
-            placeholder="https://..."
-            className="input"
-          />
-          <button
-            type="button"
-            onClick={handleScrape}
-            disabled={isScraping || !jobUrl.trim()}
-            className="btn btn-secondary"
-          >
-            抓取內容
-          </button>
-        </div>
-        {scrapeProgress !== null && <ProgressBar value={scrapeProgress} label="正在抓取職缺頁面內容…" />}
-        {scrapeMessage && <p className="hint-text">{scrapeMessage}</p>}
+        <input
+          id="jobUrl"
+          name="jobUrl"
+          type="url"
+          value={jobUrl}
+          onChange={(e) => setJobUrl(e.target.value)}
+          placeholder="https://..."
+          className="input"
+        />
       </div>
 
       <div className="field">
@@ -185,8 +164,6 @@ export function NewApplicationForm() {
           JD 內容
           <InfoTip label="JD 內容的說明">
             <ul>
-              <li>貼上職缺頁面的文字，或用上面的連結自動抓取</li>
-              <li>可以在職缺頁全選複製整頁貼上，AI 會自動挑出職缺內容</li>
               <li>履歷跟求職信都會照這份內容寫</li>
               <li>建立後不能修改，之後只能查看</li>
               <li>貼錯的話，要刪掉這筆重新新增</li>
@@ -200,32 +177,8 @@ export function NewApplicationForm() {
           rows={10}
           value={jobDescription}
           onChange={(e) => setJobDescription(e.target.value)}
-          onPaste={handleJdPaste}
-          readOnly={isTidying}
           className="textarea"
         />
-        {tidyProgress !== null && <ProgressBar value={tidyProgress} label="AI 正在從貼上的內容挑出職缺…" />}
-        {jdMessage && (
-          <p className="hint-text">
-            {jdMessage}
-            {pastedOriginal && (
-              <>
-                {" "}
-                <button
-                  type="button"
-                  className="btn-link"
-                  onClick={() => {
-                    setJobDescription(pastedOriginal);
-                    setPastedOriginal(null);
-                    setJdMessage("已還原成你貼上的原文");
-                  }}
-                >
-                  還原成貼上的原文
-                </button>
-              </>
-            )}
-          </p>
-        )}
       </div>
 
       <fieldset>

@@ -38,7 +38,7 @@ jobahn runs on your own computer with your own accounts. Nothing is sent to the 
 | An AI provider | Yes, one of: | |
 | ↳ [Claude Code](https://claude.com/claude-code) CLI, logged in | | `AI_PROVIDER=local-cli`. Uses your Claude subscription, no API key. Only works when running locally. Check that your plan's terms allow this kind of automated use. |
 | ↳ An [Anthropic API key](https://console.anthropic.com) | | `AI_PROVIDER=api`. Pay per use. Needed if you deploy to a server. |
-| A [Firecrawl](https://firecrawl.dev) API key | Optional | Enables "paste a job URL to fetch the JD" and "research the company before writing the cover letter" (about 4 credits per letter). Without it, both options are hidden. |
+| A [Firecrawl](https://firecrawl.dev) API key | Optional | Enables "research the company before writing the cover letter" (about 4 credits per letter). Without it, the option is hidden. |
 
 ### Steps
 
@@ -148,7 +148,7 @@ jobahn 跑在你自己的電腦上，用你自己的帳號，資料不會經過�
 | AI（二選一） | 必要 | |
 | ↳ 已登入的 [Claude Code](https://claude.com/claude-code) CLI | | `AI_PROVIDER=local-cli`，用你的 Claude 訂閱額度，不需要 API key，只能在本機執行。請自行確認你的方案條款允許這種自動化用法。 |
 | ↳ [Anthropic API key](https://console.anthropic.com) | | `AI_PROVIDER=api`，用多少付多少，部署到伺服器時需要。 |
-| [Firecrawl](https://firecrawl.dev) API key | 選填 | 開啟「貼職缺網址自動抓 JD」和「寫求職信前先研究公司」（每封信大約 4 credits）。沒設的話這兩個選項不會出現。 |
+| [Firecrawl](https://firecrawl.dev) API key | 選填 | 開啟「寫求職信前先研究公司」（每封信大約 4 credits）。沒設的話這個選項不會出現。 |
 
 **步驟**
 

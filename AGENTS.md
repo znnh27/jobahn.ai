@@ -35,7 +35,7 @@ When the user asks you to set up, install or run jobahn, follow these steps in o
    - `NEXT_PUBLIC_SUPABASE_URL`: `https://<project-id>.supabase.co` (project ID is in the dashboard address bar).
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: **Project Settings → API Keys → Publishable key** (`sb_publishable_...`), or the legacy `anon` key.
    - `SUPABASE_SERVICE_ROLE_KEY`: same page, **Secret key** (`sb_secret_...`), or the legacy `service_role` key. This key bypasses all row-level security: never echo it back, never put it anywhere except `.env.local` (which is gitignored).
-   - `FIRECRAWL_API_KEY` is optional; skip it unless they want job-URL scraping and company research.
+   - `FIRECRAWL_API_KEY` is optional; skip it unless they want company research for cover letters.
 
 ## Verify
 

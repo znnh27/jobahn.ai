@@ -14,6 +14,7 @@ export default async function ApplicationDetailPage(
   props: PageProps<"/applications/[id]">,
 ) {
   const { id } = await props.params;
+  const { generate } = await props.searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -70,6 +71,7 @@ export default async function ApplicationDetailPage(
           initialSectionLabels={readCustomSectionLabels(profile?.data)}
           initialKeywords={application.jd_keywords ?? null}
           jdLanguage={detectJdLanguage(application.job_description ?? "")}
+          autoGenerate={generate === "1" && !application.resume_draft}
           stepBar={
             <StepBar
               key="step-bar"

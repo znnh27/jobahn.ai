@@ -225,7 +225,8 @@ export function CoverLetter({
   useEffect(() => {
     if (autoStarted.current || !autoGenerate) return;
     autoStarted.current = true;
-    router.replace(pathname);
+    // 用瀏覽器原生的 replaceState：router.replace 碰上馬上開始的生成請求會沒生效，網址留著參數，重新整理就會再生成一次。
+    window.history.replaceState(null, "", pathname);
     handleGenerate(autoGenerate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

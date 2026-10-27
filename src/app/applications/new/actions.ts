@@ -3,39 +3,24 @@
 import { normalizeJobUrl } from "@/lib/jobs/jobUrl";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { scrapeJobPosting, tidyPastedJobPage } from "@/lib/jobs/scrapeJobPosting";
+import { tidyJobPage } from "@/lib/jobs/tidyJobPage";
 
 type CreateResult = { error?: string };
 
-type ScrapeResult = { text?: string; companyName?: string | null; jobTitle?: string | null; error?: string };
+type TidyResult = { text?: string; companyName?: string | null; jobTitle?: string | null; notJob?: boolean; error?: string };
 
-export async function scrapeJobUrlAction(url: string): Promise<ScrapeResult> {
+/** 「AI 整理內容」：從整頁貼上的內容挑出職缺本身、公司名稱、職稱。 */
+export async function tidyPastedJdAction(text: string): Promise<TidyResult> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "請先登入" };
+  if (!text.trim()) return { error: "請先貼上職缺內容" };
 
-  if (!url.trim()) return { error: "請貼上職缺連結" };
-
-  try {
-    return await scrapeJobPosting(url.trim(), { supabase, userId: user.id });
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "抓取失敗" };
-  }
-}
-
-/** JD 欄位整頁貼上時：請 AI 挑出職缺本身、公司名稱、職稱。 */
-export async function tidyPastedJdAction(text: string): Promise<ScrapeResult & { notJob?: boolean }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "請先登入" };
-
-  const result = await tidyPastedJobPage(text, { supabase, userId: user.id });
+  const result = await tidyJobPage(text, { supabase, userId: user.id });
   if (result === "blocked") return { notJob: true };
-  if (!result) return { error: "AI 整理失敗，先保留你貼上的原文" };
+  if (!result) return { error: "AI 整理失敗，內容沒有變動，可以再按一次" };
   return result;
 }
 
@@ -84,5 +69,6 @@ export async function createApplication(formData: FormData): Promise<CreateResul
     return { error: `建立應徵紀錄失敗：${error?.message ?? "unknown"}` };
   }
 
-  redirect(`/applications/${data.id}`);
+  // 帶 ?generate=1：到履歷頁就直接開始生成，不用再按一次「生成履歷」（2026-10-27 Z 回報）。
+  redirect(`/applications/${data.id}?generate=1`);
 }
