@@ -41,6 +41,24 @@ export function measureWidth(text: string, fontSize: number, bold = false): numb
   return width;
 }
 
+// 交給 react-pdf 的每一行最後都接著一個換行字元，react-pdf 斷行時會把它的寬度算進這一行。兩個字型都沒有
+// 換行字元的字形，react-pdf 會用第一個字型（Carlito）的替代字形，大約半個字寬。不扣掉的話，接近滿版的那一行
+// react-pdf 會判定塞不下、自己再斷一次，用英文斷字邏輯硬斷還補一個「-」（2026-10-29 摘要排出「30%-」再換行）。
+function newlineWidth(fontSize: number): number {
+  const { carlito } = fonts(false);
+  return (carlito.layout("\n").advanceWidth / carlito.unitsPerEm) * fontSize;
+}
+
+// 避頭點：這些標點不能出現在行首，碰到了就把前一個字一起帶到下一行。
+const NO_LINE_START = /^[，。、；：！？）」』〉》】〕％…—～,.;:!?)\]}%]/u;
+// 避尾點：開頭的括號、引號不能留在行尾，跟著下一行走。
+const NO_LINE_END = /[（「『〈《【〔(\[{]$/u;
+
+interface Piece {
+  text: string;
+  width: number;
+}
+
 export function wrapCjkText(text: string, fontSize: number, maxWidthPt: number): string {
   // 使用者自己換的行（bullet 裡按 Shift + Enter）保留，每一行各自折行。
   if (text.includes("\n")) {
@@ -50,23 +68,38 @@ export function wrapCjkText(text: string, fontSize: number, maxWidthPt: number):
       .join("\n");
   }
   const tokens = text.match(CJK_OR_WHITESPACE_TOKEN) ?? [text];
+  const reserve = newlineWidth(fontSize);
   const lines: string[] = [];
-  let current = "";
-  let currentWidth = 0;
+  let current: Piece[] = [];
+  const widthOf = (pieces: Piece[]) => pieces.reduce((sum, p) => sum + p.width, 0);
+  const textOf = (pieces: Piece[]) => pieces.map((p) => p.text).join("");
 
-  for (const token of tokens) {
-    const tokenWidth = measureWidth(token, fontSize);
-    if (current && currentWidth + tokenWidth > maxWidthPt) {
-      lines.push(current.trimEnd());
-      const blank = token.trim() === "";
-      current = blank ? "" : token;
-      currentWidth = blank ? 0 : tokenWidth;
-    } else {
-      current += token;
-      currentWidth += tokenWidth;
+  tokens.forEach((token, i) => {
+    const piece = { text: token, width: measureWidth(token, fontSize) };
+    const blank = token.trim() === "";
+    // 最後一段後面不會接換行字元，不用預留。
+    const limit = i === tokens.length - 1 ? maxWidthPt : maxWidthPt - reserve;
+    if (current.length === 0 || widthOf(current) + piece.width <= limit) {
+      current.push(piece);
+      return;
     }
-  }
-  if (current.trim() !== "") lines.push(current.trimEnd());
+    // 要換行了：下一行開頭不能是避頭點、這一行結尾不能是避尾點，不合的字從這一行搬到下一行。
+    const carry: Piece[] = [];
+    if (!blank && NO_LINE_START.test(token)) {
+      while (current.length > 1) {
+        const last = current.pop()!;
+        carry.unshift(last);
+        if (last.text.trim() !== "" && !NO_LINE_START.test(last.text)) break;
+      }
+    }
+    while (current.length > 1 && NO_LINE_END.test(current[current.length - 1].text)) {
+      carry.unshift(current.pop()!);
+    }
+    lines.push(textOf(current).trimEnd());
+    current = blank ? carry : [...carry, piece];
+    while (current.length > 0 && current[0].text.trim() === "") current.shift();
+  });
+  if (textOf(current).trim() !== "") lines.push(textOf(current).trimEnd());
 
   return lines.join("\n");
 }
