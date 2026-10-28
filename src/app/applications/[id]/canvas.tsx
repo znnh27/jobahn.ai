@@ -191,7 +191,7 @@ export function Canvas({
   // 記錄是哪個動作在跑，進度條的說明文字跟位置才對得上。
   const [busy, setBusy] = useState<Busy | null>(null);
   const isPending = busy !== null;
-  const [gapDialogText, setGapDialogText] = useState<string | null>(null);
+  const [gapDialog, setGapDialog] = useState<{ item: string; gap: string | null } | null>(null);
   const [coverLangDialog, setCoverLangDialog] = useState(false);
   const [contact, setContact] = useState<ResumeContact>(initialContact);
   // 履歷抬頭表單：generate = 第一次生成履歷前要先填；edit = 點畫布抬頭修改。
@@ -935,7 +935,7 @@ export function Canvas({
               isCovered={coveredByResume}
               language={activeLang}
               legacyGaps={gaps[activeLang] ?? []}
-              onDig={finalized ? undefined : setGapDialogText}
+              onDig={finalized ? undefined : (item, gap) => setGapDialog({ item, gap })}
               onAnswerCondition={finalized || isPending ? undefined : handleAnswerCondition}
             />
           </div>
@@ -1050,9 +1050,10 @@ export function Canvas({
         </ConfirmDialog>
       )}
 
-      {gapDialogText && (
+      {gapDialog && (
         <JdGapDialog
-          gapText={gapDialogText}
+          gapText={gapDialog.item}
+          gapAnalysis={gapDialog.gap}
           language={activeLang}
           sections={[
             ...resume.work_experience.map((e, i) => ({
@@ -1068,7 +1069,7 @@ export function Canvas({
               role: e.role,
             })),
           ]}
-          onClose={() => setGapDialogText(null)}
+          onClose={() => setGapDialog(null)}
           onCommitBullet={(section, index, bulletText) => {
             updateResume(activeLang, (r) => {
               const items = [...r[section]];

@@ -6,6 +6,9 @@ import type { DialogueTurn } from "@/lib/experience/elicitationDialogue";
 import { MessageComposer } from "@/app/experience/MessageComposer";
 import { TypingIndicator } from "@/app/experience/TypingIndicator";
 import { CompletionPopup } from "@/app/experience/CompletionPopup";
+import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
+import { addCjkSpacing } from "@/lib/text/cjkSpacing";
+import { splitSentences } from "./JdChecklist";
 
 interface SectionOption {
   section: "work_experience" | "leadership";
@@ -16,6 +19,8 @@ interface SectionOption {
 
 interface JdGapDialogProps {
   gapText: string;
+  /** JD 條件清單上的缺口分析；舊資料沒有就是 null，對話改成針對整項要求來問。 */
+  gapAnalysis: string | null;
   language: string;
   sections: SectionOption[];
   onClose: () => void;
@@ -24,7 +29,7 @@ interface JdGapDialogProps {
 
 type Step = "picking_section" | "dialogue" | "confirming";
 
-export function JdGapDialog({ gapText, language, sections, onClose, onCommitBullet }: JdGapDialogProps) {
+export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose, onCommitBullet }: JdGapDialogProps) {
   const [step, setStep] = useState<Step>("picking_section");
   const [picked, setPicked] = useState<SectionOption | null>(null);
   const [turns, setTurns] = useState<DialogueTurn[]>([]);
@@ -46,7 +51,7 @@ export function JdGapDialog({ gapText, language, sections, onClose, onCommitBull
     setError(null);
     try {
       const result = await stepElicitationAction(
-        { orgName: opt.org, role: opt.role, jdContext: gapText },
+        { orgName: opt.org, role: opt.role, jdContext: gapText, jdGap: gapAnalysis ?? undefined },
         [],
         null,
       );
@@ -70,7 +75,7 @@ export function JdGapDialog({ gapText, language, sections, onClose, onCommitBull
     setComposerText("");
     try {
       const result = await stepElicitationAction(
-        { orgName: picked.org, role: picked.role, jdContext: gapText },
+        { orgName: picked.org, role: picked.role, jdContext: gapText, jdGap: gapAnalysis ?? undefined },
         turns,
         reply,
       );
@@ -90,8 +95,10 @@ export function JdGapDialog({ gapText, language, sections, onClose, onCommitBull
     if (!draft || !picked) return;
     setIsPending(true);
     setError(null);
+    // 草稿框裡使用者自己改過的字，也一樣把中文句子裡的半形標點轉全形、中英之間補空格。
+    const text = language === "zh" ? addCjkSpacing(toFullWidthPunctuation(draft.text.trim())) : draft.text.trim();
     try {
-      onCommitBullet(picked.section, picked.index, draft.text);
+      onCommitBullet(picked.section, picked.index, text);
 
       const entryId = await findEntryIdByOrgAction(picked.org, language);
       if (!entryId) {
@@ -102,7 +109,7 @@ export function JdGapDialog({ gapText, language, sections, onClose, onCommitBull
       }
       const result = await commitNewAchievementAction({
         entryId,
-        drafts: [{ text: draft.text, angleLabel: draft.angleLabel || "JD 缺口挖掘" }],
+        drafts: [{ text, angleLabel: draft.angleLabel || "JD 缺口挖掘" }],
         sourceLabel: "JD 缺口挖掘",
       });
       setShowCompletion(
@@ -131,6 +138,16 @@ export function JdGapDialog({ gapText, language, sections, onClose, onCommitBull
           <div className="elicitation-bubble elicitation-bubble--assistant">
             <p>JD 這項要求：{gapText}</p>
           </div>
+          {gapAnalysis && (
+            <div className="elicitation-bubble elicitation-bubble--assistant">
+              <p>缺口分析（這次只補缺的部分）：</p>
+              <ul className="ats-gap-body">
+                {splitSentences(gapAnalysis).map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {step === "picking_section" && (
             <div className="elicitation-bubble elicitation-bubble--assistant">

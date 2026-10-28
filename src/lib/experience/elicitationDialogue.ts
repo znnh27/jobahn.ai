@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
 import { toTraditional } from "@/lib/text/toTraditional";
+import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
+import { addCjkSpacing } from "@/lib/text/cjkSpacing";
 import { BULLET_EXAMPLE, BULLET_RULES, stripRuleRefs } from "./bulletRules";
 
 // Phase 2.5：AI 問答挖掘的共用對話引擎。使用者可能只有一段很籠統的描述，這個引擎透過
@@ -27,6 +29,9 @@ export interface DialogueContext {
   seedText?: string;
   /** JD 缺口挖掘時，把這項 JD 要求也給 AI 參考，問題會更貼近這個缺口 */
   jdContext?: string;
+  /** JD 缺口挖掘時，JD 條件清單上的缺口分析（缺什麼、哪些已經有佐證、建議怎麼補）。
+   *  有這個就只挖缺的那一項，已經有佐證的不再問；舊資料沒有缺口分析時留空。 */
+  jdGap?: string;
   /** 從「建議加強」卡片進來潤飾時，卡片上寫的問題（這條為什麼被標記）。改寫一定要先解決這個問題。 */
   issue?: string;
 }
@@ -61,6 +66,11 @@ ${BULLET_EXAMPLE}
    - 使用者講了好幾件不同的事（不同專案、不同成果），一件事寫成一條，條數不設上限；同一件事不要拆成好幾條湊數，也不要把好幾件事硬塞成一條。
    - 有好幾件事時，追問一樣一次一題，先問最缺數字或成果的那件；同一件問兩次還問不到，就用規模或頻率寫，換下一件。
    - 有好幾件事時，重述理解要條列出「我會寫成這幾點」，每點一句話，讓使用者一次確認。
+3-1. 有「這次特別想補強的 JD 要求」時（JD 缺口挖掘）：
+   - 有「缺口分析」的話，只挖缺口分析指出缺的那一項。缺口分析裡說已經有經歷佐證的能力，一律不要再問，也不要把它們寫成這條的重點。
+   - 第一句話先用一兩句白話講清楚：這項要求還缺什麼、什麼樣的經歷可以補（缺口分析有建議就照它的方向），接著問一個只針對這個缺口的問題，例如請使用者想一次具體的經驗。不要泛泛地問使用者有沒有這些能力。
+   - 寫出來的這條要讓人一眼看出那個缺的能力。例如缺邏輯思維，就寫出「遇到什麼問題 → 怎麼拆解或分析 → 得出什麼結論或結果」；缺數據能力，就寫出用了什麼資料、得出什麼判斷。
+   - 沒有缺口分析時，就針對 JD 要求整體來問。
 4. 最多問 10 輪，通常 2-4 輪就該收斂，資訊夠了就儘早結束，不要為了湊題數硬問。
 5. status 是 "ready" 時，drafts 裡每一條的 text 都必須逐條符合上面的寫作規則，寫完先自己檢查一遍；好幾條的話動詞不要重複。angleLabel 是一句話描述這條強調的重點（例如「強調數據分析成果」），給使用者自己參考挑選用，不會出現在正式履歷裡。
 6. message 一律用繁體中文（台灣用語），絕對不要出現簡體字。drafts 的語言跟既有內容相同；全新經歷則依使用者回覆的語言，中文一律繁體。
@@ -95,6 +105,7 @@ export async function stepElicitation(params: {
     context.seedText ? `===== 已知的既有內容 =====\n${context.seedText}` : "",
     context.issue ? `===== 這條被標記的問題（改寫一定要解決）=====\n${context.issue}` : "",
     context.jdContext ? `===== 這次特別想補強的 JD 要求 =====\n${context.jdContext}` : "",
+    context.jdContext && context.jdGap ? `===== 缺口分析（只挖這裡說缺的部分）=====\n${context.jdGap}` : "",
     `===== 目前為止的對話（AI 已經問了 ${questionsAskedSoFar} 輪）=====`,
     updatedTurns.length > 0
       ? updatedTurns.map((t) => `${t.role === "assistant" ? "AI" : "使用者"}：${t.text}`).join("\n")
@@ -121,7 +132,7 @@ export async function stepElicitation(params: {
   const finalDrafts = singleOnly ? drafts.slice(0, 1) : drafts;
 
   return {
-    turns: [...updatedTurns, { role: "assistant", text: stripRuleRefs(toTraditional(parsed.message)) }],
+    turns: [...updatedTurns, { role: "assistant", text: polish(stripRuleRefs(parsed.message)) }],
     // 說 ready 卻沒給任何一條，就當成還在問，不要讓畫面跳到空白的確認畫面。
     status: parsed.status === "ready" && finalDrafts.length > 0 ? "ready" : "asking",
     drafts: finalDrafts,
@@ -140,6 +151,11 @@ interface RawResponse {
   angleLabel?: string | null;
 }
 
+/** 簡轉繁、中文句子裡的半形標點轉全形、中英之間補空格（AI 偶爾會混進半形逗號）。英文內容不會被改到。 */
+function polish(text: string): string {
+  return addCjkSpacing(toFullWidthPunctuation(toTraditional(text)));
+}
+
 function readDrafts(parsed: RawResponse): DialogueDraft[] {
   const raw = Array.isArray(parsed.drafts)
     ? parsed.drafts
@@ -147,7 +163,7 @@ function readDrafts(parsed: RawResponse): DialogueDraft[] {
       ? [{ text: parsed.draftText, angleLabel: parsed.angleLabel }]
       : [];
   return raw.flatMap((d) => {
-    const text = typeof d?.text === "string" ? toTraditional(d.text).trim() : "";
+    const text = typeof d?.text === "string" ? polish(d.text).trim() : "";
     if (!text) return [];
     const angleLabel = typeof d?.angleLabel === "string" ? toTraditional(d.angleLabel) : "";
     return [{ text, angleLabel }];

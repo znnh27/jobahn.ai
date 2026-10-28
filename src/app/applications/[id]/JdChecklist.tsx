@@ -41,7 +41,8 @@ export function JdChecklist({
   legacyGaps?: string[];
   /** JD 條件是用哪種語言寫的。英文左右對齊時要能自動斷字，字距才不會被拉得很開。 */
   language?: string;
-  onDig?: (item: string) => void;
+  /** 「讓 AI 幫你挖掘這段經驗」：連同缺口分析一起給，對話才會只挖缺的那一項。 */
+  onDig?: (item: string, gap: string | null) => void;
   onAnswerCondition?: (item: string, willing: boolean) => void;
   /** 求職信頁「補充進求職信」：把這幾項補進信裡。 */
   onAddToLetter?: (items: JdChecklistItem[]) => void;
@@ -131,7 +132,7 @@ export function JdChecklist({
                       )}
                       {canDig && (
                         <div className="ats-check-actions">
-                          <button type="button" className="link-muted" onClick={() => onDig(item.item)}>
+                          <button type="button" className="link-muted" onClick={() => onDig(item.item, item.gap ?? null)}>
                             讓 AI 幫你挖掘這段經驗
                           </button>
                         </div>
@@ -295,7 +296,7 @@ function StatusIcon({ state }: { state: CheckState | "soft" }) {
 }
 
 /** 缺口說明一句一點（照句號切）。 */
-function splitSentences(text: string): string[] {
+export function splitSentences(text: string): string[] {
   return text
     .split(/(?<=[。！？])/)
     .map((t) => t.trim())
