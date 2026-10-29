@@ -3,9 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
 import { CHAT_REPLY_FORMAT } from "@/lib/ai/chatReply";
-import { BULLET_RULES, stripRuleRefs } from "@/lib/experience/bulletRules";
+import { BULLET_RULES, readRuleTags, stripRuleRefs } from "@/lib/experience/bulletRules";
+import { checkBullets } from "@/lib/experience/checkBullets";
 import { ensureLanguageParity } from "@/lib/experience/languageParity";
-import { computeAtsScore, countsForResume, type JdImportance } from "./atsScore";
+import { computeAtsScore, countsForResume, coveredByResume, type JdImportance } from "./atsScore";
 import { classifyJdItems, resolveJdItems, type JdBaseItem, type JdItemKind } from "./jdChecklist";
 import { resolveJdKeywords } from "./jdKeywords";
 import { readContact, type ResumeContact } from "./contact";
@@ -1127,6 +1128,30 @@ function confirmedConditions(checklists: Record<string, JdChecklistItem[]>): str
   return [...new Set(items.filter((i) => i.kind === "condition" && i.answer === "yes").map((i) => i.item.trim()))];
 }
 
+/**
+ * 履歷頁「跟 AI 聊」：把右欄 JD 符合度清單裡還沒符合、部分符合的項目給 AI（2026-10-29 Z 要求）。
+ * 以前 AI 只看得到 JD 全文，使用者說「補強 JD 缺的部分」時要自己重新判斷缺什麼，可能跟右欄對不上。
+ * 判斷方式跟右欄一樣（JdChecklist 的 stateOf）：只看硬實力（軟實力在履歷頁不算分、工作條件另外由 confirmedConditions 處理），
+ * 只算履歷本身寫到的（coveredByResume），判斷有問題的項目（invalid）不給。
+ */
+function jdGapsSection(items: JdChecklistItem[] | undefined): string {
+  const gaps = (items ?? []).filter(
+    (i) => (i.kind ?? "requirement") === "requirement" && !i.invalid && !coveredByResume(i),
+  );
+  if (gaps.length === 0) return "";
+  const lines = gaps.map((i) => {
+    const status = i.partial ? "部分符合" : "還沒寫到";
+    const importance = i.importance === "required" ? "必要" : i.importance === "preferred" ? "加分" : null;
+    const head = [status, importance].filter(Boolean).join("、");
+    return `- 【${head}】${i.item}${i.gap ? `\n  缺口分析：${i.gap}` : ""}`;
+  });
+  return [
+    `===== JD 符合度清單裡還缺的項目（使用者畫面右欄看到的，以最近一次評分為準）=====`,
+    `使用者提到「JD 缺的」「還沒符合的」這類說法時，指的就是這幾項；要補強時照缺口分析的方向，只能用經歷資料庫裡有的事實，資料庫沒有的就在 reply 說明缺什麼、建議到經歷資料庫補。`,
+    ...lines,
+  ].join("\n");
+}
+
 /** 這個語言還沒有自己的 Summary 時，拿另一個語言的當參考（Summary 只是素材，不會照抄）。 */
 function withReferenceSummaries(background: LanguageBackground, profile: unknown): LanguageBackground {
   if (background.summaries.length > 0) return background;
@@ -1232,6 +1257,7 @@ export async function reviseResumeWithChat(params: {
     systemPrompt: SYSTEM_PROMPT,
     userPrompt: [
       basePrompt,
+      jdGapsSection(application.jd_match_checklist?.[language]),
       `===== 目前的履歷 =====`,
       JSON.stringify({ ...resume, layout: undefined }, null, 2),
       history.length > 0
@@ -1259,7 +1285,64 @@ export async function reviseResumeWithChat(params: {
   const next = sortWorkByRecency(pinBackground(parsed.resume, background));
   // 學歷 AI 本來就不能改；使用者在畫布上手動改過的話，沿用這份履歷目前的，不要被經歷資料庫的版本蓋回去。
   next.education = resume.education;
+  const checkNote = await checkChangedBullets({
+    supabase,
+    userId,
+    before: resume,
+    after: next,
+    jd: application.job_description,
+    instruction,
+    mutedRules: new Set(readRuleTags((profile?.data as { muted_rules?: unknown } | undefined)?.muted_rules)),
+  });
   if (language === "zh") polishChinese(next);
   next.layout = resume.layout;
-  return { reply: stripRuleRefs(toTraditional(parsed.reply ?? "改好了。")), resume: next };
+  const reply = stripRuleRefs(toTraditional(parsed.reply ?? "改好了。"));
+  return { reply: checkNote ? `${reply}\n\n${checkNote}` : reply, resume: next };
+}
+
+/** 「跟 AI 聊」改完，用跟經歷資料庫同一套檢查（checkBullets.ts）檢查這次新增或改到的 bullet（2026-10-29 Z 要求全系統標準一致）。
+ * 寫法問題直接換成改寫（改 after）；缺數字履歷頁補不了（只能用資料庫的事實），回傳一段提醒接在 AI 回覆後面。 */
+async function checkChangedBullets(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  before: Resume;
+  after: Resume;
+  jd: string;
+  instruction: string;
+  mutedRules: Set<string>;
+}): Promise<string | null> {
+  const { before, after } = params;
+  const old = new Set(
+    [...(before.work_experience ?? []), ...(before.leadership ?? [])].flatMap((e) => e.bullets ?? []),
+  );
+  const changed = [...(after.work_experience ?? []), ...(after.leadership ?? [])].flatMap((e) =>
+    (e.bullets ?? []).flatMap((text, i) => (text.trim() && !old.has(text) ? [{ entry: e, i, text }] : [])),
+  );
+  if (changed.length === 0) return null;
+
+  const results = await checkBullets({
+    supabase: params.supabase,
+    userId: params.userId,
+    feature: "resume_chat_check",
+    items: changed.map((c) => ({ text: c.text })),
+    mutedRules: params.mutedRules,
+    jd: params.jd,
+    instruction: params.instruction,
+  });
+  if (!results) return null;
+
+  results.forEach((r, k) => {
+    if (r.rewritten) changed[k].entry.bullets[changed[k].i] = r.text;
+  });
+  const rewrittenCount = results.filter((r) => r.rewritten).length;
+  const missing = results.flatMap((r) =>
+    r.missingEvidence ? [`- 「${r.text.slice(0, 14)}…」：${r.missingEvidence}`] : [],
+  );
+  const lines = [
+    rewrittenCount > 0 ? `另外照寫作規則順手調整了 ${rewrittenCount} 條的寫法。` : "",
+    missing.length > 0
+      ? `這幾條還沒有數字或具體成果，可以到經歷資料庫用「跟 AI 聊」補，補完重新產生就會帶進來：\n${missing.join("\n")}`
+      : "",
+  ].filter(Boolean);
+  return lines.length > 0 ? lines.join("\n\n") : null;
 }

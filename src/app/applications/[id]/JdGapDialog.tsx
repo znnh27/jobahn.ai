@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { stepElicitationAction, commitNewAchievementAction, findEntryIdByOrgAction } from "@/app/experience/actions";
-import type { DialogueTurn } from "@/lib/experience/elicitationDialogue";
+import type { DialogueDraft, DialogueTurn } from "@/lib/experience/elicitationDialogue";
 import { MessageComposer } from "@/app/experience/MessageComposer";
 import { TypingIndicator } from "@/app/experience/TypingIndicator";
 import { CompletionPopup } from "@/app/experience/CompletionPopup";
@@ -35,7 +35,7 @@ export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose,
   const [turns, setTurns] = useState<DialogueTurn[]>([]);
   const [composerText, setComposerText] = useState("");
   const [isPending, setIsPending] = useState(false);
-  const [draft, setDraft] = useState<{ text: string; angleLabel: string } | null>(null);
+  const [draft, setDraft] = useState<DialogueDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCompletion, setShowCompletion] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -56,8 +56,8 @@ export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose,
         null,
       );
       setTurns(result.turns);
-      if (result.status === "ready" && result.draftText) {
-        setDraft({ text: result.draftText, angleLabel: result.angleLabel ?? "" });
+      if (result.status === "ready" && result.drafts[0]) {
+        setDraft(result.drafts[0]);
         setStep("confirming");
       }
     } catch (e) {
@@ -80,8 +80,8 @@ export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose,
         reply,
       );
       setTurns(result.turns);
-      if (result.status === "ready" && result.draftText) {
-        setDraft({ text: result.draftText, angleLabel: result.angleLabel ?? "" });
+      if (result.status === "ready" && result.drafts[0]) {
+        setDraft(result.drafts[0]);
         setStep("confirming");
       }
     } catch (e) {
@@ -109,7 +109,14 @@ export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose,
       }
       const result = await commitNewAchievementAction({
         entryId,
-        drafts: [{ text, angleLabel: draft.angleLabel || "JD 缺口挖掘" }],
+        // 收斂後檢查過、使用者沒再改：直接算通過（跟經歷資料庫的「跟 AI 聊」一樣）。
+        drafts: [
+          {
+            text,
+            angleLabel: draft.angleLabel || "JD 缺口挖掘",
+            reviewed: draft.checkedText !== undefined && draft.text === draft.checkedText,
+          },
+        ],
         sourceLabel: "JD 缺口挖掘",
       });
       setShowCompletion(
@@ -182,6 +189,13 @@ export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose,
                 value={draft.text}
                 onChange={(e) => setDraft({ ...draft, text: e.target.value })}
               />
+              {/* 檢查後還缺數字：跟經歷資料庫的確認畫面同一套提醒。使用者自己改過文字就不顯示。 */}
+              {draft.missingEvidence && draft.text === draft.checkedText && (
+                <p className="elicitation-draft-hint">
+                  <span className="flag-rule-tag">缺數字或成果</span>
+                  {draft.missingEvidence}有的話按「還要調整」補，真的沒有就直接加進履歷。
+                </p>
+              )}
               <div className="elicitation-option-list">
                 <button type="button" className="btn btn-primary" disabled={isPending} onClick={handleConfirm}>
                   加進履歷

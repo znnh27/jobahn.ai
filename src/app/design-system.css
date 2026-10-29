@@ -2588,9 +2588,24 @@
   align-items: flex-start;
   gap: var(--space-1);
 }
+.elicitation-draft-body {
+  flex: 1;
+  min-width: 0;
+}
 .elicitation-draft .textarea {
   margin-top: 0;
-  flex: 1;
+  width: 100%;
+}
+/* 檢查後還缺數字或成果的提醒：標籤＋一句建議，中性色、不搶草稿本身。 */
+.elicitation-draft-hint {
+  margin-top: var(--space-1);
+  font-size: var(--font-xs);
+  line-height: 1.6;
+  color: var(--chrome-muted);
+}
+.elicitation-draft-hint .flag-rule-tag {
+  margin-right: var(--space-1);
+  cursor: default;
 }
 
 .elicitation-option-list {

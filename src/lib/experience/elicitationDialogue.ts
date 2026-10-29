@@ -6,6 +6,7 @@ import { toTraditional } from "@/lib/text/toTraditional";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { addCjkSpacing } from "@/lib/text/cjkSpacing";
 import { BULLET_EXAMPLE, BULLET_RULES, stripRuleRefs } from "./bulletRules";
+import { checkBullets } from "./checkBullets";
 
 // Phase 2.5：AI 問答挖掘的共用對話引擎。使用者可能只有一段很籠統的描述，這個引擎透過
 // 多輪對話把內容問成符合 bulletRules.ts 的專業寫法，最多問 10 輪，
@@ -39,6 +40,12 @@ export interface DialogueContext {
 export interface DialogueDraft {
   text: string;
   angleLabel: string;
+  /** 使用者在對話裡明確說過這件沒有數字。檢查就不再標「缺數字或成果」。 */
+  noMetric?: boolean;
+  /** 收斂後檢查過的文字。使用者沒改過（text 還等於它）就直接算通過，存進資料庫後下次檢查不再標。 */
+  checkedText?: string;
+  /** 檢查後還缺數字或成果（光靠改寫補不了），顯示在確認畫面上。 */
+  missingEvidence?: string;
 }
 
 export interface DialogueStepResult {
@@ -62,25 +69,31 @@ ${BULLET_EXAMPLE}
    - 有「這條被標記的問題」時，改寫一定要先解決那個問題（例如被標記流水帳，就要真的只留一個成果、刪掉過程）。
    - 既有內容的事實已經夠寫出合格的一條，就**第一輪直接給改寫版本**（status 設成 "ready"），message 用一兩句話說明改了什麼、為什麼，不用先問問題也不用先確認理解。
    - 只有缺了規則 4 要的數字或具體結果，才先問一個問題補資訊。
-3. 全新的經歷（沒有既有內容）：依序優先問 (a) 量化數字 (b) 規模/角色 (c) 結果/影響，跳過使用者已經提供的部分。收斂前先用一句話重述你的理解，問「這樣理解對嗎」，使用者確認了才把 status 設成 "ready"。
+3. 全新的經歷（沒有既有內容）：每件事依序問 (a) 數字跟比較基準（改之前是多少、多久內做到）(b) 成果看不出為什麼重要時，問當時遇到什麼問題 (c) 規模、自己負責哪一塊、跟哪些團隊合作，跳過使用者已經提供的部分。收斂前先用一句話重述你的理解，問「這樣理解對嗎」，使用者確認了才把 status 設成 "ready"。
    - 使用者講了好幾件不同的事（不同專案、不同成果），一件事寫成一條，條數不設上限；同一件事不要拆成好幾條湊數，也不要把好幾件事硬塞成一條。
-   - 有好幾件事時，追問一樣一次一題，先問最缺數字或成果的那件；同一件問兩次還問不到，就用規模或頻率寫，換下一件。
+   - 有好幾件事時，追問一樣一次一題，先問最缺數字或成果的那件。
    - 有好幾件事時，重述理解要條列出「我會寫成這幾點」，每點一句話，讓使用者一次確認。
+   - 重述時，還沒有數字的那幾件要點出來（例如「第 2 點還沒有數字，有的話可以補，真的沒有也沒關係」）。
+3-2. 沒有數字時的處理（潤飾、全新經歷、JD 缺口都適用）：
+   - 每件事至少問過一次數字，不能為了趕快收斂跳過，也不能自己判斷「應該沒有」就不問。
+   - 使用者明確說沒有數字（例如「沒有統計」「不記得」「沒有也沒關係」），就改問一次替代證據：做完之後有沒有誰開始用、流程有沒有變、是不是第一次有、有沒有被主管或客戶認可。
+   - 替代證據也沒有，就寫清楚具體做了什麼（產出物、對象、範圍），不硬湊、不編數字。
+   - drafts 裡每一條的 noMetric：使用者明確說過這件沒有數字才是 true；AI 沒問過、或使用者沒回答的都是 false。
 3-1. 有「這次特別想補強的 JD 要求」時（JD 缺口挖掘）：
    - 有「缺口分析」的話，只挖缺口分析指出缺的那一項。缺口分析裡說已經有經歷佐證的能力，一律不要再問，也不要把它們寫成這條的重點。
    - 第一句話先用一兩句白話講清楚：這項要求還缺什麼、什麼樣的經歷可以補（缺口分析有建議就照它的方向），接著問一個只針對這個缺口的問題，例如請使用者想一次具體的經驗。不要泛泛地問使用者有沒有這些能力。
    - 寫出來的這條要讓人一眼看出那個缺的能力。例如缺邏輯思維，就寫出「遇到什麼問題 → 怎麼拆解或分析 → 得出什麼結論或結果」；缺數據能力，就寫出用了什麼資料、得出什麼判斷。
    - 沒有缺口分析時，就針對 JD 要求整體來問。
-4. 最多問 10 輪，通常 2-4 輪就該收斂，資訊夠了就儘早結束，不要為了湊題數硬問。
+4. 最多問 10 輪。輪數只是參考，不是目標：每件事都照 3-2 問過數字才能收斂；資訊夠了就儘早結束，不要為了湊題數硬問。
 5. status 是 "ready" 時，drafts 裡每一條的 text 都必須逐條符合上面的寫作規則，寫完先自己檢查一遍；好幾條的話動詞不要重複。angleLabel 是一句話描述這條強調的重點（例如「強調數據分析成果」），給使用者自己參考挑選用，不會出現在正式履歷裡。
 6. message 一律用繁體中文（台灣用語），絕對不要出現簡體字。drafts 的語言跟既有內容相同；全新經歷則依使用者回覆的語言，中文一律繁體。
-7. 不要編造使用者沒提過的具體數字或事實；真的問不到數字，用範圍/頻率/規模代替。
+7. 不要編造使用者沒提過的具體數字或事實；真的問不到數字，照 3-2 處理。
 8. 使用者看不到上面的寫作規則清單，message 裡不要提「規則 1」「規則 10」這類編號，直接用白話講。
 9. ${REMEMBER_RULE}（「已記住：…」寫在 message 裡）
 10. 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。
 
 輸出格式：
-{ "status": "asking" | "ready", "message": string, "drafts": [{ "text": string, "angleLabel": string }] | null, "remember": string[] }
+{ "status": "asking" | "ready", "message": string, "drafts": [{ "text": string, "angleLabel": string, "noMetric": boolean }] | null, "remember": string[] }
 status 是 "asking" 時 drafts 給 null。`;
 
 export async function stepElicitation(params: {
@@ -89,8 +102,10 @@ export async function stepElicitation(params: {
   context: DialogueContext;
   turns: DialogueTurn[];
   userReply: string | null;
+  /** 使用者關掉的提醒類別，收斂後的檢查不標這幾類。 */
+  mutedRules?: Set<string>;
 }): Promise<DialogueStepResult> {
-  const { supabase, userId, context, turns, userReply } = params;
+  const { supabase, userId, context, turns, userReply, mutedRules } = params;
 
   const updatedTurns: DialogueTurn[] = userReply
     ? [...turns, { role: "user", text: userReply }]
@@ -129,12 +144,14 @@ export async function stepElicitation(params: {
   const drafts = readDrafts(parsed);
   // 潤飾、JD 缺口只能放一條，AI 萬一給了好幾條就只取第一條。
   const singleOnly = Boolean(context.seedText || context.jdContext);
-  const finalDrafts = singleOnly ? drafts.slice(0, 1) : drafts;
+  const ready = parsed.status === "ready" && drafts.length > 0;
+  const picked = singleOnly ? drafts.slice(0, 1) : drafts;
+  const finalDrafts = ready ? await reviewDrafts({ supabase, userId, drafts: picked, mutedRules }) : picked;
 
   return {
     turns: [...updatedTurns, { role: "assistant", text: polish(stripRuleRefs(parsed.message)) }],
     // 說 ready 卻沒給任何一條，就當成還在問，不要讓畫面跳到空白的確認畫面。
-    status: parsed.status === "ready" && finalDrafts.length > 0 ? "ready" : "asking",
+    status: ready ? "ready" : "asking",
     drafts: finalDrafts,
     draftText: finalDrafts[0]?.text ?? null,
     angleLabel: finalDrafts[0]?.angleLabel ?? null,
@@ -166,7 +183,31 @@ function readDrafts(parsed: RawResponse): DialogueDraft[] {
     const text = typeof d?.text === "string" ? polish(d.text).trim() : "";
     if (!text) return [];
     const angleLabel = typeof d?.angleLabel === "string" ? toTraditional(d.angleLabel) : "";
-    return [{ text, angleLabel }];
+    return [{ text, angleLabel, noMetric: d?.noMetric === true }];
+  });
+}
+
+/** AI 說 ready 之後，用共用的檢查（checkBullets.ts）再檢查一次草稿：寫法問題換成改寫，缺數字標在草稿上。
+ * 檢查失敗不擋流程，照原本的草稿給。 */
+async function reviewDrafts(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  drafts: DialogueDraft[];
+  mutedRules?: Set<string>;
+}): Promise<DialogueDraft[]> {
+  const { supabase, userId, drafts, mutedRules } = params;
+  const results = await checkBullets({
+    supabase,
+    userId,
+    feature: "experience_elicitation_check",
+    items: drafts,
+    mutedRules,
+  });
+  if (!results) return drafts;
+  return drafts.map((d, i) => {
+    const text = polish(results[i].text).trim();
+    const hint = results[i].missingEvidence;
+    return { ...d, text, checkedText: text, missingEvidence: hint ? polish(hint) : undefined };
   });
 }
 

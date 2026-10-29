@@ -68,6 +68,9 @@ const MEMORY_FEATURES = new Set([
   "cover_letter_chat",
   "experience_elicitation",
   "experience_bulk_scan",
+  // 「跟 AI 聊」寫完後的檢查（checkBullets.ts），跟整份檢查一樣要看「AI 記住的事」。
+  "experience_elicitation_check",
+  "resume_chat_check",
   "experience_quality_check",
   "background_interview",
   // 校稿要拿「AI 記住的事」對照事實（例如已經離職卻寫成目前任職）。

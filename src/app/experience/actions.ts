@@ -390,7 +390,8 @@ export async function stepElicitationAction(
   } = await supabase.auth.getUser();
   if (!user) throw new Error("請先登入");
 
-  return stepElicitation({ supabase, userId: user.id, context, turns, userReply });
+  const mutedRules = await loadMutedRules(supabase, user.id);
+  return stepElicitation({ supabase, userId: user.id, context, turns, userReply, mutedRules });
 }
 
 export async function quickQualityCheckAction(orgName: string, role: string, text: string) {
@@ -416,7 +417,8 @@ export async function commitNewAchievementAction(params: {
     entryType: "work" | "leadership";
     language: "zh" | "en";
   };
-  drafts: { text: string; angleLabel: string }[];
+  /** reviewed：AI 問答收斂後檢查過、使用者沒再改的寫法，存成已通過，下次檢查不再標。 */
+  drafts: { text: string; angleLabel: string; reviewed?: boolean }[];
   sourceLabel?: string;
 }): Promise<CommitResult> {
   const supabase = await createClient();
@@ -429,7 +431,14 @@ export async function commitNewAchievementAction(params: {
   if (drafts.length === 0) return { error: "沒有要新增的內容" };
   const newAchievements = drafts.map((d) => ({
     id: `ach_${Math.random().toString(36).slice(2, 10)}`,
-    variants: [{ text: d.text, angleLabel: d.angleLabel, source: params.sourceLabel ?? "手動新增" }],
+    variants: [
+      {
+        text: d.text,
+        angleLabel: d.angleLabel,
+        source: params.sourceLabel ?? "手動新增",
+        ...(d.reviewed ? { reviewedText: d.text } : {}),
+      },
+    ],
   }));
 
   let resultEntryId: string;

@@ -265,7 +265,12 @@ export function ElicitationPanel({
                   entryType: newEntryFields.entryType,
                   language: newEntryFields.language,
                 },
-            drafts: drafts.map((d) => ({ text: d.text, angleLabel: d.angleLabel || "手動新增" })),
+            drafts: drafts.map((d) => ({
+              text: d.text,
+              angleLabel: d.angleLabel || "手動新增",
+              // 收斂後檢查過、使用者沒再改：直接算通過。還缺數字的也一樣，看過提醒還是確認，就是使用者背書了。
+              reviewed: d.checkedText !== undefined && d.text === d.checkedText,
+            })),
           });
 
       if (result.error) {
@@ -440,7 +445,7 @@ export function ElicitationPanel({
               ))}
 
               {step === "dialogue" && turns.length === 0 && !isPending && (
-                <ChatBubble role="assistant">最多問 10 題，通常 2-4 題就能問完。</ChatBubble>
+                <ChatBubble role="assistant">最多問 10 題，每件事都問到成果就會收尾。</ChatBubble>
               )}
 
               {vagueSuggestion && step === "typing_self" && (
@@ -478,14 +483,23 @@ export function ElicitationPanel({
                   </p>
                   {drafts.map((d, i) => (
                     <div key={i} className="elicitation-draft">
-                      <textarea
-                        className="textarea"
-                        rows={drafts.length > 1 ? 3 : 4}
-                        value={d.text}
-                        onChange={(e) =>
-                          setDrafts((prev) => prev.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))
-                        }
-                      />
+                      <div className="elicitation-draft-body">
+                        <textarea
+                          className="textarea"
+                          rows={drafts.length > 1 ? 3 : 4}
+                          value={d.text}
+                          onChange={(e) =>
+                            setDrafts((prev) => prev.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))
+                          }
+                        />
+                        {/* 檢查後還缺數字：提醒可以補什麼。使用者自己改過文字就不顯示（可能已經補了）。 */}
+                        {d.missingEvidence && d.text === d.checkedText && (
+                          <p className="elicitation-draft-hint">
+                            <span className="flag-rule-tag">缺數字或成果</span>
+                            {d.missingEvidence}有的話按「還要調整」補，真的沒有就直接確認。
+                          </p>
+                        )}
+                      </div>
                       {drafts.length > 1 && (
                         <button
                           type="button"
