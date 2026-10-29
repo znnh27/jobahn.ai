@@ -202,8 +202,8 @@ export interface JdChecklistItem {
   invalid?: boolean | null;
   /** 沒完全符合、但有相關條件撐著（科系要求、使用者有輔修；或一項綁好幾個條件、做到一半以上），算一半分數。 */
   partial?: boolean | null;
-  /** 工作條件：使用者回答能不能配合。null＝還沒回答。 */
-  answer?: "yes" | "no" | null;
+  /** 工作條件：使用者回答能不能配合。null＝還沒回答；skip＝這份應徵先略過（不寫進履歷、不存進帳號紀錄，2026-10-29 Z 要求）。 */
+  answer?: "yes" | "no" | "skip" | null;
   /** 求職信對照（cover_letter_checklist）裡靠信補上的項目：信裡對應的那一句原文，句子沒變就不重新判斷（見 judgeLetterChecklist）。
    *  履歷對照裡是舊版格式留下來的欄位，現在不產生也不顯示。不顯示在畫面上。 */
   evidence?: string | null;
@@ -402,7 +402,7 @@ ${COVERAGE_RULES}
 
 只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。輸出格式（嚴格遵守）：
 {
-  "jd_match_checklist": [{ "item": string, "importance": "required"|"preferred", "kind": "requirement"|"trait"|"condition", "covered": boolean, "partial": boolean, "source": "resume"|null, "gap": string|null, "answer": "yes"|"no"|null }]
+  "jd_match_checklist": [{ "item": string, "importance": "required"|"preferred", "kind": "requirement"|"trait"|"condition", "covered": boolean, "partial": boolean, "source": "resume"|null, "gap": string|null, "answer": "yes"|"no"|"skip"|null }]
 }`;
 
 type Resume = GeneratedResume["resume"];
@@ -553,7 +553,10 @@ function lockItems(
       gap,
       // 硬實力判定沒寫到卻說不出缺什麼：判斷有問題，不算進分數，請使用者重新評分。
       invalid: kind === "requirement" && !covered && !gap,
-      answer: kind === "condition" && (item.answer === "yes" || item.answer === "no") ? item.answer : null,
+      answer:
+        kind === "condition" && (item.answer === "yes" || item.answer === "no" || item.answer === "skip")
+          ? item.answer
+          : null,
     };
   };
   const byItem = new Map(fresh.map((i) => [i.item.trim(), i]));
@@ -690,6 +693,39 @@ ${SUMMARY_RULES}
  * - 可以配合：每個語言的摘要補一句，存成新草稿再重新評分（只有摘要改了，其他項目沿用上次的判斷）。
  * - 無法配合：這一項標成已回答，不動履歷、不重新評分。
  */
+/** 工作條件按「略過」，或略過之後按「重新回答」：只改這份應徵的清單，不存進帳號紀錄、不動履歷，也不用重新評分（工作條件在履歷頁不算分）。 */
+export async function setWorkConditionSkipped(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  applicationId: string;
+  item: string;
+  skipped: boolean;
+}): Promise<void> {
+  const { supabase, userId, applicationId, item, skipped } = params;
+  const { data: application } = await supabase
+    .from("applications")
+    .select("jd_match_checklist")
+    .eq("id", applicationId)
+    .eq("user_id", userId)
+    .single();
+  if (!application) throw new Error("找不到這筆應徵紀錄");
+
+  const key = item.trim();
+  const checklists: Record<string, JdChecklistItem[]> = application.jd_match_checklist ?? {};
+  const next = Object.fromEntries(
+    Object.entries(checklists).map(([lang, items]) => [
+      lang,
+      items.map((i) => (i.item.trim() === key ? { ...i, answer: skipped ? ("skip" as const) : null } : i)),
+    ]),
+  );
+  const { error } = await supabase
+    .from("applications")
+    .update({ jd_match_checklist: next })
+    .eq("id", applicationId)
+    .eq("user_id", userId);
+  if (error) throw new Error(`儲存失敗：${error.message}`);
+}
+
 export async function answerWorkCondition(params: {
   supabase: SupabaseClient;
   userId: string;

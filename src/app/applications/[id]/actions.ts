@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
   answerWorkCondition,
+  setWorkConditionSkipped,
   generateResumeForApplication,
   rescoreResumeForApplication,
   reviseResumeWithChat,
@@ -206,6 +207,30 @@ export async function answerWorkConditionAction(
         ats_gaps: fresh.ats_gaps,
       },
     };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "儲存失敗，請再試一次" };
+  }
+}
+
+/** 工作條件按「略過」或「重新回答」：只改這份應徵的清單，不呼叫 AI。 */
+export async function skipWorkConditionAction(
+  applicationId: string,
+  item: string,
+  skipped: boolean,
+): Promise<{ error?: string; jd_match_checklist?: ChecklistMap }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    await setWorkConditionSkipped({ supabase, userId: user.id, applicationId, item, skipped });
+    const fresh = await fetchApplicationScoringFields(supabase, user.id, applicationId);
+    revalidatePath(`/applications/${applicationId}`);
+    revalidatePath(`/applications/${applicationId}/cover-letter`);
+    if (!fresh) return { error: "儲存後讀取結果失敗" };
+    return { jd_match_checklist: fresh.jd_match_checklist };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "儲存失敗，請再試一次" };
   }

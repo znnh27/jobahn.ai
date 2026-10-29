@@ -31,6 +31,7 @@ export function JdChecklist({
   language,
   onDig,
   onAnswerCondition,
+  onSkipCondition,
   onAddToLetter,
 }: {
   items: JdChecklistItem[];
@@ -44,6 +45,8 @@ export function JdChecklist({
   /** 「讓 AI 幫你挖掘這段經驗」：連同缺口分析一起給，對話才會只挖缺的那一項。 */
   onDig?: (item: string, gap: string | null) => void;
   onAnswerCondition?: (item: string, willing: boolean) => void;
+  /** 工作條件按「略過」（skipped＝true）或略過後按「重新回答」（false）。 */
+  onSkipCondition?: (item: string, skipped: boolean) => void;
   /** 求職信頁「補充進求職信」：把這幾項補進信裡。 */
   onAddToLetter?: (items: JdChecklistItem[]) => void;
 }) {
@@ -203,11 +206,17 @@ export function JdChecklist({
                   {item.item}
                   {!ok && item.answer === "no" && <span className="ats-check-tag">無法配合</span>}
                   {!ok && item.answer === "yes" && <span className="ats-check-tag">可以配合</span>}
+                  {!ok && item.answer === "skip" && <span className="ats-check-tag">已略過</span>}
                 </p>
                 {!ok && onAnswerCondition && !item.answer && (
                   <div className="ats-check-answer">
                     <span className="ats-check-answer-label">這個條件你可以配合嗎？</span>
                     <div className="btn-wrapper">
+                      {onSkipCondition && (
+                        <button type="button" className="btn btn-secondary" onClick={() => onSkipCondition(item.item, true)}>
+                          略過
+                        </button>
+                      )}
                       <button type="button" className="btn btn-secondary" onClick={() => onAnswerCondition(item.item, false)}>
                         無法配合
                       </button>
@@ -220,6 +229,11 @@ export function JdChecklist({
                 {!ok && onAnswerCondition && item.answer === "no" && (
                   <button type="button" className="link-muted ats-check-dig" onClick={() => onAnswerCondition(item.item, true)}>
                     改成可以配合
+                  </button>
+                )}
+                {!ok && onSkipCondition && item.answer === "skip" && (
+                  <button type="button" className="link-muted ats-check-dig" onClick={() => onSkipCondition(item.item, false)}>
+                    重新回答
                   </button>
                 )}
               </div>

@@ -7,6 +7,7 @@ import {
   generateAction,
   rescoreAction,
   answerWorkConditionAction,
+  skipWorkConditionAction,
   saveDraftAction,
   finalizeResumeAction,
   reopenResumeAction,
@@ -575,8 +576,21 @@ export function Canvas({
         setCanvasVersion((v) => v + 1);
         setMessage("摘要補上了這個條件，也重新評分了；不滿意可以按「上一步」");
       } else {
-        setMessage("記下來了，之後的職缺遇到同樣的條件不會再問");
+        setMessage("記下來了，這項不會寫進履歷");
       }
+    });
+  }
+
+  // 工作條件「略過」／「重新回答」：只改這份應徵的清單，不呼叫 AI、不動履歷。
+  function handleSkipCondition(item: string, skipped: boolean) {
+    setMessage(null);
+    void run("condition", async () => {
+      const result = await skipWorkConditionAction(applicationId, item, skipped);
+      if (result.error || !result.jd_match_checklist) {
+        setMessage(`錯誤：${result.error}`);
+        return;
+      }
+      setChecklist(result.jd_match_checklist);
     });
   }
 
@@ -937,6 +951,7 @@ export function Canvas({
               legacyGaps={gaps[activeLang] ?? []}
               onDig={finalized ? undefined : (item, gap) => setGapDialog({ item, gap })}
               onAnswerCondition={finalized || isPending ? undefined : handleAnswerCondition}
+              onSkipCondition={finalized || isPending ? undefined : handleSkipCondition}
             />
           </div>
         )}
