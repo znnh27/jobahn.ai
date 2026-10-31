@@ -14,6 +14,7 @@ import { MessageComposer } from "./MessageComposer";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompletionPopup } from "./CompletionPopup";
 import { TrashIcon } from "../icons";
+import { ConfirmDialog } from "../ConfirmDialog";
 
 type NewEntryFields = {
   orgName: string;
@@ -121,6 +122,8 @@ export function ElicitationPanel({
   const [turns, setTurns] = useState<DialogueTurn[]>(restored?.turns ?? []);
   const [composerText, setComposerText] = useState("");
   const [isPending, setIsPending] = useState(false);
+  /** 按了垃圾桶、等使用者確認要刪的那點。 */
+  const [pendingDelete, setPendingDelete] = useState<number | null>(null);
   // AI 問答新增經歷時，使用者一次講好幾件事會拆成好幾點；潤飾、自己打字都只有一點。
   const [drafts, setDrafts] = useState<DialogueDraft[]>(restored?.draft ? [restored.draft] : []);
   const [vagueSuggestion, setVagueSuggestion] = useState<string | null>(null);
@@ -507,7 +510,7 @@ export function ElicitationPanel({
                           aria-label="刪掉這點"
                           title="刪掉這點"
                           disabled={isPending}
-                          onClick={() => setDrafts((prev) => prev.filter((_, j) => j !== i))}
+                          onClick={() => setPendingDelete(i)}
                         >
                           <TrashIcon />
                         </button>
@@ -565,6 +568,19 @@ export function ElicitationPanel({
             onChange={setComposerText}
             onSend={() => (step === "typing_self" ? handleSelfWrite() : continueDialogue())}
             disabled={isPending}
+          />
+        )}
+        {/* 刪掉草稿前先確認（2026-10-31 Z：刪除一律先跳 popup）。放在面板裡，點確認框時才不會連帶關掉整個面板。 */}
+        {pendingDelete !== null && drafts[pendingDelete] && (
+          <ConfirmDialog
+            title="刪掉這條？"
+            message={`「${drafts[pendingDelete].text}」不會存進經歷資料庫。`}
+            confirmLabel="刪掉"
+            onConfirm={() => {
+              setDrafts((prev) => prev.filter((_, j) => j !== pendingDelete));
+              setPendingDelete(null);
+            }}
+            onCancel={() => setPendingDelete(null)}
           />
         )}
       </div>

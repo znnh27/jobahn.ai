@@ -17,7 +17,8 @@ import { checkBullets } from "./checkBullets";
 //
 // 這裡只負責「對話」本身，不負責寫回資料庫——收斂完的 drafts 交給呼叫端
 // （手動新增一段經歷、AI 潤飾既有 bullet、JD 缺口挖掘）自己決定要寫進哪個 entry/achievement。
-// 全新的經歷，使用者一次講了好幾件事就拆成好幾點；潤飾既有 bullet、JD 缺口挖掘一律只給一點。
+// 全新的經歷、JD 缺口挖掘，使用者一次講了好幾件事就拆成好幾點；潤飾既有 bullet 一律只給一點。
+// （2026-10-31 Z 在 JD 缺口一次貼了 5 條，以前只准一條，被併成一條、數字全掉。）
 
 export interface DialogueTurn {
   role: "assistant" | "user";
@@ -36,6 +37,8 @@ export interface DialogueContext {
   jdGap?: string;
   /** 從「建議加強」卡片進來潤飾時，卡片上寫的問題（這條為什麼被標記）。改寫一定要先解決這個問題。 */
   issue?: string;
+  /** 要寫成哪個語言（JD 缺口挖掘時是履歷的語言）。使用者可能中英文都貼，沒指定 AI 會照著兩種都寫。 */
+  language?: "zh" | "en";
 }
 
 export interface DialogueDraft {
@@ -58,7 +61,7 @@ export interface DialogueStepResult {
   angleLabel: string | null;
 }
 
-const SYSTEM_PROMPT = `你是履歷經歷挖掘助手。使用者想把一段經歷寫成履歷會用的專業 bullet，可能只有一段籠統的描述，也可能是一條已經寫好、但被檢查出問題的 bullet。你的工作是用最少的來回，產出符合下面規則的 bullet：潤飾既有內容、或有「這次特別想補強的 JD 要求」時只產出一條；全新的經歷依使用者講了幾件事產出一條或好幾條。
+const SYSTEM_PROMPT = `你是履歷經歷挖掘助手。使用者想把一段經歷寫成履歷會用的專業 bullet，可能只有一段籠統的描述，也可能是一條已經寫好、但被檢查出問題的 bullet。你的工作是用最少的來回，產出符合下面規則的 bullet：潤飾既有內容時只產出一條；全新的經歷、或有「這次特別想補強的 JD 要求」時，依使用者講了幾件事產出一條或好幾條。
 
 ${BULLET_RULES}
 
@@ -83,11 +86,15 @@ ${BULLET_EXAMPLE}
 3-1. 有「這次特別想補強的 JD 要求」時（JD 缺口挖掘）：
    - 有「缺口分析」的話，只挖缺口分析指出缺的那一項。缺口分析裡說已經有經歷佐證的能力，一律不要再問，也不要把它們寫成這條的重點。
    - 第一句話先用一兩句白話講清楚：這項要求還缺什麼、什麼樣的經歷可以補（缺口分析有建議就照它的方向），接著問一個只針對這個缺口的問題，例如請使用者想一次具體的經驗。不要泛泛地問使用者有沒有這些能力。
-   - 寫出來的這條要讓人一眼看出那個缺的能力。例如缺邏輯思維，就寫出「遇到什麼問題 → 怎麼拆解或分析 → 得出什麼結論或結果」；缺數據能力，就寫出用了什麼資料、得出什麼判斷。
+   - 使用者講了（或貼了）好幾件能補這個缺口的事，照規則 3 的多件事做法：一件事寫成一條，不要併成一條；收斂前條列「我會寫成這幾點」讓使用者確認，確認了才把 status 設成 "ready"。只有一件事的話不用先確認。
+   - 使用者已經給的數字跟比較基準一律保留，不能為了讓缺口能力更明顯而拿掉數字。
+   - 只寫使用者實際做過的事。使用者的做法其實不是缺口要求的那個技術或方法（例如把網頁搜尋說成 RAG），就不能套上那個名詞；缺口裡使用者做不到的部分，在 message 照實說還缺，不要硬補。
+   - 使用者貼的是已經寫好的 bullet：逐條照寫作規則檢查，合格的保留原文，不合格的只改有問題的地方，不要整條重寫。
+   - 寫出來的每一條都要讓人一眼看出那個缺的能力。例如缺邏輯思維，就寫出「遇到什麼問題 → 怎麼拆解或分析 → 得出什麼結論或結果」；缺數據能力，就寫出用了什麼資料、得出什麼判斷。
    - 沒有缺口分析時，就針對 JD 要求整體來問。
 4. 最多問 10 輪。輪數只是參考，不是目標：每件事都照 3-2 問過數字才能收斂；資訊夠了就儘早結束，不要為了湊題數硬問。
 5. status 是 "ready" 時，drafts 裡每一條的 text 都必須逐條符合上面的寫作規則，寫完先自己檢查一遍；好幾條的話動詞不要重複。angleLabel 是一句話描述這條強調的重點（例如「強調數據分析成果」），給使用者自己參考挑選用，不會出現在正式履歷裡。
-6. message 一律用繁體中文（台灣用語），絕對不要出現簡體字。drafts 的語言跟既有內容相同；全新經歷則依使用者回覆的語言，中文一律繁體。
+6. message 一律用繁體中文（台灣用語），絕對不要出現簡體字。有「要寫的語言」就照它寫，使用者同一件事給了中英兩種寫法算同一件事，只寫一條；沒有的話，drafts 的語言跟既有內容相同，全新經歷則依使用者回覆的語言。中文一律繁體。
 7. 不要編造使用者沒提過的具體數字或事實；真的問不到數字，照 3-2 處理。
 8. 使用者看不到上面的寫作規則清單，message 裡不要提「規則 1」「規則 10」這類編號，直接用白話講。
 9. ${REMEMBER_RULE}（「已記住：…」寫在 message 裡）
@@ -118,6 +125,7 @@ export async function stepElicitation(params: {
   const userPrompt = [
     `===== 這段經歷屬於 =====`,
     `${context.orgName} / ${context.role}`,
+    context.language ? `===== 要寫的語言 =====\n${context.language === "en" ? "英文" : "中文"}` : "",
     context.seedText ? `===== 已知的既有內容 =====\n${context.seedText}` : "",
     context.issue ? `===== 這條被標記的問題（改寫一定要解決）=====\n${context.issue}` : "",
     context.jdContext ? `===== 這次特別想補強的 JD 要求 =====\n${context.jdContext}` : "",
@@ -146,8 +154,8 @@ export async function stepElicitation(params: {
     });
   await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
   const drafts = readDrafts(parsed);
-  // 潤飾、JD 缺口只能放一條，AI 萬一給了好幾條就只取第一條。
-  const singleOnly = Boolean(context.seedText || context.jdContext);
+  // 潤飾只能放一條（取代原本那條），AI 萬一給了好幾條就只取第一條。
+  const singleOnly = Boolean(context.seedText);
   const ready = parsed.status === "ready" && drafts.length > 0;
   const picked = singleOnly ? drafts.slice(0, 1) : drafts;
   const finalDrafts = ready ? await reviewDrafts({ supabase, userId, drafts: picked, mutedRules }) : picked;

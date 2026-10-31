@@ -1085,10 +1085,10 @@ export function Canvas({
             })),
           ]}
           onClose={() => setGapDialog(null)}
-          onCommitBullet={(section, index, bulletText) => {
+          onCommitBullets={(section, index, bulletTexts) => {
             updateResume(activeLang, (r) => {
               const items = [...r[section]];
-              items[index] = { ...items[index], bullets: [...items[index].bullets, bulletText] };
+              items[index] = { ...items[index], bullets: [...items[index].bullets, ...bulletTexts] };
               return { ...r, [section]: items };
             });
             setCanvasVersion((v) => v + 1);
