@@ -66,8 +66,9 @@ export default async function HomePage() {
 
   const displayName = getDisplayName(user);
   // 首頁的招呼語：吉祥物、標題維持原本的大小跟置中排版，只是不再撐滿 66% 螢幕高度，下面直接接漏斗。
+  // greeting、applicationsHeader 當 props 傳進 client 元件，不給 key 的話 React 19 開發模式會誤報缺 key。
   const greeting = (
-    <div className="home-hero">
+    <div key="home-hero" className="home-hero">
       <div className="home-hero-greeting">
         {/* eslint-disable-next-line @next/next/no-img-element -- 純裝飾性的靜態吉祥物圖，不需要 next/image 的最佳化 */}
         <img
@@ -83,7 +84,7 @@ export default async function HomePage() {
     </div>
   );
   const applicationsHeader = (
-    <div className="page-header">
+    <div key="applications-header" className="page-header">
       <h2 className="heading-page">應徵紀錄</h2>
       <Link href="/applications/new" className="btn btn-primary">
         <PlusIcon />
