@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 
 // 使用者要求：同一個 achievement 底下有好幾種寫法（不同角度），如果它們共同缺的東西
 // （例如都沒有量化數字）在潤飾其中一條時被問出來了，其他條也要跟著補上這個新事實，
@@ -50,7 +51,7 @@ ${params.siblings.map((s) => `[${s.index}] (${s.angleLabel}) ${s.text}`).join("\
       .trim()
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/```\s*$/i, "");
-    const parsed = JSON.parse(cleaned) as { updates: { index: number; text: string }[] };
+    const parsed = parseAiJson(cleaned, "syncSiblingVariants") as { updates: { index: number; text: string }[] };
     return parsed.updates ?? [];
   } catch {
     return []; // 補強失敗不影響主要動作，安靜跳過

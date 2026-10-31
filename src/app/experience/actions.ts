@@ -4,6 +4,7 @@ import { activeStoredFlag, type StoredFlag } from "@/lib/experience/storedFlag";
 import { readRuleTags, stripRuleRefs } from "@/lib/experience/bulletRules";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { readLayoutSettings, type ResumeLayoutSettings } from "@/lib/resumes/typography";
 import { readBackground, splitList, type EducationItem } from "@/lib/resumes/background";
 import { ensureBackgroundLanguage } from "@/lib/resumes/translateBackground";
@@ -562,76 +563,29 @@ export async function commitRefinedVariantAction(params: {
   } = await supabase.auth.getUser();
   if (!user) return { error: "請先登入" };
 
-  const { data: row, error: readError } = await supabase
-    .from("experience_entries")
-    .select("org_name, location, language, entry_type, role_variants, period_variants, achievements")
-    .eq("id", params.entryId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (readError || !row) return { error: "找不到這個經歷區塊" };
-
-  const achievements = Array.isArray(row.achievements) ? row.achievements : [];
-  const target = achievements.find((a: { id: string }) => a.id === params.achievementId);
-  if (!target) return { error: "找不到這個成就" };
-
   // 潤飾完的寫法照規則寫過，算已經通過檢查（reviewedText 等於目前文字），下次檢查不會再標它。
-  const refined = { text: params.draftText, angleLabel: params.angleLabel, source: "AI 潤飾", reviewedText: params.draftText };
-  let newVariantIndex: number;
-  if (params.mode !== "append" && target.variants[params.variantIndex]) {
-    // 取代原本那條：原本的流水帳不留在資料庫，不然下次檢查又會被標出同樣的問題。
-    target.variants[params.variantIndex] = { ...target.variants[params.variantIndex], ...refined };
-    newVariantIndex = params.variantIndex;
-  } else {
-    target.variants.push(refined);
-    newVariantIndex = target.variants.length - 1;
-  }
-
-  // 同一個 achievement 底下的其他寫法，缺同一個新事實的話自動補上
-  const siblings = target.variants
-    .map((v: { text: string; angleLabel: string }, i: number) => ({ index: i, text: v.text, angleLabel: v.angleLabel }))
-    .filter((_: unknown, i: number) => i !== newVariantIndex);
-  if (siblings.length > 0) {
-    const { syncSiblingVariants } = await import("@/lib/experience/syncSiblingVariants");
-    const updates = await syncSiblingVariants({
-      supabase,
-      userId: user.id,
-      refinedText: params.draftText,
-      siblings,
-    });
-    for (const u of updates) {
-      if (target.variants[u.index]) target.variants[u.index].text = u.text;
-    }
-  }
-
-  const { error } = await supabase
-    .from("experience_entries")
-    .update({ achievements, updated_at: new Date().toISOString() })
-    .eq("id", params.entryId)
-    .eq("user_id", user.id);
-  if (error) return { error: error.message };
-
-  const role = row.role_variants?.[0]?.role ?? "";
-  const { syncToOtherLanguage } = await import("@/lib/experience/syncLanguage");
-  const synced = await syncToOtherLanguage({
+  const { saveRefinedVariant } = await import("@/lib/experience/saveRefinedVariant");
+  const saved = await saveRefinedVariant({
     supabase,
     userId: user.id,
-    sourceLanguage: row.language,
-    orgName: row.org_name,
-    role,
-    location: row.location ?? null,
-    period: row.period_variants?.[0]?.period ?? "",
-    entryType: row.entry_type,
+    entryId: params.entryId,
+    achievementId: params.achievementId,
     text: params.draftText,
-    sourceLabel: "AI 潤飾（雙語同步）",
+    angleLabel: params.angleLabel,
+    source: "AI 潤飾",
+    mode: params.mode === "append" ? "append" : "replace",
+    variantIndex: params.variantIndex,
+    reviewed: true,
   });
+  if (saved.error) return { error: saved.error };
 
   revalidatePath("/experience");
   return {
     success: true,
     entryId: params.entryId,
     achievementId: params.achievementId,
-    variantIndex: newVariantIndex,
-    syncedToOtherLanguage: synced !== null,
+    variantIndex: saved.variantIndex,
+    syncedToOtherLanguage: saved.syncedToOtherLanguage,
   };
 }
 
@@ -763,7 +717,7 @@ ${mutedNames.length > 0 ? `\n使用者已經關掉這幾類提醒，這幾類的
 
   let parsed: { flags: { index: number; rules?: unknown; suggestion: string; rewrite?: string | null }[] };
   try {
-    parsed = JSON.parse(cleaned) as typeof parsed;
+    parsed = parseAiJson(cleaned, "experience/actions") as typeof parsed;
   } catch {
     return { error: "AI 回傳的檢查結果不完整（可能是內容太多被截斷），請再檢查一次看看" };
   }

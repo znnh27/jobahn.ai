@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { readContact, type ResumeContact } from "@/lib/resumes/contact";
 import {
   mergeLanguageBackground,
@@ -393,7 +394,7 @@ function parseJsonResponse(text: string): MergePlanResponse {
     .replace(/```\s*$/i, "");
 
   try {
-    return JSON.parse(cleaned) as MergePlanResponse;
+    return parseAiJson(cleaned, "mergeIntoExperienceDb") as MergePlanResponse;
   } catch {
     throw new Error("AI 回傳的合併計畫不是有效的 JSON，解析失敗");
   }

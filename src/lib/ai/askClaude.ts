@@ -60,6 +60,8 @@ export interface AskClaudeResult {
 const MEMORY_FEATURES = new Set([
   "resume_generate",
   "resume_chat",
+  // 只回傳改動對不上時，退回整份重寫的那一次（resumePatch.ts）。
+  "resume_chat_full",
   "resume_condition_summary",
   "resume_fit_page",
   "resume_trim",
@@ -160,7 +162,12 @@ async function callLocalCli(params: AskClaudeParams): Promise<AskClaudeResult> {
   return {
     text: String(parsed.result ?? ""),
     provider: "local-cli",
-    inputTokens: parsed.usage?.input_tokens ?? 0,
+    // CLI 會自動用 prompt cache，input_tokens 只算沒命中快取的那一點點（以前紀錄裡幾乎都是 2），
+    // 要加上讀快取、寫快取的量才是這次真正送進去的 input。成本直接用 CLI 算好的 total_cost_usd。
+    inputTokens:
+      (parsed.usage?.input_tokens ?? 0) +
+      (parsed.usage?.cache_read_input_tokens ?? 0) +
+      (parsed.usage?.cache_creation_input_tokens ?? 0),
     outputTokens: parsed.usage?.output_tokens ?? 0,
     estimatedCostUsd:
       typeof parsed.total_cost_usd === "number" ? parsed.total_cost_usd : null,

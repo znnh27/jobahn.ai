@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { toTraditional } from "@/lib/text/toTraditional";
 import { mergeLanguageBackground, readBackground, readLanguageBackground, type LanguageBackground } from "./background";
 
@@ -54,7 +55,7 @@ export async function saveBackgroundAnswers(params: {
   );
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(cleaned);
+    parsed = parseAiJson(cleaned, "backgroundInterview");
   } catch {
     throw new Error("AI 回傳的內容不是有效的 JSON，整理失敗");
   }

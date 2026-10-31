@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { toTraditional } from "@/lib/text/toTraditional";
 import { readBackground, readLanguageBackground, type LanguageBackground, type ResumeLanguage } from "./background";
 
@@ -57,7 +58,7 @@ export async function ensureBackgroundLanguage(params: {
     .replace(/```\s*$/i, "");
   let parsed: unknown;
   try {
-    parsed = JSON.parse(language === "zh" ? toTraditional(cleaned) : cleaned);
+    parsed = parseAiJson(language === "zh" ? toTraditional(cleaned) : cleaned, "translateBackground");
   } catch {
     return target; // 翻譯失敗就維持原樣，生成時 AI 會依來源轉換規則自己處理。
   }

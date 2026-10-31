@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { normalizeJd } from "./jdChecklist";
 
 // JD 關鍵字：招募官在 ATS 裡搜尋人才是逐字比對，JD 寫 stakeholder management，
@@ -73,7 +74,7 @@ async function extractKeywords(supabase: SupabaseClient, userId: string, jd: str
   });
   let parsed: { keywords?: unknown };
   try {
-    parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
+    parsed = parseAiJson(response.text, "jdKeywords");
   } catch {
     throw new Error("AI 挑 JD 關鍵字時回傳的內容不是有效的 JSON");
   }

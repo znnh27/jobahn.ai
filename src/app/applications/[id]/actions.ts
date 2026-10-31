@@ -29,6 +29,7 @@ import { readLayoutSettings, resolveMetrics, type PdfFit, type ResumeLayoutSetti
 import { BODY_WIDTH_PT } from "@/lib/documents/ResumePdfDocument";
 import { isValidWordLimit } from "@/lib/text/letterLength";
 import { readCustomSectionLabels } from "@/lib/resumes/sectionLabels";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 
 type ResumeMap = Record<string, GeneratedResume["resume"]>;
 type ChecklistMap = Record<string, GeneratedResume["jd_match_checklist"]>;
@@ -885,9 +886,7 @@ export async function suggestTrimAction(
       temperature: 0,
       supabase,
     });
-    const parsed = JSON.parse(
-      response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
-    ) as { suggestions: Omit<TrimSuggestion, "original">[] };
+    const parsed = parseAiJson(response.text, "applications/actions") as { suggestions: Omit<TrimSuggestion, "original">[] };
 
     // 把原文補上，順便丟掉編號對不上的建議（AI 偶爾會編錯號）。
     const suggestions: TrimSuggestion[] = [];

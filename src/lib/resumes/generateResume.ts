@@ -1,10 +1,14 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { askClaudeForJson, parseAiJson } from "@/lib/ai/parseAiJson";
 import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
 import { CHAT_REPLY_FORMAT } from "@/lib/ai/chatReply";
 import { BULLET_RULES, readRuleTags, stripRuleRefs } from "@/lib/experience/bulletRules";
 import { checkBullets } from "@/lib/experience/checkBullets";
+import { addAchievement, saveRefinedVariant } from "@/lib/experience/saveRefinedVariant";
+import { after } from "next/server";
+import { applyResumePatch, isResumeShape, resumeForPatch, RESUME_PATCH_FORMAT } from "./resumePatch";
 import { ensureLanguageParity } from "@/lib/experience/languageParity";
 import { computeAtsScore, countsForResume, coveredByResume, type JdImportance } from "./atsScore";
 import { classifyJdItems, resolveJdItems, type JdBaseItem, type JdItemKind } from "./jdChecklist";
@@ -508,9 +512,7 @@ async function scoreResumeAgainstJd(params: {
       supabase: params.supabase,
     });
 
-    const parsed = JSON.parse(
-      response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
-    ) as Pick<GeneratedResume, "jd_match_checklist">;
+    const parsed = parseAiJson(response.text, "generateResume") as Pick<GeneratedResume, "jd_match_checklist">;
     items = lockItems(params.items, previousByItem, parsed.jd_match_checklist);
   }
 
@@ -1183,7 +1185,7 @@ function jdGapsSection(items: JdChecklistItem[] | undefined): string {
   });
   return [
     `===== JD 符合度清單裡還缺的項目（使用者畫面右欄看到的，以最近一次評分為準）=====`,
-    `使用者提到「JD 缺的」「還沒符合的」這類說法時，指的就是這幾項；要補強時照缺口分析的方向，只能用經歷資料庫裡有的事實，資料庫沒有的就在 reply 說明缺什麼、建議到經歷資料庫補。`,
+    `使用者提到「JD 缺的」「還沒符合的」這類說法時，指的就是這幾項；要補強時照缺口分析的方向，只能用經歷資料庫裡有的、或使用者在對話裡親口講的事實，都沒有的就在 reply 說明缺什麼、請使用者直接在對話裡告訴你。`,
     ...lines,
   ].join("\n");
 }
@@ -1227,7 +1229,7 @@ export function parseJsonResponse<T>(text: string): T {
     .replace(/```\s*$/i, "");
 
   try {
-    return JSON.parse(cleaned) as T;
+    return parseAiJson(cleaned, "generateResume") as T;
   } catch {
     throw new Error("AI 回傳的內容不是有效的 JSON，解析失敗");
   }
@@ -1240,7 +1242,8 @@ export interface ResumeChatTurn {
 
 /**
  * 履歷頁的「跟 AI 聊」：使用者用一句話說要怎麼改（例如「Northwind 那段多加兩條」「摘要改短一點」），
- * AI 照經歷資料庫的事實改這一個語言版本，回傳改好的整份履歷跟一句說明。不存檔、不重新評分，
+ * AI 照經歷資料庫跟使用者在對話裡講的事實改這一個語言版本，回傳改好的整份履歷跟一句說明。履歷不存檔、不重新評分，
+ * 對話裡講的新事實會存回經歷資料庫（learnedBullets）；
  * 改完放進畫布草稿（可以復原），使用者按「儲存」才存。
  */
 export async function reviseResumeWithChat(params: {
@@ -1264,13 +1267,14 @@ export async function reviseResumeWithChat(params: {
 
   const { data: entries } = await supabase
     .from("experience_entries")
-    .select("language, entry_type, org_name, location, role_variants, period_variants, achievements")
+    .select("id, language, entry_type, org_name, location, role_variants, period_variants, achievements")
     .eq("user_id", userId);
-  let langEntries = ((entries ?? []) as ExperienceEntryRow[]).filter((e) => e.language === language);
+  type EntryWithId = ExperienceEntryRow & { id: string };
+  let langEntries = ((entries ?? []) as EntryWithId[]).filter((e) => e.language === language);
   let sourceLanguage = language;
   if (langEntries.length === 0) {
     sourceLanguage = language === "en" ? "zh" : "en";
-    langEntries = ((entries ?? []) as ExperienceEntryRow[]).filter((e) => e.language === sourceLanguage);
+    langEntries = ((entries ?? []) as EntryWithId[]).filter((e) => e.language === sourceLanguage);
   }
 
   const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", userId).maybeSingle();
@@ -1280,48 +1284,68 @@ export async function reviseResumeWithChat(params: {
     jd: application.job_description,
     language,
     sourceLanguage,
-    entries: langEntries,
+    entries: langEntries.map(({ id: _id, ...e }) => e), // eslint-disable-line @typescript-eslint/no-unused-vars
     profile: profile?.data ?? {},
     background: withReferenceSummaries(background, profile?.data),
     confirmedConditions: confirmedConditions(application.jd_match_checklist ?? {}),
     keywords: application.jd_keywords ?? [],
   });
 
-  const response = await askClaude({
-    userId,
-    feature: "resume_chat",
-    systemPrompt: SYSTEM_PROMPT,
-    userPrompt: [
-      basePrompt,
-      jdGapsSection(application.jd_match_checklist?.[language]),
-      `===== 目前的履歷 =====`,
-      JSON.stringify({ ...resume, layout: undefined }, null, 2),
-      history.length > 0
-        ? `===== 之前的對話 =====\n${history.map((t) => `${t.role === "user" ? "使用者" : "AI"}：${t.text}`).join("\n")}`
-        : "",
-      `===== 使用者這次的要求 =====`,
-      instruction,
-      `===== 這次要做的事 =====`,
-      `- 照使用者的要求修改目前的履歷，沒被要求的地方原則上不要動。`,
-      `- 要新增內容時，只能用經歷資料庫裡有的事實（可以照寫作規則改寫）；資料庫裡沒有對應的事，就不要編，在 reply 說明缺什麼、建議到經歷資料庫補。`,
-      `- ${REMEMBER_RULE}`,
-      `- 這次的輸出格式改成：{ "reply": string, "resume": 整份履歷（格式跟上面的履歷完全一樣）, "remember": string[] }。reply 不要提「規則 N」這類編號。`,
-      CHAT_REPLY_FORMAT,
-      `- 只輸出 JSON，不要有其他文字。`,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-    maxTokens: 8000,
-    supabase,
-  });
+  type ChatResponse = {
+    reply?: string;
+    mode?: string;
+    ops?: unknown;
+    resume?: Resume | null;
+    remember?: string[];
+    learned?: unknown;
+  };
+  const ask = async (forceFull: boolean) => {
+    // 格式壞掉修不好就自動再問一次，不用使用者重送。
+    const { data: parsed } = await askClaudeForJson<ChatResponse>({
+      userId,
+      feature: forceFull ? "resume_chat_full" : "resume_chat",
+      systemPrompt: SYSTEM_PROMPT,
+      userPrompt: [
+        basePrompt,
+        jdGapsSection(application.jd_match_checklist?.[language]),
+        `===== 目前的履歷（id 只是給你指名用的）=====`,
+        JSON.stringify(resumeForPatch(resume), null, 2),
+        history.length > 0
+          ? `===== 之前的對話 =====\n${history.map((t) => `${t.role === "user" ? "使用者" : "AI"}：${t.text}`).join("\n")}`
+          : "",
+        `===== 使用者這次的要求 =====`,
+        instruction,
+        `===== 這次要做的事 =====`,
+        `- 照使用者的要求修改目前的履歷，沒被要求的地方原則上不要動。`,
+        // 2026-10-30 Z：缺數字時不要叫使用者跑去經歷資料庫，在這裡講的數字就能用（使用者親口講＝他掛保證）。
+        `- 事實來源：經歷資料庫，加上使用者在這次或之前的對話裡親口告訴你的事（例如補了一個數字、講了一件資料庫沒有的成果）。使用者親口講的可以直接寫進 bullet（可以照寫作規則改寫）；兩邊都沒有的就不要編，在 reply 說明缺什麼，請使用者直接在對話裡告訴你。`,
+        `- learned：這次寫進履歷的 bullet 用到了使用者在對話裡親口講、經歷資料庫裡沒有的事實時，每條列一筆 { "achievementId": 經歷資料庫裡講同一件事的 achievement id（資料庫沒有這件事就給 null）, "org": 這條所在經歷的公司名稱（照目前履歷上的寫）, "text": 這條 bullet 改好的全文 }，系統會存回經歷資料庫。沒用到新事實就給空陣列。`,
+        `- ${REMEMBER_RULE}`,
+        `- reply 不要提「規則 N」這類編號。`,
+        RESUME_PATCH_FORMAT,
+        forceFull ? `- 這次一定要用 full，resume 給整份履歷。` : "",
+        CHAT_REPLY_FORMAT,
+        `- 只輸出 JSON，不要有其他文字。`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      maxTokens: 8000,
+      supabase,
+    });
+    const full = parsed.mode === "full" || forceFull;
+    const revised = full ? (isResumeShape(parsed.resume) ? parsed.resume : null) : applyResumePatch(resume, parsed.ops);
+    return { parsed, revised };
+  };
 
-  const parsed = parseJsonResponse<{ reply?: string; resume?: Resume; remember?: string[] }>(response.text);
-  if (!parsed.resume) throw new Error("AI 沒有回傳改好的履歷，請換個說法再試一次");
+  // 先要 AI 只回傳改到的地方；ops 看不懂或 id 對不上，就再問一次、這次要整份（慢，但不會改錯條）。
+  let { parsed, revised } = await ask(false);
+  if (!revised) ({ parsed, revised } = await ask(true));
+  if (!revised) throw new Error("AI 沒有回傳改好的履歷，請換個說法再試一次");
   await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
-  const next = sortWorkByRecency(pinBackground(parsed.resume, background));
+  const next = sortWorkByRecency(pinBackground(revised, background));
   // 學歷 AI 本來就不能改；使用者在畫布上手動改過的話，沿用這份履歷目前的，不要被經歷資料庫的版本蓋回去。
   next.education = resume.education;
-  const checkNote = await checkChangedBullets({
+  const check = await checkChangedBullets({
     supabase,
     userId,
     before: resume,
@@ -1332,12 +1356,73 @@ export async function reviseResumeWithChat(params: {
   });
   if (language === "zh") polishChinese(next);
   next.layout = resume.layout;
+
+  // 用到使用者在對話裡講的新事實：存回經歷資料庫，下次重新產生才帶得進來。
+  // 經歷資料庫沒有這個語言（履歷是從另一個語言翻的）就不存，免得把這個語言的句子存進另一個語言的資料。
+  const toSave =
+    sourceLanguage === language ? learnedBullets(parsed.learned, langEntries, next, check.results, language) : [];
+  if (toSave.length > 0) {
+    // 補其他寫法、同步另一個語言要多花幾秒：履歷先回給使用者，存檔在回應送出後才跑。
+    after(async () => {
+      for (const item of toSave) {
+        const base = { supabase, userId, entryId: item.entryId, text: item.text, reviewed: item.reviewed };
+        const source = "履歷頁跟 AI 聊";
+        const result = item.achievementId
+          ? await saveRefinedVariant({ ...base, achievementId: item.achievementId, angleLabel: "補上成果", source, mode: "append" })
+          : await addAchievement({ ...base, angleLabel: "履歷頁補充", source });
+        if (result.error) console.error("[resume_chat] 存回經歷資料庫失敗：", result.error, item.text);
+      }
+    });
+  }
+
   const reply = stripRuleRefs(toTraditional(parsed.reply ?? "改好了。"));
-  return { reply: checkNote ? `${reply}\n\n${checkNote}` : reply, resume: next };
+  const notes = [
+    reply,
+    toSave.length > 0 ? `這次補的內容會存回經歷資料庫，之後重新產生也會帶進來。` : "",
+    check.note ?? "",
+  ].filter(Boolean);
+  return { reply: notes.join("\n\n"), resume: next };
+}
+
+/**
+ * AI 回報用到新事實的 bullet，對回經歷資料庫的位置。achievement id 對不上、公司找不到、
+ * 或這條最後沒出現在履歷裡（AI 說的跟做的不一樣）就跳過，不猜。文字用檢查、潤飾完的最終版本。
+ */
+function learnedBullets(
+  learned: unknown,
+  entries: Array<ExperienceEntryRow & { id: string }>,
+  finalResume: Resume,
+  checked: Map<string, { text: string; passed: boolean }>,
+  language: string,
+): Array<{ entryId: string; achievementId: string | null; text: string; reviewed: boolean }> {
+  if (!Array.isArray(learned)) return [];
+  const finalBullets = new Set(
+    [...(finalResume.work_experience ?? []), ...(finalResume.leadership ?? [])].flatMap((e) => e.bullets ?? []),
+  );
+  const fix = (t: string) => (language === "zh" ? addCjkSpacing(toFullWidthPunctuation(toTraditional(t))) : t);
+  const achievementsOf = (e: ExperienceEntryRow) =>
+    (Array.isArray(e.achievements) ? e.achievements : []) as Array<{ id?: string }>;
+
+  return learned.flatMap((raw: { achievementId?: unknown; org?: unknown; text?: unknown }) => {
+    const aiText = typeof raw?.text === "string" ? raw.text.trim() : "";
+    if (!aiText) return [];
+    const result = checked.get(aiText);
+    const text = fix(result?.text ?? aiText);
+    if (!finalBullets.has(text)) return [];
+
+    const achievementId = typeof raw.achievementId === "string" ? raw.achievementId : null;
+    const byAchievement = achievementId ? entries.find((e) => achievementsOf(e).some((a) => a.id === achievementId)) : null;
+    if (achievementId && !byAchievement) return [];
+    const entry =
+      byAchievement ?? entries.find((e) => typeof raw.org === "string" && normalize(e.org_name) === normalize(raw.org));
+    if (!entry) return [];
+    return [{ entryId: entry.id, achievementId, text, reviewed: result?.passed ?? false }];
+  });
 }
 
 /** 「跟 AI 聊」改完，用跟經歷資料庫同一套檢查（checkBullets.ts）檢查這次新增或改到的 bullet（2026-10-29 Z 要求全系統標準一致）。
- * 寫法問題直接換成改寫（改 after）；缺數字履歷頁補不了（只能用資料庫的事實），回傳一段提醒接在 AI 回覆後面。 */
+ * 寫法問題直接換成改寫（改 after）；缺數字改寫補不了（不能編），回傳一段提醒接在 AI 回覆後面，請使用者直接在對話裡回數字。
+ * results：檢查前的文字 → 檢查後的文字、有沒有通過，存回經歷資料庫時用。 */
 async function checkChangedBullets(params: {
   supabase: SupabaseClient;
   userId: string;
@@ -1346,15 +1431,16 @@ async function checkChangedBullets(params: {
   jd: string;
   instruction: string;
   mutedRules: Set<string>;
-}): Promise<string | null> {
+}): Promise<{ note: string | null; results: Map<string, { text: string; passed: boolean }> }> {
   const { before, after } = params;
+  const none = { note: null, results: new Map<string, { text: string; passed: boolean }>() };
   const old = new Set(
     [...(before.work_experience ?? []), ...(before.leadership ?? [])].flatMap((e) => e.bullets ?? []),
   );
   const changed = [...(after.work_experience ?? []), ...(after.leadership ?? [])].flatMap((e) =>
     (e.bullets ?? []).flatMap((text, i) => (text.trim() && !old.has(text) ? [{ entry: e, i, text }] : [])),
   );
-  if (changed.length === 0) return null;
+  if (changed.length === 0) return none;
 
   const results = await checkBullets({
     supabase: params.supabase,
@@ -1365,20 +1451,22 @@ async function checkChangedBullets(params: {
     jd: params.jd,
     instruction: params.instruction,
   });
-  if (!results) return null;
+  if (!results) return none;
 
   results.forEach((r, k) => {
     if (r.rewritten) changed[k].entry.bullets[changed[k].i] = r.text;
   });
+  const checked = new Map(changed.map((c, k) => [c.text, { text: results[k].text, passed: !results[k].missingEvidence }]));
   const rewrittenCount = results.filter((r) => r.rewritten).length;
-  const missing = results.flatMap((r) =>
-    r.missingEvidence ? [`- 「${r.text.slice(0, 14)}…」：${r.missingEvidence}`] : [],
-  );
+  const missing = results
+    .filter((r) => r.missingEvidence)
+    .map((r, k) => `${k + 1}. 「${r.text.slice(0, 14)}…」：${r.missingEvidence}`);
   const lines = [
     rewrittenCount > 0 ? `另外照寫作規則順手調整了 ${rewrittenCount} 條的寫法。` : "",
+    // 2026-10-30 Z：不要叫使用者跑去經歷資料庫補，直接在這裡回數字就好，補的會存回經歷資料庫。
     missing.length > 0
-      ? `這幾條還沒有數字或具體成果，可以到經歷資料庫用「跟 AI 聊」補，補完重新產生就會帶進來：\n${missing.join("\n")}`
+      ? `這幾條還缺數字或成果，有的話直接回我（例如「第 1 條：報名人數從 200 變 500」），我幫你補上、也存回經歷資料庫；真的沒有也可以維持現在的寫法：\n${missing.join("\n")}`
       : "",
   ].filter(Boolean);
-  return lines.length > 0 ? lines.join("\n\n") : null;
+  return { note: lines.length > 0 ? lines.join("\n\n") : null, results: checked };
 }

@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { askClaudeForJson, parseAiJson } from "@/lib/ai/parseAiJson";
 import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
 import { CHAT_REPLY_FORMAT } from "@/lib/ai/chatReply";
 import { COVERAGE_RULES, readScoreBasis, type GeneratedResume } from "./generateResume";
@@ -361,9 +362,7 @@ async function judgeLetterChecklist(params: {
       temperature: 0,
       supabase,
     });
-    const parsed = JSON.parse(
-      response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""),
-    ) as { results: { item: string; covered: boolean; evidence?: string; reason?: string }[] };
+    const parsed = parseAiJson(response.text, "generateCoverLetter") as { results: { item: string; covered: boolean; evidence?: string; reason?: string }[] };
     for (const r of parsed.results) {
       const item = r.item.trim();
       if (r.covered) {
@@ -454,7 +453,7 @@ ${COVER_LETTER_RULES}
 
 修改規則：
 1. 沒被要求的地方原則上不要動；被要求改一段，就只改那一段。
-2. 只能用履歷、JD 裡有的事實。要求加的內容資料裡沒有，就不要編，在 reply 說明缺什麼、建議怎麼補。
+2. 只能用履歷、JD 裡有的事實，加上使用者在這次或之前的對話裡親口告訴你的事（例如補了一個數字、一個作品集連結），使用者親口講的可以直接寫進信。要求加的內容都沒有，就不要編，在 reply 說明缺什麼，請使用者直接在對話裡告訴你。
 3. 信裡的 {{SIGNATURE}} 記號一字不改留在原位，系統會換成使用者的名字跟聯絡方式。
 4. 使用者要求縮短或加長時，reply 裡說明大概改成多少字。
 5. ${CHAT_REPLY_FORMAT}
@@ -497,7 +496,8 @@ export async function reviseCoverLetterWithChat(params: {
     .filter((i: Checklist[number]) => i.covered && i.source === "cover_letter")
     .map((i: Checklist[number]) => i.item);
 
-  const response = await askClaude({
+  // 格式壞掉修不好就自動再問一次，不用使用者重送。
+  const request = {
     userId,
     feature: "cover_letter_chat",
     systemPrompt: REVISE_SYSTEM_PROMPT,
@@ -520,11 +520,11 @@ export async function reviseCoverLetterWithChat(params: {
       .join("\n\n"),
     maxTokens: 3000,
     supabase,
-  });
+  };
 
   let parsed: { reply?: string; letter?: string; remember?: string[] };
   try {
-    parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
+    ({ data: parsed } = await askClaudeForJson<typeof parsed>(request));
   } catch {
     throw new Error("AI 回傳的內容不是有效的 JSON，請再試一次");
   }
@@ -651,7 +651,7 @@ export async function addItemsToCoverLetter(params: {
 
     let parsed: { letter?: string; no_example?: string[] };
     try {
-      parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
+      parsed = parseAiJson(response.text, "generateCoverLetter");
     } catch {
       throw new Error("AI 回傳的內容不是有效的 JSON，請再試一次");
     }

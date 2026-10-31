@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { toTraditional } from "@/lib/text/toTraditional";
 
 // 新增應徵的「AI 整理內容」：使用者在職缺頁全選複製、整頁貼進 JD 欄位，按按鈕後請 AI 挑出職缺本身
@@ -46,7 +47,7 @@ export async function tidyJobPage(
       temperature: 0,
       supabase: ctx.supabase,
     });
-    parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, ""));
+    parsed = parseAiJson(response.text, "tidyJobPage");
   } catch {
     return null;
   }

@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import type { JdImportance, JdItemKind } from "./atsScore";
 
 export type { JdItemKind } from "./atsScore";
@@ -144,7 +145,7 @@ async function extractJdItems(
   const cleaned = response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
   let parsed: { items?: Array<{ item?: unknown; importance?: unknown; kind?: unknown }> };
   try {
-    parsed = JSON.parse(cleaned);
+    parsed = parseAiJson(cleaned, "jdChecklist");
   } catch {
     throw new Error("AI 拆解 JD 條件時回傳的內容不是有效的 JSON");
   }
@@ -201,7 +202,7 @@ export async function classifyJdItems<T extends { item: string; kind?: JdItemKin
       supabase: params.supabase,
     });
     try {
-      const parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "")) as {
+      const parsed = parseAiJson(response.text, "jdChecklist") as {
         items?: { item?: string; kind?: string }[];
       };
       for (const r of parsed.items ?? []) {

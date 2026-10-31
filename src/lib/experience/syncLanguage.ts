@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 
 // 使用者要求：中文版跟英文版的經歷資料庫內容意思要對得上，不能各自為政——
 // 潤飾/新增某個語言的一段經歷後，自動把「另一個語言」對應的同一段經歷也更新，
@@ -102,7 +103,7 @@ ${JSON.stringify(targetSummary, null, 2)}
     angleLabel: string;
   };
   try {
-    parsed = JSON.parse(cleaned);
+    parsed = parseAiJson(cleaned, "syncLanguage");
   } catch {
     return null; // 同步失敗不應該讓主要的動作跟著失敗，安靜跳過即可
   }
@@ -224,7 +225,7 @@ ${JSON.stringify(targetSummary, null, 2)}`;
     .replace(/```\s*$/i, "");
 
   try {
-    const parsed = JSON.parse(cleaned) as {
+    const parsed = parseAiJson(cleaned, "syncLanguage") as {
       matchedEntryId: string | null;
       matchedAchievementId: string | null;
       matchedVariantIndex: number | null;

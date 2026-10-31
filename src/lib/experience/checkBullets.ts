@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { toTraditional } from "@/lib/text/toTraditional";
 import { BULLET_RULES, BULLET_RULE_TAGS, RULE_TAG_INSTRUCTIONS, readRuleTags, stripRuleRefs } from "./bulletRules";
 
@@ -73,7 +74,7 @@ ${mutedNames.length > 0 ? `\n使用者已經關掉這幾類提醒，這幾類的
       supabase,
     });
     const cleaned = response.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "");
-    const parsed = JSON.parse(cleaned) as {
+    const parsed = parseAiJson(cleaned, "checkBullets") as {
       flags?: { index: number; rules?: unknown; rewrite?: string | null; evidenceHint?: string | null }[];
     };
     const byIndex = new Map((parsed.flags ?? []).map((f) => [f.index, f]));

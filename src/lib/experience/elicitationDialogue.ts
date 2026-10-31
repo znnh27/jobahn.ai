@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { askClaudeForJson, parseAiJson } from "@/lib/ai/parseAiJson";
 import { REMEMBER_RULE, rememberNotes } from "@/lib/ai/userMemory";
 import { toTraditional } from "@/lib/text/toTraditional";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
@@ -130,16 +131,19 @@ export async function stepElicitation(params: {
     .filter(Boolean)
     .join("\n\n");
 
-  const response = await askClaude({
+  // 格式壞掉修不好就自動再問一次，不用使用者重送。
+  const parsed = await askClaudeForJson<RawResponse>({
     userId,
     feature: "experience_elicitation",
     systemPrompt: SYSTEM_PROMPT,
     userPrompt,
     maxTokens: 2000,
     supabase,
-  });
-
-  const parsed = parseJsonResponse(response.text);
+  })
+    .then((r) => r.data)
+    .catch(() => {
+      throw new Error("AI 回傳的對話內容不是有效的 JSON，解析失敗");
+    });
   await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
   const drafts = readDrafts(parsed);
   // 潤飾、JD 缺口只能放一條，AI 萬一給了好幾條就只取第一條。
@@ -211,19 +215,6 @@ async function reviewDrafts(params: {
   });
 }
 
-function parseJsonResponse(text: string): RawResponse {
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/```\s*$/i, "");
-
-  try {
-    return JSON.parse(cleaned) as RawResponse;
-  } catch {
-    throw new Error("AI 回傳的對話內容不是有效的 JSON，解析失敗");
-  }
-}
-
 /** 「已經想好了，自己寫」這條路徑用的輕量檢查：只判斷寫得夠不夠具體，不開對話。 */
 export async function quickQualityCheck(params: {
   supabase: SupabaseClient;
@@ -256,7 +247,7 @@ suggestion 只在 isVague 為 true 時給，用繁體中文一句話講清楚問
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/```\s*$/i, "");
 
-  const parsed = JSON.parse(cleaned) as { isVague: boolean; suggestion: string | null };
+  const parsed = parseAiJson(cleaned, "elicitationDialogue") as { isVague: boolean; suggestion: string | null };
   const suggestion = toTraditional(parsed.suggestion);
   return { ...parsed, suggestion: suggestion === null ? null : stripRuleRefs(suggestion) };
 }

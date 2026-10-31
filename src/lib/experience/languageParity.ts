@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { toTraditional } from "@/lib/text/toTraditional";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { addCjkSpacing } from "@/lib/text/cjkSpacing";
@@ -164,12 +165,7 @@ export async function ensureLanguageParity(params: {
     add_achievements?: { target_ref: string; achievements: { from: string; text: string; angle_label: string }[] }[];
   };
   try {
-    plan = JSON.parse(
-      response.text
-        .trim()
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/```\s*$/i, ""),
-    );
+    plan = parseAiJson(response.text, "languageParity");
   } catch {
     return none;
   }
