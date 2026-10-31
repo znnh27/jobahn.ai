@@ -138,6 +138,35 @@ export function applyResumePatch(resume: Resume, ops: unknown): Resume | null {
   };
 }
 
+/**
+ * AI 有送出修改（ops 不是空的，或回傳整份），改完的內容卻跟原本一模一樣：等於沒改，回覆卻會說「改好了」。
+ * 2026-10-31 實測：經歷資料庫裡同一件事存了長短兩版，履歷上已經是短版，使用者說「縮短」，
+ * AI 把長版當成原文，回傳的「縮短版」就是履歷上那條，畫面沒變卻回「縮短了」。
+ * 只比 AI 能改的部分（摘要、經歷、技能、語言），學歷、排版不算。
+ */
+export function isNoopRevision(before: Resume, after: Resume, mode: "patch" | "full", ops: unknown): boolean {
+  if (mode === "patch" && (!Array.isArray(ops) || ops.length === 0)) return false;
+  return JSON.stringify(resumeForPatch(before)) === JSON.stringify(resumeForPatch(after));
+}
+
+/** 沒改到的那幾個 op 指到的原文，再問 AI 一次時附上，讓它知道要以哪段文字為基礎改。 */
+export function noopTargets(resume: Resume, ops: unknown): string[] {
+  if (!Array.isArray(ops)) return [];
+  const bullets = new Map(
+    [...resumeForPatch(resume).work_experience, ...resumeForPatch(resume).leadership].flatMap((e) =>
+      e.bullets.map((b) => [b.id, b.text] as const),
+    ),
+  );
+  return (ops as Record<string, unknown>[]).flatMap((op) => {
+    if (op?.op === "replace" && typeof op.id === "string" && bullets.has(op.id.trim())) {
+      return [`${op.id.trim()} 目前是「${bullets.get(op.id.trim())}」`];
+    }
+    if (op?.op === "summary") return [`摘要目前是「${resume.summary}」`];
+    if (op?.op === "skills") return [`技能目前是「${(resume.skills ?? []).join(", ")}」`];
+    return [];
+  });
+}
+
 /** AI 回傳整份履歷時的基本檢查：經歷是陣列、bullet 是字串（AI 偶爾會把上面帶 id 的格式照抄回來）。 */
 export function isResumeShape(value: unknown): value is Resume {
   const r = value as Resume | null;

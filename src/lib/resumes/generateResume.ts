@@ -8,7 +8,7 @@ import { BULLET_RULES, readRuleTags, stripRuleRefs } from "@/lib/experience/bull
 import { checkBullets } from "@/lib/experience/checkBullets";
 import { addAchievement, saveRefinedVariant } from "@/lib/experience/saveRefinedVariant";
 import { after } from "next/server";
-import { applyResumePatch, isResumeShape, resumeForPatch, RESUME_PATCH_FORMAT } from "./resumePatch";
+import { applyResumePatch, isNoopRevision, isResumeShape, noopTargets, resumeForPatch, RESUME_PATCH_FORMAT } from "./resumePatch";
 import { ensureLanguageParity } from "@/lib/experience/languageParity";
 import { computeAtsScore, countsForResume, coveredByResume, type JdImportance } from "./atsScore";
 import { classifyJdItems, resolveJdItems, type JdBaseItem, type JdItemKind } from "./jdChecklist";
@@ -1299,7 +1299,7 @@ export async function reviseResumeWithChat(params: {
     remember?: string[];
     learned?: unknown;
   };
-  const ask = async (forceFull: boolean) => {
+  const ask = async (forceFull: boolean, retryNote?: string) => {
     // 格式壞掉修不好就自動再問一次，不用使用者重送。
     const { data: parsed } = await askClaudeForJson<ChatResponse>({
       userId,
@@ -1317,6 +1317,8 @@ export async function reviseResumeWithChat(params: {
         instruction,
         `===== 這次要做的事 =====`,
         `- 照使用者的要求修改目前的履歷，沒被要求的地方原則上不要動。`,
+        // 2026-10-31：經歷資料庫有長短兩版時，AI 把長版當原文「縮短」，回傳的就是履歷上原本那條（見 resumePatch.ts 的 isNoopRevision）。
+        `- 要改的是上面「目前的履歷」裡的文字。經歷資料庫只拿來查事實，同一件事在資料庫裡可能有好幾種寫法，不要把資料庫的寫法當成要改的原文。replace、summary、skills 的內容不能跟目前的一模一樣；看過之後真的不需要改，ops 給空陣列，reply 照實說明原因，不能說已經改好。`,
         // 2026-10-30 Z：缺數字時不要叫使用者跑去經歷資料庫，在這裡講的數字就能用（使用者親口講＝他掛保證）。
         `- 事實來源：經歷資料庫，加上使用者在這次或之前的對話裡親口告訴你的事（例如補了一個數字、講了一件資料庫沒有的成果）。使用者親口講的可以直接寫進 bullet（可以照寫作規則改寫）；兩邊都沒有的就不要編，在 reply 說明缺什麼，請使用者直接在對話裡告訴你。`,
         `- learned：這次寫進履歷的 bullet 用到了使用者在對話裡親口講、經歷資料庫裡沒有的事實時，每條列一筆 { "achievementId": 經歷資料庫裡講同一件事的 achievement id（資料庫沒有這件事就給 null）, "org": 這條所在經歷的公司名稱（照目前履歷上的寫）, "text": 這條 bullet 改好的全文 }，系統會存回經歷資料庫。沒用到新事實就給空陣列。`,
@@ -1324,6 +1326,7 @@ export async function reviseResumeWithChat(params: {
         `- reply 不要提「規則 N」這類編號。`,
         RESUME_PATCH_FORMAT,
         forceFull ? `- 這次一定要用 full，resume 給整份履歷。` : "",
+        retryNote ?? "",
         CHAT_REPLY_FORMAT,
         `- 只輸出 JSON，不要有其他文字。`,
       ]
@@ -1334,12 +1337,23 @@ export async function reviseResumeWithChat(params: {
     });
     const full = parsed.mode === "full" || forceFull;
     const revised = full ? (isResumeShape(parsed.resume) ? parsed.resume : null) : applyResumePatch(resume, parsed.ops);
-    return { parsed, revised };
+    const noop = !!revised && isNoopRevision(resume, revised, full ? "full" : "patch", parsed.ops);
+    return { parsed, revised, noop };
+  };
+  // 先要 AI 只回傳改到的地方；ops 看不懂或 id 對不上，就再問一次、這次要整份（慢，但不會改錯條）。
+  const askRevised = async (retryNote?: string) => {
+    const first = await ask(false, retryNote);
+    return first.revised ? first : ask(true, retryNote);
   };
 
-  // 先要 AI 只回傳改到的地方；ops 看不懂或 id 對不上，就再問一次、這次要整份（慢，但不會改錯條）。
-  let { parsed, revised } = await ask(false);
-  if (!revised) ({ parsed, revised } = await ask(true));
+  let { parsed, revised, noop } = await askRevised();
+  // AI 送出了修改，改完卻跟原本一樣：附上它沒改到的原文再問一次。
+  if (noop) {
+    const targets = noopTargets(resume, parsed.ops);
+    ({ parsed, revised, noop } = await askRevised(
+      `- 注意：你上一次回傳的修改跟目前的履歷一模一樣，等於沒改${targets.length > 0 ? `（${targets.join("；")}）` : ""}。請以目前履歷上的文字為基礎，照使用者的要求修改；如果它已經符合要求、真的沒有可以改的地方，ops 給空陣列，reply 照實說明原因並問使用者想怎麼改。`,
+    ));
+  }
   if (!revised) throw new Error("AI 沒有回傳改好的履歷，請換個說法再試一次");
   await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
   const next = sortWorkByRecency(pinBackground(revised, background));
@@ -1375,7 +1389,10 @@ export async function reviseResumeWithChat(params: {
     });
   }
 
-  const reply = stripRuleRefs(toTraditional(parsed.reply ?? "改好了。"));
+  // 問了兩次還是沒改到：不能照 AI 的回覆說「改好了」。
+  const reply = noop
+    ? "我改出來的跟目前寫的一樣，所以這次沒有改到任何內容。可以說得具體一點嗎？例如想拿掉哪個部分、要縮到多短。"
+    : stripRuleRefs(toTraditional(parsed.reply ?? "改好了。"));
   const notes = [
     reply,
     toSave.length > 0 ? `這次補的內容會存回經歷資料庫，之後重新產生也會帶進來。` : "",
