@@ -6,6 +6,8 @@ import {
   answerWorkCondition,
   setWorkConditionSkipped,
   generateResumeForApplication,
+  checkResumeChatRevision,
+  type ChatRewrite,
   rescoreResumeForApplication,
   reviseResumeWithChat,
   readScoreBasis,
@@ -125,7 +127,14 @@ export async function reviseResumeAction(
   resume: GeneratedResume["resume"],
   history: ResumeChatTurn[],
   instruction: string,
-): Promise<{ error?: string; reply?: string; resume?: GeneratedResume["resume"] }> {
+): Promise<{
+  error?: string;
+  reply?: string;
+  resume?: GeneratedResume["resume"];
+  /** 有改到 bullet：畫面要接著呼叫 checkResumeChatAction 在背景檢查寫法。 */
+  needsCheck?: boolean;
+  learned?: unknown[];
+}> {
   if (!instruction.trim()) return { error: "請輸入想怎麼改" };
   const supabase = await createClient();
   const {
@@ -145,6 +154,39 @@ export async function reviseResumeAction(
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "修改失敗，請再試一次" };
+  }
+}
+
+/** 「跟 AI 聊」改完之後的寫法檢查（背景跑，見 checkResumeChatRevision）。失敗就當沒檢查，不擋使用者。 */
+export async function checkResumeChatAction(
+  applicationId: string,
+  language: string,
+  before: GeneratedResume["resume"],
+  after: GeneratedResume["resume"],
+  instruction: string,
+  learned: unknown[],
+  alsoCheck: string[] = [],
+): Promise<{ error?: string; rewrites?: ChatRewrite[]; missingNote?: string | null }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    return await checkResumeChatRevision({
+      supabase,
+      userId: user.id,
+      applicationId,
+      language,
+      before,
+      after,
+      instruction,
+      learned,
+      alsoCheck,
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "檢查失敗" };
   }
 }
 

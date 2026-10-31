@@ -2195,6 +2195,13 @@
   flex-direction: column;
   gap: var(--space-2);
 }
+/* 背景檢查進行中的狀態：不是對話泡泡，不擋輸入。 */
+.resume-chat-status {
+  font-size: var(--font-xs);
+  color: var(--chrome-muted);
+  padding: 0 var(--space-1);
+}
+
 .resume-chat-examples {
   display: flex;
   flex-direction: column;

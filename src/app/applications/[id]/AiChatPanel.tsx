@@ -27,19 +27,27 @@ export function AiChatPanel({
   /** 點了直接送出的範例要求。 */
   examples: string[];
   placeholder: string;
-  /** 送出一句要求：成功回傳 AI 的一句說明，失敗回傳 error。history 是這句之前的對話。 */
-  onSend: (instruction: string, history: ChatTurn[]) => Promise<{ error?: string; reply?: string }>;
+  /**
+   * 送出一句要求：成功回傳 AI 的一句說明，失敗回傳 error。history 是這句之前的對話。
+   * followUp：回覆之後還在背景跑的事（例如寫法檢查），跑完回傳要補的一則訊息；沒有要補、或已經被下一則訊息取代就回 null。
+   */
+  onSend: (
+    instruction: string,
+    history: ChatTurn[],
+  ) => Promise<{ error?: string; reply?: string; followUp?: Promise<string | null> }>;
   onClose: () => void;
 }) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** 還在背景跑的 followUp 數量：不擋輸入，只顯示一行狀態。 */
+  const [checking, setChecking] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [turns, pending, error]);
+  }, [turns, pending, error, checking]);
 
   async function send(text: string) {
     const instruction = text.trim();
@@ -56,6 +64,15 @@ export function AiChatPanel({
       return;
     }
     setTurns((t) => [...t, { role: "assistant", text: result.reply ?? "改好了。" }]);
+    if (result.followUp) {
+      setChecking((n) => n + 1);
+      result.followUp
+        .then((text) => {
+          if (text) setTurns((t) => [...t, { role: "assistant", text }]);
+        })
+        .catch(() => {})
+        .finally(() => setChecking((n) => n - 1));
+    }
   }
 
   return (
@@ -84,6 +101,9 @@ export function AiChatPanel({
           </div>
         ))}
         {pending && <TypingIndicator />}
+        {!pending && checking > 0 && (
+          <p className="resume-chat-status">正在依寫作規則檢查改過的條目，檢查完才能定案、校稿；可以先繼續聊…</p>
+        )}
         {error && (
           <div className="elicitation-bubble elicitation-bubble--assistant">
             <p className="text-error">{error}</p>

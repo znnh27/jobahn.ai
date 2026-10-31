@@ -41,7 +41,7 @@ import {
 import { JdGapDialog } from "./JdGapDialog";
 import { LangSwitch } from "@/app/LangSwitch";
 import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
-import type { GeneratedResume } from "@/lib/resumes/generateResume";
+import type { ChatRewrite, GeneratedResume } from "@/lib/resumes/generateResume";
 import { hasRequiredContact, type ResumeContact } from "@/lib/resumes/contact";
 import { ContactDialog } from "@/app/ContactForm";
 import { CheckIcon, CloseIcon, RedoIcon, UndoIcon } from "@/app/icons";
@@ -180,6 +180,12 @@ export function Canvas({
   const router = useRouter();
   const pathname = usePathname();
   const [draft, setDraft] = useState<ResumeMap | null>(initialDraft);
+  /** 非同步回來的結果（例如聊天的背景檢查）要讀最新的草稿，不能用當時閉包裡的 draft。 */
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  /** 「跟 AI 聊」改完的寫法檢查還在背景跑：定案、校稿、重新產生要等它跑完（不然會定案到還沒檢查的內容）。 */
+  const [chatChecking, setChatChecking] = useState(false);
+  const chatCheckingHint = chatChecking ? "正在檢查跟 AI 聊改過的條目，幾秒後就能按" : undefined;
   const [checklist, setChecklist] = useState<ChecklistMap>(initialChecklist);
   const [atsScore, setAtsScore] = useState<number | null>(initialAtsScore);
   const [gaps, setGaps] = useState<GapsMap>(initialGaps);
@@ -461,6 +467,34 @@ export function Canvas({
     setCanvasVersion((v) => v + 1);
     autoSave(nextDraft);
     setMessage("AI 改好了；不滿意可以按「上一步」");
+  }
+
+  // 「跟 AI 聊」背景檢查回來的改寫：晚幾秒才到，要用最新的草稿（draftRef），不能用送出當下的。
+  // 只換文字還是原文的那條；使用者這段時間手動改過，或正在畫布上打字，就不換。
+  function applyChatRewrites(lang: string, rewrites: ChatRewrite[]): number {
+    const current = draftRef.current;
+    if (!current?.[lang] || liveEdit.current) return 0;
+    const map = new Map(rewrites.map((r) => [r.from, r.to]));
+    let applied = 0;
+    const swap = (entries: Resume["work_experience"]) =>
+      (entries ?? []).map((e) => ({
+        ...e,
+        bullets: (e.bullets ?? []).map((b) => {
+          const to = map.get(b);
+          if (!to) return b;
+          applied++;
+          return to;
+        }),
+      }));
+    const r = current[lang];
+    const nextLang = { ...r, work_experience: swap(r.work_experience), leadership: swap(r.leadership) };
+    if (applied === 0) return 0;
+    const nextDraft = { ...current, [lang]: nextLang };
+    remember(current);
+    setDraft(nextDraft);
+    setCanvasVersion((v) => v + 1);
+    autoSave(nextDraft);
+    return applied;
   }
 
   function handleProofread() {
@@ -768,14 +802,26 @@ export function Canvas({
                 >
                   跟 AI 聊
                 </button>
-                <button type="button" onClick={() => setConfirmRegenerate(true)} disabled={isPending} className="btn btn-secondary">
+                <button
+                  type="button"
+                  onClick={() => setConfirmRegenerate(true)}
+                  disabled={isPending || chatChecking}
+                  title={chatCheckingHint}
+                  className="btn btn-secondary"
+                >
                   重新產生履歷
                 </button>
-                <button type="button" onClick={handleProofread} disabled={isPending} className="btn btn-secondary">
+                <button
+                  type="button"
+                  onClick={handleProofread}
+                  disabled={isPending || chatChecking}
+                  title={chatCheckingHint}
+                  className="btn btn-secondary"
+                >
                   {busy === "proofread" && <Spinner />}
                   校稿
                 </button>
-                <button onClick={handleFinalize} disabled={isPending} className="btn btn-primary">
+                <button onClick={handleFinalize} disabled={isPending || chatChecking} title={chatCheckingHint} className="btn btn-primary">
                   定案
                 </button>
               </>
@@ -964,6 +1010,8 @@ export function Canvas({
           language={activeLang}
           resume={activeResume}
           onApply={(next) => applyChatRevision(activeLang, next)}
+          onApplyRewrites={(rewrites) => applyChatRewrites(activeLang, rewrites)}
+          onCheckingChange={setChatChecking}
           onClose={() => setChatOpen(false)}
         />
       )}
