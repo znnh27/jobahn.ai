@@ -198,6 +198,7 @@ export function ElicitationPanel({
           role: orgContext.role || refineSeed?.role || "",
           seedText: opts?.seedText,
           issue: refineSeed?.issue,
+          entryId: selectedEntryId ?? undefined,
         },
         [],
         null,
@@ -225,7 +226,13 @@ export function ElicitationPanel({
     setError(null);
     try {
       const result = await stepElicitationAction(
-        { orgName: orgContext.orgName, role: orgContext.role, seedText: refineSeed?.seedText, issue: refineSeed?.issue },
+        {
+          orgName: orgContext.orgName,
+          role: orgContext.role,
+          seedText: refineSeed?.seedText,
+          issue: refineSeed?.issue,
+          entryId: selectedEntryId ?? undefined,
+        },
         turns,
         reply,
       );

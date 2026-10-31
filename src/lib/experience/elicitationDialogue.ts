@@ -39,6 +39,8 @@ export interface DialogueContext {
   issue?: string;
   /** 要寫成哪個語言（JD 缺口挖掘時是履歷的語言）。使用者可能中英文都貼，沒指定 AI 會照著兩種都寫。 */
   language?: "zh" | "en";
+  /** 這段經歷在經歷資料庫的 id：伺服器自己讀出這段已有的成果給 AI 查，不用畫面傳內容。全新的經歷沒有。 */
+  entryId?: string;
 }
 
 export interface DialogueDraft {
@@ -69,6 +71,10 @@ ${BULLET_EXAMPLE}
 
 對話規則：
 1. 一次只問一個問題，不要一次列一堆問題，語氣自然、口語，不要生硬。
+1-1. 有「這段經歷在經歷資料庫裡已有的成果」時（使用者自己確認過的事實）：
+   - 要問數字或事實之前，先從這裡找。找得到就直接用，在 message 說「從經歷資料庫找到：…」，不要再問使用者；只有這裡也沒有的才問。
+   - 只用這段經歷裡的成果，不要把其他經歷的事寫進來。
+   - 不要說你看不到或查不到經歷資料庫。
 2. 潤飾既有內容時（有「已知的既有內容」）：
    - 有「這條被標記的問題」時，改寫一定要先解決那個問題（例如被標記流水帳，就要真的只留一個成果、刪掉過程）。
    - 既有內容的事實已經夠寫出合格的一條，就**第一輪直接給改寫版本**（status 設成 "ready"），message 用一兩句話說明改了什麼、為什麼，不用先問問題也不用先確認理解。
@@ -79,7 +85,7 @@ ${BULLET_EXAMPLE}
    - 有好幾件事時，重述理解要條列出「我會寫成這幾點」，每點一句話，讓使用者一次確認。
    - 重述時，還沒有數字的那幾件要點出來（例如「第 2 點還沒有數字，有的話可以補，真的沒有也沒關係」）。
 3-2. 沒有數字時的處理（潤飾、全新經歷、JD 缺口都適用）：
-   - 每件事至少問過一次數字，不能為了趕快收斂跳過，也不能自己判斷「應該沒有」就不問。
+   - 每件事至少問過一次數字，不能為了趕快收斂跳過，也不能自己判斷「應該沒有」就不問；經歷資料庫裡已經有這件事的數字就直接用，不用再問。
    - 使用者明確說沒有數字（例如「沒有統計」「不記得」「沒有也沒關係」），就改問一次替代證據：做完之後有沒有誰開始用、流程有沒有變、是不是第一次有、有沒有被主管或客戶認可。
    - 替代證據也沒有，就寫清楚具體做了什麼（產出物、對象、範圍），不硬湊、不編數字。
    - drafts 裡每一條的 noMetric：使用者明確說過這件沒有數字才是 true；AI 沒問過、或使用者沒回答的都是 false。
@@ -120,12 +126,14 @@ export async function stepElicitation(params: {
     : turns;
 
   const questionsAskedSoFar = updatedTurns.filter((t) => t.role === "assistant").length;
+  const known = context.entryId ? await loadEntryAchievements(supabase, userId, context.entryId) : null;
   const forceReady = questionsAskedSoFar >= 10;
 
   const userPrompt = [
     `===== 這段經歷屬於 =====`,
     `${context.orgName} / ${context.role}`,
     context.language ? `===== 要寫的語言 =====\n${context.language === "en" ? "英文" : "中文"}` : "",
+    known ? `===== 這段經歷在經歷資料庫裡已有的成果（使用者確認過的事實，先從這裡找）=====\n${known}` : "",
     context.seedText ? `===== 已知的既有內容 =====\n${context.seedText}` : "",
     context.issue ? `===== 這條被標記的問題（改寫一定要解決）=====\n${context.issue}` : "",
     context.jdContext ? `===== 這次特別想補強的 JD 要求 =====\n${context.jdContext}` : "",
@@ -168,6 +176,26 @@ export async function stepElicitation(params: {
     draftText: finalDrafts[0]?.text ?? null,
     angleLabel: finalDrafts[0]?.angleLabel ?? null,
   };
+}
+
+/**
+ * 這段經歷在資料庫裡已有的成果，一件成果一行（好幾種寫法用「／」接在一起，重複的寫法只留一次）。
+ * 2026-10-31 Z：JD 缺口挖掘問數字時，AI 說「我這邊沒有經歷資料庫可以查」，其實數字都在資料庫裡。
+ * 只讀使用者選的這一段，不給其他經歷（避免 A 公司的成果被寫進 B 公司）。
+ */
+async function loadEntryAchievements(supabase: SupabaseClient, userId: string, entryId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("experience_entries")
+    .select("achievements")
+    .eq("id", entryId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  const achievements = (Array.isArray(data?.achievements) ? data.achievements : []) as Array<{ variants?: Array<{ text?: unknown }> }>;
+  const lines = achievements.flatMap((a, i) => {
+    const texts = [...new Set((a.variants ?? []).map((v) => (typeof v.text === "string" ? v.text.trim() : "")).filter(Boolean))];
+    return texts.length > 0 ? [`${i + 1}. ${texts.join(" ／ ")}`] : [];
+  });
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 interface RawResponse {

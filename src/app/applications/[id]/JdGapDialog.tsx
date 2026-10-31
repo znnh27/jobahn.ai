@@ -35,6 +35,8 @@ type Step = "picking_section" | "dialogue" | "confirming";
 export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose, onCommitBullets }: JdGapDialogProps) {
   const [step, setStep] = useState<Step>("picking_section");
   const [picked, setPicked] = useState<SectionOption | null>(null);
+  /** 選的這段在經歷資料庫的 id：對話時 AI 會先查這段已有的成果（找不到就是 null，照舊只靠對話）。 */
+  const [entryId, setEntryId] = useState<string | null>(null);
   const [turns, setTurns] = useState<DialogueTurn[]>([]);
   const [composerText, setComposerText] = useState("");
   const [isPending, setIsPending] = useState(false);
@@ -56,8 +58,10 @@ export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose,
     setIsPending(true);
     setError(null);
     try {
+      const foundId = await findEntryIdByOrgAction(opt.org, lang);
+      setEntryId(foundId);
       const result = await stepElicitationAction(
-        { orgName: opt.org, role: opt.role, jdContext: gapText, jdGap: gapAnalysis ?? undefined, language: lang },
+        { orgName: opt.org, role: opt.role, jdContext: gapText, jdGap: gapAnalysis ?? undefined, language: lang, entryId: foundId ?? undefined },
         [],
         null,
       );
@@ -81,7 +85,7 @@ export function JdGapDialog({ gapText, gapAnalysis, language, sections, onClose,
     setComposerText("");
     try {
       const result = await stepElicitationAction(
-        { orgName: picked.org, role: picked.role, jdContext: gapText, jdGap: gapAnalysis ?? undefined, language: lang },
+        { orgName: picked.org, role: picked.role, jdContext: gapText, jdGap: gapAnalysis ?? undefined, language: lang, entryId: entryId ?? undefined },
         turns,
         reply,
       );
