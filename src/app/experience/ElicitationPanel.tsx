@@ -136,8 +136,13 @@ export function ElicitationPanel({
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [turns, step, drafts]);
 
+  // 開發模式的 StrictMode 會把這個 effect 跑兩次，開場就問了兩次 AI。server action 是排隊一個一個跑的，
+  // 第二次的回覆晚到，會把使用者已經聊到一半的對話整段換掉，之後的回答、確認也都要排在它後面
+  // （2026-11-01 錄 demo 時發生：按了確認之後，對話框換成另一段對話）。用 ref 記著，只開場一次。
+  const started = useRef(false);
   useEffect(() => {
-    if (restored) return;
+    if (restored || started.current) return;
+    started.current = true;
     if (refineSeed) {
       void startDialogue({ seedText: refineSeed.seedText });
     }
