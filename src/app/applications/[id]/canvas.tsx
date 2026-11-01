@@ -16,6 +16,7 @@ import {
   saveLayoutAction,
   proofreadResumeAction,
   dismissProofreadAction,
+  syncResumeLanguageAction,
   type TrimSuggestion,
 } from "./actions";
 import { ProofreadPanel } from "./ProofreadPanel";
@@ -99,6 +100,14 @@ type TrimPlan = { suggestions: TrimSuggestion[]; checked: boolean[] };
 const UNDO_LIMIT = 30;
 // 取捨建議最多請 AI 補幾輪（一輪不夠塞回一頁才會補下一輪）。
 const TRIM_MAX_ROUNDS = 3;
+// 一個語言停止修改幾毫秒後，同步到另一個語言。
+const SYNC_DELAY_MS = 3000;
+
+/** 只比內容，不比字級、間距（排版兩個語言各自調，不用同步）。 */
+function sameContent(a?: Resume, b?: Resume): boolean {
+  const key = (r?: Resume) => (r ? JSON.stringify({ ...r, layout: undefined }) : "");
+  return key(a) === key(b);
+}
 
 type Busy = "generate" | "rescore" | "condition" | "finalize" | "reopen" | "trim" | "proofread";
 
@@ -185,13 +194,19 @@ export function Canvas({
   draftRef.current = draft;
   /** 「跟 AI 聊」改完的寫法檢查還在背景跑：定案、校稿、重新產生要等它跑完（不然會定案到還沒檢查的內容）。 */
   const [chatChecking, setChatChecking] = useState(false);
+  const chatCheckingRef = useRef(chatChecking);
+  chatCheckingRef.current = chatChecking;
   const chatCheckingHint = chatChecking ? "正在檢查跟 AI 聊改過的條目，幾秒後就能按" : undefined;
   const [checklist, setChecklist] = useState<ChecklistMap>(initialChecklist);
   const [atsScore, setAtsScore] = useState<number | null>(initialAtsScore);
   const [gaps, setGaps] = useState<GapsMap>(initialGaps);
   const [finalized, setFinalized] = useState(initialFinalized);
+  const finalizedRef = useRef(finalized);
+  finalizedRef.current = finalized;
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [activeLang, setActiveLang] = useState(languages[0]);
+  const activeLangRef = useRef(activeLang);
+  activeLangRef.current = activeLang;
   const [message, setMessage] = useState<string | null>(null);
   // 重新檢查評分這種簡短確認不進訊息列，按鈕本身變「✓ 已重新評分」2 秒（見 useFlash）。
   const { flashed, flash } = useFlash();
@@ -253,6 +268,8 @@ export function Canvas({
   async function run(kind: Busy, fn: () => Promise<void>) {
     setBusy(kind);
     try {
+      // 還在等的中英文同步先跑完（重新產生不用等，內容會整份換掉）。
+      if (kind !== "generate") await flushSync();
       // 還沒存的修改先存完：定案、評分這些動作會讀資料庫裡的草稿，也避免晚到的存檔蓋掉 AI 剛寫好的內容。
       await autosave.flush();
       await fn();
@@ -358,6 +375,109 @@ export function Canvas({
   function autoSave(next: ResumeMap) {
     void autosave.saveNow(next);
   }
+
+  // ---- 中英文同步（2026-11-01 Z 要求兩個語言的內容一致）----
+  // 一個語言的內容變了（打字、跟 AI 聊、補充、校稿…），停 3 秒沒再動，就把同樣的修改套到另一個語言（syncResumeLanguageAction）。
+  // syncBase 記每個語言上次同步時的內容，跟它比就知道這次改了什麼。
+  // 兩個語言同時被換掉（生成、上一步／下一步、補摘要）代表兩邊本來就一致，直接當成新的基準，不同步。
+  // 同步過來的內容不另外記一步：按上一步會把兩個語言一起換回使用者改之前的樣子。
+  const pairLangs = languages.length === 2 ? languages : null;
+  const syncBase = useRef<ResumeMap | null>(initialDraft);
+  const prevDraft = useRef<ResumeMap | null>(initialDraft);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncChain = useRef<Promise<void>>(Promise.resolve());
+  const [syncStatus, setSyncStatus] = useState<{ lang: string; state: "syncing" | "done" } | null>(null);
+
+  function scheduleSync() {
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      syncTimer.current = null;
+      void queueSyncs();
+    }, SYNC_DELAY_MS);
+  }
+
+  function queueSyncs() {
+    for (const lang of pairLangs ?? []) {
+      syncChain.current = syncChain.current.then(() => runSync(lang));
+    }
+    return syncChain.current;
+  }
+
+  /** 定案、評分這類動作前：還在等的同步馬上跑，等它跑完。 */
+  function flushSync() {
+    if (!syncTimer.current) return syncChain.current;
+    clearTimeout(syncTimer.current);
+    syncTimer.current = null;
+    return queueSyncs();
+  }
+
+  async function runSync(lang: string) {
+    const other = pairLangs?.find((l) => l !== lang);
+    const base = syncBase.current;
+    const current = draftRef.current;
+    if (!other || !base?.[lang] || !base[other] || !current?.[lang] || !current[other]) return;
+    const before = base[lang];
+    const after = current[lang];
+    const target = current[other];
+    if (sameContent(before, after)) return;
+    // 正在打字、或跟 AI 聊的寫法檢查還沒跑完（它還會再改內容）：晚點再同步。
+    if (liveEdit.current || chatCheckingRef.current) {
+      scheduleSync();
+      return;
+    }
+    setSyncStatus({ lang: other, state: "syncing" });
+    const result = await syncResumeLanguageAction(lang, before, after, target).catch((e: unknown) => ({
+      error: e instanceof Error ? e.message : "同步失敗",
+      resume: undefined,
+    }));
+    const latest = draftRef.current;
+    const baseNow = syncBase.current;
+    if (finalizedRef.current || !latest?.[other] || !baseNow) {
+      setSyncStatus(null);
+      return;
+    }
+    if (result.error || !result.resume) {
+      setSyncStatus(null);
+      setMessage(`錯誤：沒有同步到${LANG_LABEL[other] ?? other}版（${result.error ?? "未知錯誤"}），下次修改時會再試一次`);
+      return;
+    }
+    // 等的期間另一個語言也被改了（或整份被換掉）：這次的結果不用，等那邊停下來再一起同步。
+    if (!sameContent(latest[other], target)) {
+      setSyncStatus(null);
+      scheduleSync();
+      return;
+    }
+    const next = { ...latest, [other]: { ...result.resume, layout: latest[other].layout } };
+    // 另一個語言自己也有還沒同步的修改時，它的基準不動，之後照常同步回來。
+    const otherInSync = sameContent(baseNow[other], target);
+    syncBase.current = { ...baseNow, [lang]: after, [other]: otherInSync ? next[other] : baseNow[other] };
+    draftRef.current = next;
+    setDraft(next);
+    if (activeLangRef.current === other) setCanvasVersion((v) => v + 1);
+    autoSave(next);
+    setSyncStatus({ lang: other, state: "done" });
+  }
+
+  useEffect(() => {
+    const prev = prevDraft.current;
+    prevDraft.current = draft;
+    if (!pairLangs || !draft || finalized) return;
+    const changed = pairLangs.filter((l) => !sameContent(prev?.[l], draft[l]));
+    if (changed.length === 0) return;
+    if (changed.length === 2 || !syncBase.current) {
+      syncBase.current = draft;
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+      syncTimer.current = null;
+      setSyncStatus(null);
+      return;
+    }
+    // 同步回來的那一份（跟基準一樣）不用再同步回去。
+    if (sameContent(draft[changed[0]], syncBase.current[changed[0]])) return;
+    setSyncStatus(null);
+    scheduleSync();
+    // 只在草稿變動時檢查；其他用到的值都從 ref 讀。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
 
   /** 換成上一步／下一步的內容：只換內容，字級跟間距維持現在的設定（排版設定是另外存的，不算一步）。 */
   function restore(target: ResumeMap) {
@@ -753,6 +873,13 @@ export function Canvas({
               </div>
             )}
             {!finalized && <SaveStatus state={autosave.state} error={autosave.error} onRetry={() => void autosave.retry()} />}
+            {!finalized && syncStatus && (
+              <span className="save-status">
+                {syncStatus.state === "syncing"
+                  ? `正在同步到${LANG_LABEL[syncStatus.lang] ?? syncStatus.lang}版…`
+                  : `已同步到${LANG_LABEL[syncStatus.lang] ?? syncStatus.lang}版`}
+              </span>
+            )}
           </div>
           <div className="canvas-bar-actions">
             {finalized ? (

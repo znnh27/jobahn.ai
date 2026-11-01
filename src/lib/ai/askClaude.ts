@@ -64,6 +64,9 @@ const MEMORY_FEATURES = new Set([
   "resume_chat_full",
   "resume_condition_summary",
   "resume_fit_page",
+  // 中英文一起生成時，照主版本改寫另一個語言；之後在一個語言改內容，同步到另一個語言（2026-11-01）。
+  "resume_mirror",
+  "resume_language_sync",
   "resume_trim",
   "cover_letter",
   "cover_letter_add",

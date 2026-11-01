@@ -64,7 +64,7 @@ const WRITING_RULES = `${BULLET_RULES}
 9. 技能區只放工具、軟體、專業技能（Figma、SQL、A/B Testing、Financial Modeling），不放「領導力、溝通能力、團隊合作、抗壓性」這類軟實力；軟實力要靠經歷裡的事實證明。`;
 
 // 英文版/中文版各自只拿自己那份，不要兩份一起塞給同一次生成。
-const EN_RULES = `英文版額外規則（一定要遵守）：
+export const EN_RULES = `英文版額外規則（一定要遵守）：
 1. 每條 bullet 用強動詞開頭（Led, Built, Launched, Redesigned, Increased 等）。弱開頭一律不用：Responsible for, Assisted, Helped, Participated in, Worked on, Served as, Acted as。
 2. 不寫 I、my、me 等第一人稱。
 3. 時態依事實：以前的工作一律過去式；現職裡持續在做的職責用現在式（Leads, Owns），已經完成的專案或成果用過去式（Rebuilt, Launched）。同一段可以混用，但不能為了時態把已完成的事改寫成持續在做（Rebuilt → Maintains 會把意思改弱，也不符合事實）。
@@ -77,7 +77,7 @@ const EN_RULES = `英文版額外規則（一定要遵守）：
 10. JD 是英文時，優先使用 JD 原字，不自己換同義詞（例如 JD 寫 stakeholder management，就不要寫成 cross-team coordination）。
 輸出前逐條自我檢查以上規則，全部符合才輸出。`;
 
-const ZH_RULES = `中文版額外規則（一定要遵守）：
+export const ZH_RULES = `中文版額外規則（一定要遵守）：
 1. bullet 用動作動詞開頭，不用「負責、參與、協助」起頭。
 2. 用中文自然的寫法，避免翻譯腔，不要寫「透過……，成功地……」「負責……的……」這種長串修飾。
 3. 專業術語、產品名、工具名保留英文（例如 A/B Test、Figma、Google Analytics）。
@@ -216,7 +216,7 @@ export interface JdChecklistItem {
 }
 
 /** 中文版的摘要跟 bullet：簡體字轉繁體、半形標點轉全形（AI 偶爾會混進來）。公司名要跟資料庫比對，不動。 */
-function polishChinese(resume: GeneratedResume["resume"]) {
+export function polishChinese(resume: GeneratedResume["resume"]) {
   const fix = (t: string) => addCjkSpacing(toFullWidthPunctuation(toTraditional(t)));
   resume.summary = fix(resume.summary ?? "");
   for (const e of [...(resume.work_experience ?? []), ...(resume.leadership ?? [])]) {
@@ -300,7 +300,13 @@ export async function generateResumeForApplication(
   const atsScores: Record<string, number> = {};
   const atsGaps: Record<string, string[]> = {};
 
+  // 中英文一起生成時（2026-11-01 Z 要求）：只有主版本（resume_language 第一個，新增應徵時使用者選的）
+  // 自己從經歷資料庫挑內容，另一個語言照主版本逐條改寫（mirrorResume），兩份內容才會一致。
+  // 以前兩個語言各自生成，挑的經歷、條數都不一樣。
+  const pairPrimary = languages.length === 2 && languages.includes("zh") && languages.includes("en") ? languages[0] : null;
+
   for (const lang of languages) {
+    if (pairPrimary && lang !== pairPrimary) continue;
     let langEntries = (entries as ExperienceEntryRow[]).filter((e) => e.language === lang);
     let sourceLanguage = lang;
     // 這個語言沒有經歷資料時，改用另一個語言的經歷重寫（中→英、英→中都要有）。
@@ -355,6 +361,30 @@ export async function generateResumeForApplication(
       entries: langEntries,
       pin,
     });
+  }
+
+  if (pairPrimary) {
+    const secondaryLang = pairPrimary === "zh" ? "en" : "zh";
+    const contact = readContact(profile?.data);
+    const labels = readCustomSectionLabels(profile?.data);
+    const mirrored = await mirrorResume({
+      supabase,
+      userId,
+      jd: application.job_description,
+      keywords: jdKeywords,
+      primaryLang: pairPrimary,
+      targetLang: secondaryLang,
+      primary: resumeDraft[pairPrimary],
+      targetEntries: (entries as ExperienceEntryRow[]).filter((e) => e.language === secondaryLang),
+      layout: layoutDefaults[secondaryLang],
+      contact,
+      labels,
+    });
+    resumeDraft[pairPrimary] = mirrored.primary;
+    resumeDraft[secondaryLang] = mirrored.secondary;
+  }
+
+  for (const lang of languages) {
     const filled = resumeDraft[lang];
 
     // 檢查清單／評分一律走同一個評分函式（跟 rescore 共用），不要讓生成當下的評分
@@ -950,6 +980,178 @@ async function fitOnePage(params: {
   }
 }
 
+const MIRROR_SYSTEM_PROMPT = `你是履歷雙語助手。使用者已經有一份內容定好的「主版本」履歷，你要寫出另一個語言（目標語言）的版本，兩份給不同語言的招募官看，內容要一模一樣。
+
+1. 段落、順序、每段的 bullet 條數跟順序都跟主版本一樣，不能新增、刪除、合併或拆開任何一條。每條講的事實、數字、專案歸屬都跟主版本對應的那條一樣，不能加主版本沒有的事實。
+2. 不是逐字翻譯，是照目標語言的履歷慣例重寫同一件事（見下面的語言規則）。中文的「負責、協助、參與」不能直譯成 Responsible for / Assisted in / Participated in；英文的 Led 不要一律寫成「帶領」，避免翻譯腔。
+3. 公司名稱、職稱：「目標語言經歷資料庫」裡有同一家公司的（看語意，例如「網際威信」對應「HiTrust」），org 用那筆的 org_name，括號說明太長時照主版本的方式精簡（中文超過 15 個字、英文超過 8 個字就只保留產業或產品）；role 用那筆的職稱寫法。資料庫裡找不到的，才自己轉成目標語言常見的寫法。
+4. period、location 轉成目標語言的寫法；目標語言經歷資料庫有同一家公司的就照那筆。
+5. summary 照主版本的內容重寫，事實不增不減。
+6. skills 從「目標語言的技能清單」挑跟主版本 skills 對應的，順序一樣，每一項跟清單的寫法一字不差；education、languages 照目標語言的資料照抄。
+7. JD 關鍵字清單是招募官會逐字搜尋的字：主版本那條講的事實能對應到清單上的字，目標語言版本就直接用清單上的原字（只換詞，不搬 JD 的句子）。
+
+${NATURAL_WRITING_RULES}
+
+只輸出 JSON，不要有其他文字、不要用 markdown code fence 包起來。輸出格式（嚴格遵守）：
+{
+  "summary": string,
+  "work_experience": [{ "org": string, "role": string, "period": string, "location": string|null, "bullets": string[] }],
+  "leadership": [{ "org": string, "role": string, "period": string, "location": string|null, "bullets": string[] }],
+  "education": [{ "school": string, "period": string, "location": string|null, "detail": string|null }],
+  "skills": string[],
+  "languages": string[]
+}`;
+
+/** 每段經歷各有幾條，用來確認改寫出來的版本跟主版本一條對一條。 */
+function bulletShape(r: Resume): string {
+  const counts = (list?: { bullets?: string[] }[]) => (list ?? []).map((e) => e.bullets?.length ?? 0);
+  return JSON.stringify([counts(r.work_experience), counts(r.leadership)]);
+}
+
+function readRoles(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((v) => (typeof v === "string" ? v : (v as { role?: unknown })?.role))
+    .filter((r): r is string => typeof r === "string" && r.trim() !== "");
+}
+
+/**
+ * 中英文一起生成時，照主版本逐條寫出另一個語言（2026-11-01 Z 要求兩份內容一致）。
+ * 排成一頁的方式跟 fitOnePage 不同：不從資料庫補內容（會跟主版本不一樣），
+ * 超出一頁先請 AI 縮短措辭，還是超出才照固定順序刪，主版本也刪同一條；沒填滿就交給排版放大。
+ */
+async function mirrorResume(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  jd: string;
+  keywords: string[];
+  primaryLang: string;
+  targetLang: "zh" | "en";
+  primary: Resume;
+  /** 目標語言的經歷資料庫，只用公司、職稱、期間、地點的寫法。 */
+  targetEntries: ExperienceEntryRow[];
+  layout: ResumeLayoutSettings | undefined;
+  contact: ResumeContact;
+  labels: Record<"zh" | "en", CustomSectionLabels>;
+}): Promise<{ primary: Resume; secondary: Resume }> {
+  const { supabase, userId, primaryLang, targetLang, targetEntries } = params;
+  const background = await ensureBackgroundLanguage({ supabase, userId, language: targetLang });
+  const content = (r: Resume) => ({ ...r, layout: undefined });
+  const basePrompt = [
+    `目標語言：${targetLang}`,
+    targetLang === "en" ? EN_RULES : ZH_RULES,
+    `===== JD =====`,
+    params.jd,
+    `===== JD 關鍵字 =====`,
+    params.keywords.length > 0 ? params.keywords.join("、") : "（無）",
+    `===== 目標語言（${targetLang}）經歷資料庫裡的公司、職稱、期間、地點 =====`,
+    JSON.stringify(
+      targetEntries.map((e) => ({
+        org_name: e.org_name,
+        roles: readRoles(e.role_variants),
+        periods: readPeriods(e.period_variants),
+        location: e.location,
+      })),
+      null,
+      2,
+    ),
+    `===== 目標語言的學歷、技能清單、語言能力 =====`,
+    JSON.stringify({ education: background.education, skills: background.skills, languages: background.languages }, null, 2),
+    `===== 主版本履歷（${primaryLang}）=====`,
+    JSON.stringify(content(params.primary), null, 2),
+  ].join("\n\n");
+
+  const ask = async (extra: string[]): Promise<Resume | null> => {
+    const response = await askClaude({
+      userId,
+      feature: "resume_mirror",
+      systemPrompt: MIRROR_SYSTEM_PROMPT,
+      userPrompt: [basePrompt, ...extra].join("\n\n"),
+      maxTokens: 8000,
+      supabase,
+    });
+    try {
+      const r = parseJsonResponse<Resume>(response.text);
+      if (!isResumeShape(r)) return null;
+      pinBackground(r, background);
+      pinEntryFacts(r, targetEntries);
+      if (targetLang === "zh") polishChinese(r);
+      r.layout = params.layout;
+      return r;
+    } catch {
+      return null;
+    }
+  };
+
+  const wanted = bulletShape(params.primary);
+  let secondary = await ask([]);
+  if (!secondary || bulletShape(secondary) !== wanted) {
+    const retry = await ask([
+      `===== 注意 =====`,
+      `上一次輸出的段落或條數跟主版本對不上。每段經歷的 bullet 條數要跟主版本一樣（主版本是 ${wanted}，格式是 [[正式工作各段條數], [社團專案各段條數]]）。`,
+    ]);
+    if (retry && (!secondary || bulletShape(retry) === wanted)) secondary = retry;
+  }
+  if (!secondary) throw new Error(`${targetLang === "en" ? "英文" : "中文"}版改寫失敗，請再試一次`);
+  // 試兩次還是對不上：照常給使用者，但不能跟主版本刪同一個位置，只調這一份。
+  const aligned = bulletShape(secondary) === wanted;
+  if (!aligned) console.error(`[mirrorResume] ${targetLang} 條數跟主版本對不上：${bulletShape(secondary)} vs ${wanted}`);
+
+  const { measureResumePdf } = await import("@/lib/documents/measureResumePdf");
+  const measureFor = (lang: "zh" | "en") => (r: Resume) =>
+    measureResumePdf({ contact: params.contact, resume: r, language: lang, labels: params.labels[lang] });
+  const measureTarget = measureFor(targetLang);
+
+  let primary = params.primary;
+  let fit = await measureTarget(secondary).catch(() => null);
+  if (!fit) return { primary, secondary };
+
+  // 超出一頁：先請 AI 把長的寫短，條數、事實都不變。
+  if (fit.pages > 1) {
+    const lines = Math.ceil(fit.overflowPt / resolveMetrics(targetLang, secondary.layout).line);
+    const shorter = await ask([
+      `===== 目前的${targetLang}版 =====`,
+      JSON.stringify(content(secondary), null, 2),
+      `===== 這次要做的事 =====`,
+      `目前的${targetLang}版超出一頁 A4 大約 ${lines} 行。把比較長、多佔一行的 bullet 改短，讓整份回到一頁內。段落、條數、事實、數字都不能變，不能刪掉任何一條。輸出整份履歷。`,
+    ]);
+    if (shorter && bulletShape(shorter) === bulletShape(secondary)) {
+      const shorterFit = await measureTarget(shorter).catch(() => null);
+      if (shorterFit && (shorterFit.pages < fit.pages || shorterFit.overflowPt < fit.overflowPt)) {
+        secondary = shorter;
+        fit = shorterFit;
+      }
+    }
+  }
+
+  // 還是超出：照固定順序一次刪一條，主版本刪同一條，兩份才一致。
+  let primaryTrimmed = false;
+  while (fit.pages > 1) {
+    const target = trimTarget(secondary);
+    if (!target) break;
+    const next = applyTrim(secondary, target);
+    const nextFit = await measureTarget(next).catch(() => null);
+    if (!nextFit) break;
+    secondary = next;
+    fit = nextFit;
+    if (aligned) {
+      primary = applyTrim(primary, target);
+      primaryTrimmed = true;
+    }
+  }
+
+  if (fit.pages <= 1) secondary = await enlargeToFill(secondary, targetLang, fit.fillRatio, measureTarget);
+  if (primaryTrimmed) {
+    const primaryLangKey = primaryLang === "zh" ? "zh" : "en";
+    const measurePrimary = measureFor(primaryLangKey);
+    const primaryFit = await measurePrimary(primary).catch(() => null);
+    if (primaryFit && primaryFit.pages <= 1) {
+      primary = await enlargeToFill(primary, primaryLangKey, primaryFit.fillRatio, measurePrimary);
+    }
+  }
+  return { primary, secondary };
+}
+
 /** 每段條數上限（2026-10-21 跟 Z 定案）：最近一份正式工作 4、其他正式工作 3 而且越舊越少、社團專案 3。 */
 const LATEST_WORK_MAX = 4;
 const OTHER_WORK_MAX = 3;
@@ -1002,28 +1204,33 @@ function enforceBulletCaps(input: Resume): Resume {
  * 都到下限了回 null。
  */
 function trimOneBullet(resume: Resume): Resume | null {
+  const target = trimTarget(resume);
+  return target ? applyTrim(resume, target) : null;
+}
+
+type TrimTarget = { section: "work_experience" | "leadership"; index: number };
+
+/** 照 trimOneBullet 的順序，下一條要刪哪一段的最後一條。中英文對照生成時，兩個語言刪同一個位置。 */
+function trimTarget(resume: Resume): TrimTarget | null {
   const leadership = resume.leadership ?? [];
-  if (leadership.length > 0) {
-    const last = leadership.length - 1;
-    const bullets = leadership[last].bullets ?? [];
-    const next =
-      bullets.length > 1
-        ? leadership.map((e, i) => (i === last ? { ...e, bullets: bullets.slice(0, -1) } : e))
-        : leadership.slice(0, -1);
-    return { ...resume, leadership: next };
-  }
+  if (leadership.length > 0) return { section: "leadership", index: leadership.length - 1 };
   const order = workByRecency(resume);
   for (const i of [...order].reverse()) {
-    const bullets = resume.work_experience[i].bullets ?? [];
     const min = i === order[0] ? LATEST_WORK_MIN : 1;
-    if (bullets.length > min) {
-      return {
-        ...resume,
-        work_experience: resume.work_experience.map((e, j) => (j === i ? { ...e, bullets: bullets.slice(0, -1) } : e)),
-      };
-    }
+    if ((resume.work_experience[i].bullets ?? []).length > min) return { section: "work_experience", index: i };
   }
   return null;
+}
+
+/** 刪掉這段的最後一條；社團、專案只剩一條就整段拿掉。 */
+function applyTrim(resume: Resume, target: TrimTarget): Resume {
+  const list = resume[target.section] ?? [];
+  const bullets = list[target.index]?.bullets ?? [];
+  const next =
+    target.section === "leadership" && bullets.length <= 1
+      ? list.filter((_, i) => i !== target.index)
+      : list.map((e, i) => (i === target.index ? { ...e, bullets: bullets.slice(0, -1) } : e));
+  return { ...resume, [target.section]: next };
 }
 
 interface LatestWork {
@@ -1202,7 +1409,7 @@ function withReferenceSummaries(background: LanguageBackground, profile: unknown
  * 技能讓 AI 依 JD 挑選排序，但只留經歷資料庫裡有的、換回資料庫的原字。
  * 經歷資料庫還沒有這些資料（舊帳號沒重新上傳）時，維持 AI 從舊資料整理出來的內容。
  */
-function pinBackground(resume: Resume, background: LanguageBackground): Resume {
+export function pinBackground(resume: Resume, background: LanguageBackground): Resume {
   if (background.education.length > 0) {
     resume.education = background.education.map((e) => ({
       school: e.school,

@@ -37,7 +37,11 @@ export async function createApplication(formData: FormData): Promise<CreateResul
   const companyName = (formData.get("companyName") as string)?.trim();
   const jobTitle = (formData.get("jobTitle") as string)?.trim();
   const jobDescription = (formData.get("jobDescription") as string)?.trim();
-  const languages = formData.getAll("language") as string[];
+  // 主版本排第一個（中英文都勾時使用者選的），生成時以它為主、另一個照它改寫；履歷頁也先打開它。
+  const primaryLanguage = formData.get("primaryLanguage") as string | null;
+  const languages = (formData.getAll("language") as string[]).sort((a, b) =>
+    a === primaryLanguage ? -1 : b === primaryLanguage ? 1 : 0,
+  );
   // 職缺連結也存起來，首頁表格可以直接點回職缺頁。
   const jobUrl = normalizeJobUrl(formData.get("jobUrl") as string | null);
 

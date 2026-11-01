@@ -23,6 +23,7 @@ import {
   type CoverLetterOptions,
 } from "@/lib/resumes/generateCoverLetter";
 import { dismissProofreadIssues, proofreadLetter, proofreadResume } from "@/lib/resumes/proofread";
+import { syncResumeEdit } from "@/lib/resumes/syncResumeLanguage";
 import type { ProofreadIssue } from "@/lib/resumes/proofreadTypes";
 import {
   applyExperienceMerge,
@@ -165,6 +166,26 @@ export async function reviseResumeAction(
     });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "修改失敗，請再試一次" };
+  }
+}
+
+/** 一個語言改了內容：同樣的修改套到另一個語言（見 syncResumeLanguage.ts）。只回傳改好的另一個語言，不存檔。 */
+export async function syncResumeLanguageAction(
+  sourceLanguage: string,
+  before: GeneratedResume["resume"],
+  after: GeneratedResume["resume"],
+  target: GeneratedResume["resume"],
+): Promise<{ error?: string; resume?: GeneratedResume["resume"] }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    return { resume: await syncResumeEdit({ supabase, userId: user.id, sourceLanguage, before, after, target }) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "同步失敗" };
   }
 }
 
