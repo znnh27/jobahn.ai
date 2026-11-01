@@ -445,7 +445,7 @@ export async function recheckJdMatchWithCoverLetter(
   return updated;
 }
 
-const REVISE_SYSTEM_PROMPT = `你是求職信修改助手。使用者會給你：JD、已經定案的履歷內容、目前的求職信，跟一句想怎麼改的要求。
+const REVISE_SYSTEM_PROMPT = `你是求職信修改助手。使用者會給你：JD、已經定案的履歷內容、使用者的經歷資料庫（履歷沒放進去的經歷跟成就也在裡面）、目前的求職信，跟一句想怎麼改的要求。
 
 照使用者的要求修改目前的求職信，修改時一樣要遵守下面的寫作規則：
 
@@ -453,7 +453,7 @@ ${COVER_LETTER_RULES}
 
 修改規則：
 1. 沒被要求的地方原則上不要動；被要求改一段，就只改那一段。
-2. 只能用履歷、JD 裡有的事實，加上使用者在這次或之前的對話裡親口告訴你的事（例如補了一個數字、一個作品集連結），使用者親口講的可以直接寫進信。要求加的內容都沒有，就不要編，在 reply 說明缺什麼，請使用者直接在對話裡告訴你。
+2. 只能用履歷、經歷資料庫、JD 裡有的事實，加上使用者在這次或之前的對話裡親口告訴你的事（例如補了一個數字、一個作品集連結），使用者親口講的可以直接寫進信。要問使用者事實或數字之前，先去經歷資料庫找，找到就直接用，在 reply 說「從經歷資料庫找到：…」，不要再問；不要說你看不到或查不到經歷資料庫。都沒有才不要編，在 reply 說明缺什麼，請使用者直接在對話裡告訴你。
 3. 信裡的 {{SIGNATURE}} 記號一字不改留在原位，系統會換成使用者的名字跟聯絡方式。
 4. 使用者要求縮短或加長時，reply 裡說明大概改成多少字。
 5. ${CHAT_REPLY_FORMAT}
@@ -491,6 +491,15 @@ export async function reviseCoverLetterWithChat(params: {
   const snapshot: Record<string, Resume> = application.resume_snapshot ?? {};
   const resumeLang = snapshot[language] ? language : Object.keys(snapshot)[0];
   const { layout: _layout, ...resume } = snapshot[resumeLang] ?? ({} as Resume); // eslint-disable-line @typescript-eslint/no-unused-vars
+  // 經歷資料庫：跟生成、補充求職信讀的一樣（2026-10-31 Z：聊天叫 AI 去資料庫找，AI 說查不到，以前這裡只給定案履歷）。
+  // 這個語言還沒有資料時，用另一個語言的。
+  const { data: entryRows } = await supabase
+    .from("experience_entries")
+    .select("language, entry_type, org_name, location, role_variants, period_variants, achievements")
+    .eq("user_id", userId);
+  const allEntries = (entryRows ?? []) as Array<{ language: string } & Record<string, unknown>>;
+  const entryLang = allEntries.some((e) => e.language === language) ? language : (allEntries[0]?.language ?? language);
+
   // 目前靠這封信補上的 JD 條件（補充完會自動存），改信時要保留（2026-10-27：聊天改信把補充的句子改掉，重新比對又變回沒寫到）。
   const keep: string[] = ((application.cover_letter_checklist ?? {})[language] ?? [])
     .filter((i: Checklist[number]) => i.covered && i.source === "cover_letter")
@@ -507,6 +516,8 @@ export async function reviseCoverLetterWithChat(params: {
       application.job_description,
       `===== 已定案的履歷內容 =====`,
       JSON.stringify(resume, null, 2),
+      `===== 使用者經歷資料庫（${entryLang}；履歷沒放進去的事實可以從這裡找，只能用這裡跟履歷有的事實）=====`,
+      JSON.stringify(allEntries.filter((e) => e.language === entryLang), null, 2),
       `===== 目前的求職信 =====`,
       body,
       keep.length > 0 ? `===== 要保留的內容（信裡回應這幾項 JD 條件的句子不能刪）=====\n${keep.map((i) => `- ${i}`).join("\n")}` : "",
