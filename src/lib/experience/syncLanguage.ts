@@ -13,6 +13,8 @@ const SYSTEM_PROMPT = `你是履歷雙語同步助手。使用者剛在「某一
 1. 不是逐字翻譯，是用目標語言的人資/履歷寫作習慣重新表達同一件事，維持動詞開頭＋具體任務＋量化成果的寫法。
 2. 判斷「對應的公司/職位」看語意，不要只比對字串——同一家公司在中英文可能寫法不同（例如「台積電」對應「TSMC」）。
 3. 如果目標語言裡已經有這家公司/職位的 entry，判斷這條內容屬於既有哪個 achievement（同一件事的不同語言版本），沒有對應的 achievement 就當成新的。如果目標語言裡完全沒有這家公司/職位的 entry，就當成全新的一個 entry。
+   - 每個 achievement 的 variantTexts 是它底下的所有寫法。只有講的是「同一件真實的事」（同一個成果、同一組數字）才算對應；同一段經歷底下的不同成果，要當成新的 achievement。
+   - 不確定是不是同一件事，就當成新的（matchedAchievementId 給 null），不要硬歸進既有的 achievement。
 4. 職稱、地點、期間也都要翻譯/轉換成目標語言常見的寫法。
 5. 不要編造新內容，只轉換這一條 bullet 實際講的事情。
 6. 只輸出 JSON，不要其他文字：
@@ -57,13 +59,15 @@ export async function syncToOtherLanguage(params: {
     .eq("user_id", userId)
     .eq("language", targetLanguage);
 
+  // 每個 achievement 給 AI 看全部有內容的寫法（2026-10-31：以前只給第一個寫法，
+  // 英文 jobahn 的第一個寫法剛好是空的，AI 看不出那件事在講什麼，之後 10 條不同成果全被歸進同一個 achievement）。
   const targetSummary = (targetEntries ?? []).map((e) => ({
     entryId: e.id,
     orgName: e.org_name,
     role: e.role_variants?.[0]?.role ?? "",
-    achievements: (e.achievements ?? []).map((a: { id: string; variants: { text: string }[] }) => ({
+    achievements: (e.achievements ?? []).map((a: { id: string; variants: { text?: string }[] }) => ({
       achievementId: a.id,
-      sampleText: a.variants[0]?.text ?? "",
+      variantTexts: (a.variants ?? []).map((v) => v.text?.trim()).filter(Boolean),
     })),
   }));
 
@@ -107,6 +111,11 @@ ${JSON.stringify(targetSummary, null, 2)}
   } catch {
     return null; // 同步失敗不應該讓主要的動作跟著失敗，安靜跳過即可
   }
+  // AI 回的 JSON 沒有 text（2026-10-21 有一次回了 4,500 tokens 的怪格式）就不存，不然會留下只有來源標籤的空寫法。
+  if (typeof parsed.text !== "string" || !parsed.text.trim()) {
+    console.error("[syncLanguage] AI 回覆沒有 text，跳過這次同步：", cleaned.slice(0, 500));
+    return null;
+  }
 
   const newAchievement = {
     id: `ach_${Math.random().toString(36).slice(2, 10)}`,
@@ -144,6 +153,15 @@ ${JSON.stringify(targetSummary, null, 2)}
       .eq("id", parsed.matchedEntryId)
       .eq("user_id", userId);
     return { entryId: parsed.matchedEntryId, achievementId: newAchievement.id, isNewEntry: false };
+  }
+
+  // 要建新的經歷區塊，AI 卻沒給目標語言的公司名稱或職稱：跳過，不要拿來源語言的原文頂上
+  // （2026-10-21 英文資料庫因此多了一個「jobahn 九斑（開源專案）／產品經理暨開發者」的中文標題）。
+  // 目標是英文，標題卻還有中文字，也是沒翻到。
+  const untranslated = targetLanguage === "en" && /[㐀-鿿]/.test(`${parsed.orgName ?? ""}${parsed.role ?? ""}`);
+  if (!parsed.orgName?.trim() || !parsed.role?.trim() || untranslated) {
+    console.error("[syncLanguage] 新經歷區塊缺公司名稱或職稱，跳過這次同步：", cleaned.slice(0, 500));
+    return null;
   }
 
   const { data: created, error } = await supabase

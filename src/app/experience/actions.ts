@@ -860,18 +860,22 @@ export async function applyFlagRewriteAction(params: {
     .eq("user_id", user.id);
   if (error) return { error: error.message };
 
-  const { syncToOtherLanguage } = await import("@/lib/experience/syncLanguage");
-  await syncToOtherLanguage({
-    supabase,
-    userId: user.id,
-    sourceLanguage: row.language,
-    orgName: row.org_name,
-    role: row.role_variants?.[0]?.role ?? "",
-    location: row.location ?? null,
-    period: row.period_variants?.[0]?.period ?? "",
-    entryType: row.entry_type,
-    text: params.newText,
-    sourceLabel: "檢查建議（雙語同步）",
+  // 雙語同步要問 AI（幾十秒），放到回應之後跑（2026-11-01 Z 回報：按 ✓ 後過很久畫面才改）。
+  const { after } = await import("next/server");
+  after(async () => {
+    const { syncToOtherLanguage } = await import("@/lib/experience/syncLanguage");
+    await syncToOtherLanguage({
+      supabase,
+      userId: user.id,
+      sourceLanguage: row.language,
+      orgName: row.org_name,
+      role: row.role_variants?.[0]?.role ?? "",
+      location: row.location ?? null,
+      period: row.period_variants?.[0]?.period ?? "",
+      entryType: row.entry_type,
+      text: params.newText,
+      sourceLabel: "檢查建議（雙語同步）",
+    }).catch(() => null);
   });
 
   revalidatePath("/experience");
