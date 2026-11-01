@@ -24,7 +24,11 @@ import {
 } from "@/lib/resumes/generateCoverLetter";
 import { dismissProofreadIssues, proofreadLetter, proofreadResume } from "@/lib/resumes/proofread";
 import type { ProofreadIssue } from "@/lib/resumes/proofreadTypes";
-import { mergeContentIntoExperienceDb, removeVariantsFromSource } from "@/lib/experience/mergeIntoExperienceDb";
+import {
+  applyExperienceMerge,
+  planExperienceMerge,
+  removeVariantsFromSource,
+} from "@/lib/experience/mergeIntoExperienceDb";
 import { measureResumePdf } from "@/lib/documents/measureResumePdf";
 import type { ResumeContact } from "@/lib/resumes/contact";
 import { readLayoutSettings, resolveMetrics, type PdfFit, type ResumeLayoutSettings } from "@/lib/resumes/typography";
@@ -396,30 +400,33 @@ export async function finalizeResumeAction(
   // 只寫回新增或改過的，改掉或刪掉的舊寫法從資料庫拿掉，不會越定案越多重複的寫法。
   const previous = (application.resume_snapshot ?? null) as ResumeMap | null;
 
-  for (const lang of languages) {
-    const resume = draft[lang];
-    if (!resume) continue;
-    const sourceLabel = `${labelBase}_${lang}_定案`;
-    const before = previous?.[lang];
+  // 中英文的 AI 判斷同時跑（以前一個語言等完一次 AI 才換下一個，第一次定案要等很久），
+  // 寫進資料庫再一個語言一個語言來：兩邊都會更新個人資料，同時寫會互相蓋掉。
+  const plans = await Promise.all(
+    languages.map(async (lang) => {
+      const resume = draft[lang];
+      if (!resume) return null;
+      const sourceLabel = `${labelBase}_${lang}_定案`;
+      const before = previous?.[lang];
 
-    if (before) {
-      const nowBullets = new Set(allBullets(resume));
-      const staleBullets = allBullets(before).filter((b) => !nowBullets.has(b));
-      if (staleBullets.length > 0) {
-        await removeVariantsFromSource({ supabase, userId: user.id, sourceLabel, texts: staleBullets });
+      if (before) {
+        const nowBullets = new Set(allBullets(resume));
+        const staleBullets = allBullets(before).filter((b) => !nowBullets.has(b));
+        if (staleBullets.length > 0) {
+          await removeVariantsFromSource({ supabase, userId: user.id, sourceLabel, texts: staleBullets });
+        }
       }
-    }
 
-    const toWrite = before ? onlyNewBullets(resume, before) : resume;
-    const rawContent = serializeResumeSections(toWrite);
-    if (!rawContent.trim()) continue;
+      const toWrite = before ? onlyNewBullets(resume, before) : resume;
+      const rawContent = serializeResumeSections(toWrite);
+      if (!rawContent.trim()) return null;
 
-    await mergeContentIntoExperienceDb({
-      supabase,
-      userId: user.id,
-      sourceLabel,
-      rawContent,
-    });
+      const plan = await planExperienceMerge({ supabase, userId: user.id, sourceLabel, rawContent });
+      return { sourceLabel, plan };
+    }),
+  );
+  for (const p of plans) {
+    if (p) await applyExperienceMerge({ supabase, userId: user.id, sourceLabel: p.sourceLabel, plan: p.plan });
   }
 
   const { error: updateError } = await supabase

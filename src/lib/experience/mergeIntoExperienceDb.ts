@@ -77,7 +77,7 @@ type MergeAction =
   | AppendRoleVariantAction
   | NewEntryAction;
 
-interface MergePlanResponse {
+export interface MergePlanResponse {
   contact: Partial<ResumeContact> | null;
   background: Record<string, unknown> | null;
   conflicts_needing_confirmation: string[];
@@ -142,6 +142,18 @@ export async function mergeContentIntoExperienceDb(params: {
   sourceLabel: string;
   rawContent: string;
 }): Promise<MergeResult> {
+  const plan = await planExperienceMerge(params);
+  return applyExperienceMerge({ ...params, plan });
+}
+
+/** 合併的 AI 判斷，只讀不寫。好幾份內容要一起併時（定案的中英文），可以同時跑這步，
+ * 再用 applyExperienceMerge 一份一份寫進去，不會互相蓋掉。 */
+export async function planExperienceMerge(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  sourceLabel: string;
+  rawContent: string;
+}): Promise<MergePlanResponse> {
   const { supabase, userId, sourceLabel, rawContent } = params;
 
   const existingSummary = await loadExistingSummary(supabase, userId);
@@ -173,7 +185,22 @@ ${rawContent}`;
     supabase,
   });
 
-  const plan = parseJsonResponse(response.text);
+  return parseJsonResponse(response.text);
+}
+
+/** 把 planExperienceMerge 的結果寫進資料庫。個人資料在寫入前重新讀，前一份剛寫進去的不會被蓋掉。 */
+export async function applyExperienceMerge(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  sourceLabel: string;
+  plan: MergePlanResponse;
+}): Promise<MergeResult> {
+  const { supabase, userId, sourceLabel, plan } = params;
+  const { data: existingProfile } = await supabase
+    .from("profile_data")
+    .select("data")
+    .eq("user_id", userId)
+    .maybeSingle();
 
   const backgroundItemsAdded = await mergeProfile(supabase, userId, existingProfile?.data ?? {}, plan);
 
