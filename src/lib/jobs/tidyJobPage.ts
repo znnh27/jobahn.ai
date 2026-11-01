@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
 import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { toTraditional } from "@/lib/text/toTraditional";
+import { companyMentionedInJd } from "@/lib/jobs/companyInJd";
 
 // 新增應徵的「AI 整理內容」：使用者在職缺頁全選複製、整頁貼進 JD 欄位，按按鈕後請 AI 挑出職缺本身
 // （原文照抄、不改寫），順便帶回公司名稱跟職稱（表單空白的欄位會自動填上）。
@@ -53,5 +54,13 @@ export async function tidyJobPage(
   }
   if (parsed.blocked || !parsed.text?.trim()) return "blocked";
   const clean = (v: string | null | undefined) => (typeof v === "string" && v.trim() ? toTraditional(v.trim()) : null);
-  return { text: parsed.text.trim(), companyName: clean(parsed.company), jobTitle: clean(parsed.title) };
+  const companyName = clean(parsed.company);
+  let text = parsed.text.trim();
+  // 規則 1 會把公司介紹刪掉，JD 本文常常就找不到公司名稱，寫求職信時會誤判成「JD 跟公司對不上」
+  // （2026-11-01 錄 demo：整理完的 Northwind Health 職缺，求職信跳出「JD 裡沒寫公司名稱…請確認公司」）。
+  // 公司名稱跟 JD 出自同一個職缺頁，找不到就在最上面補一行，後面的比對才認得出來。
+  if (companyName && companyMentionedInJd(companyName, text) === false) {
+    text = /[\u4e00-\u9fff]/.test(text) ? `公司：${companyName}\n\n${text}` : `Company: ${companyName}\n\n${text}`;
+  }
+  return { text, companyName, jobTitle: clean(parsed.title) };
 }
