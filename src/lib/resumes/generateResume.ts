@@ -71,7 +71,7 @@ const EN_RULES = `英文版額外規則（一定要遵守）：
 4. 講自己的貢獻，不是團隊整體做了什麼；團隊成果要寫清楚自己負責的那一塊。
 5. 不用形容詞自誇（例如 excellent, outstanding, passionate, hardworking），改用事實和數字證明。
 6. 職稱用國際通用說法，不要直譯台灣特有職稱（例如「專員」依實際工作內容改成 Specialist / Associate / Coordinator）。
-7. 數字單位用 K、M、B（例如 3 萬 → 30K，1,200 萬 → 12M）；新台幣金額加註換算的 USD（例如 NT$3M (~USD 95K)），或直接用 USD。
+7. 數字單位用 K、M、B（例如 3 萬 → 30K，1,200 萬 → 12M）；NT$10K 以上的新台幣金額加註換算的 USD（例如 NT$3M (~USD 95K)），或直接用 USD；不到 NT$10K 的小金額（例如客單價 NT$180）照寫 NT$，不用換算。
 8. 日期格式全份統一，沿用 Mar. 2024 – Aug. 2024 這種寫法。
 9. 全部用半形標點，不能殘留全形符號或中文字。
 10. JD 是英文時，優先使用 JD 原字，不自己換同義詞（例如 JD 寫 stakeholder management，就不要寫成 cross-team coordination）。

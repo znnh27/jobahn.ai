@@ -61,11 +61,18 @@ function onlyNewBullets(
   return { ...resume, work_experience: keep(resume.work_experience ?? []), leadership: keep(resume.leadership ?? []) };
 }
 
+/** 拿掉履歷加註的美金換算，例如「NT$60,000 (~USD 1.9K)」→「NT$60,000」。
+ * 換算是履歷的呈現方式（英文版規則），經歷資料庫存原本的寫法；不拿掉的話，定案寫回時
+ * 會多出一條只差在換算的重複寫法（2026-11-01 錄 demo 時發生）。 */
+function withoutUsdNote(text: string): string {
+  return text.replace(/\s*[（(]\s*(?:~|≈|約)?\s*(?:USD|US\$)\s*\$?[\d.,]+\s*[KMB]?\s*[)）]/gi, "");
+}
+
 function serializeResumeSections(resume: GeneratedResume["resume"]): string {
   const sections = [...(resume.work_experience ?? []), ...(resume.leadership ?? [])];
   return sections
     .map((s) => {
-      const bullets = s.bullets.map((b) => `- ${b}`).join("\n");
+      const bullets = s.bullets.map((b) => `- ${withoutUsdNote(b)}`).join("\n");
       return `${s.org}\t${s.location ?? ""}\n${s.role}\t${s.period}\n${bullets}`;
     })
     .join("\n\n");
@@ -411,7 +418,10 @@ export async function finalizeResumeAction(
 
       if (before) {
         const nowBullets = new Set(allBullets(resume));
-        const staleBullets = allBullets(before).filter((b) => !nowBullets.has(b));
+        // 資料庫裡存的是拿掉美金換算的寫法，比對要刪的舊寫法時也要拿掉。
+        const staleBullets = allBullets(before)
+          .filter((b) => !nowBullets.has(b))
+          .map(withoutUsdNote);
         if (staleBullets.length > 0) {
           await removeVariantsFromSource({ supabase, userId: user.id, sourceLabel, texts: staleBullets });
         }
