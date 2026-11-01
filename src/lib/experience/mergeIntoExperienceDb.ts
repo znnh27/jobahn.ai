@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { askClaude } from "@/lib/ai/askClaude";
+import { contentLanguage, textLanguage, type TextLanguage } from "@/lib/text/detectLanguage";
 import { parseAiJson } from "@/lib/ai/parseAiJson";
 import { readContact, type ResumeContact } from "@/lib/resumes/contact";
 import {
@@ -153,10 +154,20 @@ export async function planExperienceMerge(params: {
   userId: string;
   sourceLabel: string;
   rawContent: string;
+  /** 新內容的語言；沒給就用程式判斷，中英混合的內容判斷不出來就不限制。 */
+  language?: TextLanguage;
 }): Promise<MergePlanResponse> {
   const { supabase, userId, sourceLabel, rawContent } = params;
 
-  const existingSummary = await loadExistingSummary(supabase, userId);
+  // 只給 AI 看同語言的經歷：中英文履歷一起上傳時，後處理的那份會看到先寫進去的另一個語言，
+  // AI 有時不管規則 6，把中文的寫法併進英文的經歷（2026-11-02 錄 demo：英文資料庫混進 22 條中文，中文資料庫是空的）。
+  // 看不到另一個語言，就不可能併過去。
+  const language = params.language ?? contentLanguage(rawContent);
+  const allEntries = await loadExistingSummary(supabase, userId);
+  const existingSummary = language ? allEntries.filter((e) => e.language === language) : allEntries;
+  const languageNote = language
+    ? `\n\n===== 新內容的語言 =====\n這份新內容是${language === "zh" ? "中文" : "英文"}，上面只列出同語言的經歷資料庫；new_entry 的 language 一律用 "${language}"。`
+    : "";
 
   const { data: existingProfile } = await supabase
     .from("profile_data")
@@ -174,7 +185,7 @@ ${JSON.stringify(readContact(existingProfile?.data), null, 2)}
 ${JSON.stringify(readBackground(existingProfile?.data), null, 2)}
 
 ===== 新內容（來源：${sourceLabel}）=====
-${rawContent}`;
+${rawContent}${languageNote}`;
 
   const response = await askClaude({
     userId,
@@ -204,6 +215,19 @@ export async function applyExperienceMerge(params: {
 
   const backgroundItemsAdded = await mergeProfile(supabase, userId, existingProfile?.data ?? {}, plan);
 
+  // 寫進去之前再用程式擋一次：內容的語言跟要併進去的經歷不同就不寫（AI 拿錯 id 或沒照規則時的保險）。
+  const { data: langRows } = await supabase.from("experience_entries").select("id, language").eq("user_id", userId);
+  const entryLanguage = new Map((langRows ?? []).map((r: { id: string; language: string }) => [r.id, r.language]));
+  const wrongLanguage = (text: string, entryId: string) => {
+    const lang = textLanguage(text);
+    const target = entryLanguage.get(entryId);
+    if (!lang || !target || lang === target) return false;
+    // 中文履歷常直接用英文職稱、工具名（Product Designer、Figma），短的英文放進中文經歷沒關係，一整句才擋。
+    if (lang === "en" && (text.match(/[A-Za-z]+/g) ?? []).length < 4) return false;
+    console.error(`[mergeIntoExperienceDb] 語言不同，不併進去（${lang} → ${target} 的經歷）：`, text.slice(0, 80));
+    return true;
+  };
+
   const result: MergeResult = {
     newEntriesCreated: 0,
     newAchievementsCreated: 0,
@@ -220,9 +244,11 @@ export async function applyExperienceMerge(params: {
         .filter((variants) => variants.length > 0)
         .map((variants) => ({ id: newAchievementId(), variants }));
 
+      // 語言以程式判斷的為準，不照 AI 填的。
+      const texts = [action.role ?? "", ...action.achievements.flatMap((a) => (a.variants ?? []).map((v) => v.text ?? ""))];
       const { error } = await supabase.from("experience_entries").insert({
         user_id: userId,
-        language: action.language,
+        language: textLanguage(texts.join("\n")) ?? action.language,
         entry_type: action.entryType,
         org_name: action.orgName,
         location: action.location,
@@ -245,7 +271,10 @@ export async function applyExperienceMerge(params: {
         .maybeSingle();
       if (readError || !row) throw new Error(`找不到要新增成就的經歷區塊：${action.entryId}`);
 
-      const variants = toVariants(action.variants, sourceLabel);
+      const variants = toVariants(
+        (action.variants ?? []).filter((v) => !wrongLanguage(v.text ?? "", action.entryId)),
+        sourceLabel,
+      );
       if (variants.length === 0) continue;
 
       const achievements = Array.isArray(row.achievements) ? row.achievements : [];
@@ -278,6 +307,7 @@ export async function applyExperienceMerge(params: {
 
       // 應徵定案寫回時，直接沿用資料庫原文的 bullet 會被 AI 當成「新寫法」再加一次，
       // 所以寫入前先比對，文字實質相同就跳過
+      if (wrongLanguage(action.text ?? "", action.entryId)) continue;
       const key = normalizeForDedupe(action.text);
       if (target.variants.some((v: { text: string }) => normalizeForDedupe(v.text) === key)) continue;
 
@@ -302,6 +332,7 @@ export async function applyExperienceMerge(params: {
         .maybeSingle();
       if (readError || !row) throw new Error(`找不到要新增職稱寫法的經歷區塊：${action.entryId}`);
 
+      if (wrongLanguage(action.role ?? "", action.entryId)) continue;
       const roleVariants = Array.isArray(row.role_variants) ? row.role_variants : [];
       roleVariants.push({ role: action.role, source: [sourceLabel] });
 

@@ -452,7 +452,13 @@ export async function finalizeResumeAction(
       const rawContent = serializeResumeSections(toWrite);
       if (!rawContent.trim()) return null;
 
-      const plan = await planExperienceMerge({ supabase, userId: user.id, sourceLabel, rawContent });
+      const plan = await planExperienceMerge({
+        supabase,
+        userId: user.id,
+        sourceLabel,
+        rawContent,
+        language: lang === "zh" || lang === "en" ? lang : undefined,
+      });
       return { sourceLabel, plan };
     }),
   );
