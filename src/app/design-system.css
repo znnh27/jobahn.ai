@@ -3872,8 +3872,19 @@ button.step-bar-link:focus-visible {
 }
 /* 只有「Aa」圖示、沒有外框，跟語言切換鈕同高；面板打開時保留底色，看得出是哪個按鈕開的。 */
 .layout-menu-trigger {
+  position: relative;
   width: 36px;
   height: 36px;
+}
+/* PDF 下面空 2 行以上：「Aa」右上角的小圓點，提醒可以打開排版自動填滿。 */
+.layout-menu-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--chrome-accent);
 }
 /* 履歷頁「Aa」右邊的上一步／下一步，大小跟「Aa」一樣。 */
 .canvas-history {
@@ -3953,8 +3964,15 @@ button.step-bar-link:focus-visible {
   font-size: var(--font-sm);
   color: var(--chrome-muted);
 }
-.layout-menu-status:empty {
-  display: none;
+.layout-menu-status-text {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+.layout-menu-status .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .overflow-alert-text {
@@ -3987,12 +4005,6 @@ button.step-bar-link:focus-visible {
   background: var(--color-danger-bg);
   font-size: var(--font-sm);
   color: var(--color-danger-text);
-}
-/* 一頁下面還有空白的提醒：不是錯誤，用中性色（跟 status-message 一樣白底灰框）。 */
-.overflow-alert--info {
-  border-color: var(--color-neutral-200);
-  background: var(--color-white);
-  color: var(--color-neutral-700);
 }
 
 /* AI 取捨建議清單。 */

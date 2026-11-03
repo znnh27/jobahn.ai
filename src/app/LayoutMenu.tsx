@@ -18,8 +18,12 @@ import {
   type ResumeLayoutSettings,
 } from "@/lib/resumes/typography";
 
+/** 一頁下面空幾行以上才提醒可以自動填滿。 */
+const SPARE_LINES_HINT = 2;
+
 // 工具列上的「Aa」排版按鈕：點開調上下間距、抬頭字級、內文字級（抬頭在上，跟履歷由上往下的順序一樣；2026-10-27 Z 要求）。履歷頁底下還會顯示量 PDF 的結果；
 // 經歷資料庫沒有下載檔案，不傳 fit 就不顯示。
+// 一頁下面空 2 行以上：面板底下顯示空幾行跟「自動填滿」，「Aa」右上角加小圓點（2026-11-04 Z 要求，取代紙張上方的提示條）。
 // 點面板以外的地方或按 Esc 就關閉。
 export function LayoutMenu({
   language,
@@ -27,12 +31,20 @@ export function LayoutMenu({
   onChange,
   fit,
   measuring,
+  onAutoFill,
+  autoFilling,
+  disabled,
 }: {
   language: string;
   layout: ResumeLayoutSettings;
   onChange: (next: ResumeLayoutSettings) => void;
   fit?: PdfFit | null;
   measuring?: boolean;
+  /** 自動填滿（放大字級、撐開段落間距）；沒傳就不顯示按鈕。 */
+  onAutoFill?: () => void;
+  autoFilling?: boolean;
+  /** 其他動作在跑時，自動填滿先不能按。 */
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -64,13 +76,17 @@ export function LayoutMenu({
       contactPt: Math.min(CONTACT_PT_MAX, Math.max(CONTACT_PT_MIN, Math.round((contactPt + delta) * 2) / 2)),
     });
 
+  const spareLines = fit && !measuring && fit.pages <= 1 ? fit.spareLines : 0;
+  const canFill = !!onAutoFill && spareLines >= SPARE_LINES_HINT;
+  const triggerLabel = canFill ? `排版（字級、上下間距）：PDF 下面還空約 ${spareLines} 行` : "排版（字級、上下間距）";
+
   return (
     <div className="layout-menu" ref={ref}>
       <button
         type="button"
         className="icon-btn layout-menu-trigger"
-        aria-label="排版（字級、上下間距）"
-        title="排版（字級、上下間距）"
+        aria-label={triggerLabel}
+        title={triggerLabel}
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((v) => !v)}
@@ -78,6 +94,7 @@ export function LayoutMenu({
         <span className="layout-menu-glyph" aria-hidden="true">
           Aa
         </span>
+        {canFill && <span className="layout-menu-dot" aria-hidden="true" />}
       </button>
 
       {open && (
@@ -159,21 +176,35 @@ export function LayoutMenu({
             </div>
           </div>
 
-          {fit !== undefined && (
-            <p className="layout-menu-status" role="status">
-              {measuring ? (
-                <>
-                  <Spinner />
-                  計算 PDF 頁數…
-                </>
-              ) : fit ? (
-                fit.pages <= 1 ? (
-                  "PDF：一頁 ✓"
-                ) : (
+          {fit !== undefined && (measuring || fit) && (
+            <div className="layout-menu-status">
+              <p className="layout-menu-status-text" role="status">
+                {measuring ? (
+                  <>
+                    <Spinner />
+                    計算 PDF 頁數…
+                  </>
+                ) : fit && fit.pages > 1 ? (
                   `PDF：${fit.pages} 頁`
-                )
-              ) : null}
-            </p>
+                ) : canFill ? (
+                  `PDF：一頁 ✓，還空約 ${spareLines} 行`
+                ) : (
+                  "PDF：一頁 ✓"
+                )}
+              </p>
+              {canFill && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn--sm"
+                  onClick={onAutoFill}
+                  disabled={disabled || autoFilling}
+                  title="放大字級、撐開段落間距填滿一頁，不會改內容"
+                >
+                  {autoFilling && <Spinner />}
+                  自動填滿
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

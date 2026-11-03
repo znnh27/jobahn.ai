@@ -246,11 +246,6 @@ export function Canvas({
   // 使用者按掉超出一頁的警告時，記下當時超出多少；之後又變得更長才再跳出來。
   const [dismissedOverflowPt, setDismissedOverflowPt] = useState<number | null>(null);
   const showOverflowAlert = overflowPt > 0 && (dismissedOverflowPt === null || overflowPt > dismissedOverflowPt);
-  // 一頁下面空太多（2 行以上）時提醒可以自動填滿；按掉或填不滿時記下當時空幾行，之後空得更多才再出現。
-  const spareLines = fit && !measuring ? fit.spareLines : 0;
-  const [dismissedSpareLines, setDismissedSpareLines] = useState<number | null>(null);
-  const showSpareAlert =
-    !showOverflowAlert && spareLines >= 2 && (dismissedSpareLines === null || spareLines > dismissedSpareLines);
   const layoutSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [trimPlan, setTrimPlan] = useState<TrimPlan | null>(null);
   const [pendingDownload, setPendingDownload] = useState<string | null>(null);
@@ -364,7 +359,7 @@ export function Canvas({
     });
   }
 
-  /** 「自動填滿」：放大字級、撐開段落間距補滿一頁（不呼叫 AI），跟手動調排版一樣存檔。 */
+  /** 排版框框的「自動填滿」：放大字級、撐開段落間距補滿一頁（不呼叫 AI），跟手動調排版一樣存檔。 */
   function handleAutoFill() {
     if (!activeResume) return;
     const lang = activeLang;
@@ -379,10 +374,9 @@ export function Canvas({
       changeLayout(result.layout);
       const left = result.spareLines ?? 0;
       if (left >= 2) {
-        setDismissedSpareLines(left);
         setMessage(`字級、間距已經調到上限，下面還空大約 ${left} 行，可以跟 AI 聊補一些內容`);
       } else {
-        setMessage("已調整字級、間距填滿一頁；不滿意可以用「排版」調回來");
+        setMessage("已調整排版填滿一頁；不滿意可以用「排版」調回來");
       }
     });
   }
@@ -968,7 +962,16 @@ export function Canvas({
               value={activeLang}
               onChange={setActiveLang}
             />
-            <LayoutMenu language={activeLang} layout={layout} onChange={changeLayout} fit={fit} measuring={measuring} />
+            <LayoutMenu
+              language={activeLang}
+              layout={layout}
+              onChange={changeLayout}
+              fit={fit}
+              measuring={measuring}
+              onAutoFill={handleAutoFill}
+              autoFilling={busy === "fill"}
+              disabled={isPending}
+            />
             {/* 上一步／下一步：跟「Aa」一樣是灰色純圖示，沒有紀錄時變淡、不能按。定案後不能編輯，就不顯示。 */}
             {!finalized && (
               <div className="canvas-history">
@@ -1125,32 +1128,6 @@ export function Canvas({
                 aria-label="關掉這個提醒"
                 title="關掉這個提醒（決定保留超過一頁）"
                 onClick={() => setDismissedOverflowPt(overflowPt)}
-              >
-                <CloseIcon />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {showSpareAlert && (
-          <div className="overflow-alert overflow-alert--info" role="status">
-            <span
-              className="overflow-alert-text"
-              title="下載的 PDF 下面還有空白。自動填滿會放大字級、撐開段落間距，不會改內容。"
-            >
-              PDF 下面還空大約 {spareLines} 行，可以自動調整排版填滿
-            </span>
-            <div className="overflow-alert-actions">
-              <button type="button" className="btn btn-secondary" onClick={handleAutoFill} disabled={isPending}>
-                {busy === "fill" && <Spinner />}
-                自動填滿
-              </button>
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="關掉這個提醒"
-                title="關掉這個提醒（保留現在的空白）"
-                onClick={() => setDismissedSpareLines(spareLines)}
               >
                 <CloseIcon />
               </button>
