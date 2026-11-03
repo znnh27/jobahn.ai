@@ -25,7 +25,6 @@ export function NewApplicationForm() {
   const [jobDescription, setJobDescription] = useState("");
   // 中英文都勾時，選哪個當主版本（另一個照它改寫，見 generateResume.ts 的 mirrorResume）。2026-11-01 Z：每個人習慣不同，讓使用者選。
   const [languages, setLanguages] = useState<{ en: boolean; zh: boolean }>({ en: false, zh: false });
-  const [primaryLanguage, setPrimaryLanguage] = useState<"zh" | "en">("zh");
   // 最上面「從職缺頁帶入」：整頁貼上 → 按「AI 整理」才整理（2026-10-27 Z 要求：不要貼上就自動讀取），
   // 整理完填進下面空白的欄位。貼上框的內容不送出、整理完也保留，整理錯了可以直接再按一次。
   // 整理成功不另外說明（欄位填好就是回饋），只有失敗才顯示錯誤。
@@ -190,6 +189,7 @@ export function NewApplicationForm() {
           <InfoTip label="語言版本的說明">
             <ul>
               <li>語言版本建立後不能再改</li>
+              <li>中英文都選的話，之後在任一個語言修改內容，另一個語言會自動跟著改</li>
               <li>公司名稱跟職稱之後還可以在標題旁邊修改</li>
             </ul>
           </InfoTip>
@@ -217,43 +217,6 @@ export function NewApplicationForm() {
           </label>
         </div>
       </fieldset>
-
-      {languages.en && languages.zh && (
-        <fieldset>
-          <legend className="label">
-            以哪個語言為主
-            <InfoTip label="主要語言的說明">
-              <ul>
-                <li>主要語言的版本直接照 JD 跟經歷資料庫來寫，另一個語言照它逐條改寫，兩份內容一樣</li>
-                <li>之後在任一個語言修改內容，另一個語言會自動跟著改</li>
-                <li>建立後不能再改</li>
-              </ul>
-            </InfoTip>
-          </legend>
-          <div className="checkbox-row">
-            <label className="checkbox-label">
-              <input
-                type="radio"
-                name="primaryLanguage"
-                value="zh"
-                checked={primaryLanguage === "zh"}
-                onChange={() => setPrimaryLanguage("zh")}
-              />
-              中文
-            </label>
-            <label className="checkbox-label">
-              <input
-                type="radio"
-                name="primaryLanguage"
-                value="en"
-                checked={primaryLanguage === "en"}
-                onChange={() => setPrimaryLanguage("en")}
-              />
-              英文
-            </label>
-          </div>
-        </fieldset>
-      )}
 
       {state.error && <p className="text-error">{state.error}</p>}
 

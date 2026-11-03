@@ -40,6 +40,12 @@ export interface ResumeLayoutSettings {
   spacing: ResumeSpacing;
   /** 抬頭聯絡資訊的字級。沒設就跟著內文等比縮放；網址很長、斷行難看時使用者可以單獨調小。 */
   contactPt?: number;
+  /**
+   * 「自動填滿」微調的段落間距倍數（區塊、經歷之間），1 = 不調。字級每跳一級頁面就差 7–8%，
+   * 停在跳不上去的地方下面會空好幾行（2026-11-04 Z 回報），剩下的空白靠撐開段落間距補滿。
+   * 使用者自己調字級、間距時拿掉（見 withoutAutoFill），排版選單只顯示三種固定間距。
+   */
+  gapScale?: number;
 }
 
 export const BODY_PT_MIN = 9;
@@ -47,6 +53,14 @@ export const BODY_PT_MAX = 12;
 export const BODY_PT_STEP = 0.5;
 export const CONTACT_PT_MIN = 7;
 export const CONTACT_PT_MAX = 12;
+export const GAP_SCALE_MAX = 2.5;
+
+/** 使用者自己調排版時用：拿掉自動填滿的段落間距微調。 */
+export function withoutAutoFill(layout: ResumeLayoutSettings): ResumeLayoutSettings {
+  const rest = { ...layout };
+  delete rest.gapScale;
+  return rest;
+}
 
 export const SPACING_OPTIONS: { value: ResumeSpacing; label: string }[] = [
   { value: "tight", label: "緊湊" },
@@ -91,7 +105,16 @@ export function readLayoutSettings(raw: unknown, language: string): ResumeLayout
     typeof r.contactPt === "number" && Number.isFinite(r.contactPt)
       ? Math.min(CONTACT_PT_MAX, Math.max(CONTACT_PT_MIN, Math.round(r.contactPt / BODY_PT_STEP) * BODY_PT_STEP))
       : undefined;
-  return contactPt === undefined ? { bodyPt, spacing } : { bodyPt, spacing, contactPt };
+  const gapScale =
+    typeof r.gapScale === "number" && Number.isFinite(r.gapScale) && r.gapScale > 1
+      ? Math.round(Math.min(GAP_SCALE_MAX, r.gapScale) * 100) / 100
+      : undefined;
+  return {
+    bodyPt,
+    spacing,
+    ...(contactPt === undefined ? {} : { contactPt }),
+    ...(gapScale === undefined ? {} : { gapScale }),
+  };
 }
 
 /**
@@ -121,6 +144,8 @@ export function resolveMetrics(language: string, raw?: unknown): ResumeMetrics {
   const settings = readLayoutSettings(raw, language);
   const scale = settings.bodyPt / base.body;
   const f = SPACING_FACTORS[settings.spacing];
+  // 自動填滿只撐開區塊、經歷之間，抬頭上下維持原本的距離。
+  const g = f.gap * (settings.gapScale ?? 1);
   const round = (n: number) => Math.round(n * 100) / 100;
   return {
     name: round(base.name * scale),
@@ -131,9 +156,9 @@ export function resolveMetrics(language: string, raw?: unknown): ResumeMetrics {
     line: round(base.line * scale * f.line),
     contactBefore: round(BASE_GAPS.contactBefore * scale * f.gap),
     contactAfter: round(BASE_GAPS.contactAfter * scale * f.gap),
-    sectionBefore: round(BASE_GAPS.sectionBefore * scale * f.gap),
-    sectionAfter: round(BASE_GAPS.sectionAfter * scale * f.gap),
-    block: round(BASE_GAPS.block * scale * f.gap),
+    sectionBefore: round(BASE_GAPS.sectionBefore * scale * g),
+    sectionAfter: round(BASE_GAPS.sectionAfter * scale * g),
+    block: round(BASE_GAPS.block * scale * g),
   };
 }
 
@@ -166,4 +191,6 @@ export interface PdfFit {
   breakAt: { key: string; linesBefore: number } | null;
   /** 第一頁內容區用了幾成（0–1，超出一頁就是 1）。生成履歷時用來判斷要不要補內容。 */
   fillRatio: number;
+  /** 第一頁下面還空幾行（照內文行高算，超出一頁就是 0）。畫布空太多時提醒可以自動填滿。 */
+  spareLines: number;
 }

@@ -722,6 +722,9 @@
   line-height: 1.5;
   padding-top: 1px;
 }
+.status-message-action {
+  flex-shrink: 0;
+}
 .status-message .icon-btn {
   flex-shrink: 0;
   width: 24px;
@@ -3984,6 +3987,12 @@ button.step-bar-link:focus-visible {
   background: var(--color-danger-bg);
   font-size: var(--font-sm);
   color: var(--color-danger-text);
+}
+/* 一頁下面還有空白的提醒：不是錯誤，用中性色（跟 status-message 一樣白底灰框）。 */
+.overflow-alert--info {
+  border-color: var(--color-neutral-200);
+  background: var(--color-white);
+  color: var(--color-neutral-700);
 }
 
 /* AI 取捨建議清單。 */

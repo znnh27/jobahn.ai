@@ -1,12 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
   answerWorkCondition,
   setWorkConditionSkipped,
   generateResumeForApplication,
   checkResumeChatRevision,
+  enlargeToFill,
   type ChatRewrite,
   rescoreResumeForApplication,
   reviseResumeWithChat,
@@ -27,12 +29,20 @@ import { syncResumeEdit } from "@/lib/resumes/syncResumeLanguage";
 import type { ProofreadIssue } from "@/lib/resumes/proofreadTypes";
 import {
   applyExperienceMerge,
+  loadKnownTexts,
   planExperienceMerge,
   removeVariantsFromSource,
 } from "@/lib/experience/mergeIntoExperienceDb";
+import { createServiceClient } from "@/lib/supabase/service";
 import { measureResumePdf } from "@/lib/documents/measureResumePdf";
 import type { ResumeContact } from "@/lib/resumes/contact";
-import { readLayoutSettings, resolveMetrics, type PdfFit, type ResumeLayoutSettings } from "@/lib/resumes/typography";
+import {
+  readLayoutSettings,
+  resolveMetrics,
+  withoutAutoFill,
+  type PdfFit,
+  type ResumeLayoutSettings,
+} from "@/lib/resumes/typography";
 import { BODY_WIDTH_PT } from "@/lib/documents/ResumePdfDocument";
 import { isValidWordLimit } from "@/lib/text/letterLength";
 import { readCustomSectionLabels } from "@/lib/resumes/sectionLabels";
@@ -49,16 +59,19 @@ function allBullets(resume: GeneratedResume["resume"]): string[] {
   return [...(resume.work_experience ?? []), ...(resume.leadership ?? [])].flatMap((s) => s.bullets);
 }
 
-/** 只留下「上一次定案沒有的」bullet；整段都沒新東西的經歷就拿掉。 */
-function onlyNewBullets(
+/** 只留下要送 AI 判斷的 bullet：資料庫已經有一樣寫法的、上一次定案已經判斷過的都拿掉
+ * （上一次 AI 判斷成「幾乎重複、不用寫」的不在資料庫裡，只看資料庫的話每次重新定案都會再送一次）。
+ * bullet 都拿掉了、職稱也沒新寫法的經歷就整段拿掉。 */
+function withoutKnownBullets(
   resume: GeneratedResume["resume"],
-  before: GeneratedResume["resume"],
+  known: Awaited<ReturnType<typeof loadKnownTexts>>,
+  before: GeneratedResume["resume"] | undefined,
 ): GeneratedResume["resume"] {
-  const old = new Set(allBullets(before));
+  const judged = new Set(before ? allBullets(before) : []);
   const keep = (sections: GeneratedResume["resume"]["work_experience"]) =>
     sections
-      .map((s) => ({ ...s, bullets: s.bullets.filter((b) => !old.has(b)) }))
-      .filter((s) => s.bullets.length > 0);
+      .map((s) => ({ ...s, bullets: s.bullets.filter((b) => !judged.has(b) && !known.hasBullet(withoutUsdNote(b))) }))
+      .filter((s) => s.bullets.length > 0 || !known.hasRole(s.role));
   return { ...resume, work_experience: keep(resume.work_experience ?? []), leadership: keep(resume.leadership ?? []) };
 }
 
@@ -175,7 +188,8 @@ export async function syncResumeLanguageAction(
   before: GeneratedResume["resume"],
   after: GeneratedResume["resume"],
   target: GeneratedResume["resume"],
-): Promise<{ error?: string; resume?: GeneratedResume["resume"] }> {
+  force = false,
+): Promise<{ error?: string; resume?: GeneratedResume["resume"]; skipped?: string[] }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -183,7 +197,7 @@ export async function syncResumeLanguageAction(
   if (!user) return { error: "請先登入" };
 
   try {
-    return { resume: await syncResumeEdit({ supabase, userId: user.id, sourceLanguage, before, after, target }) };
+    return await syncResumeEdit({ supabase, userId: user.id, sourceLanguage, before, after, target, force });
   } catch (e) {
     return { error: e instanceof Error ? e.message : "同步失敗" };
   }
@@ -399,6 +413,37 @@ export async function saveLayoutAction(
   return { success: true };
 }
 
+/**
+ * 畫布的「自動填滿」：一頁下面空太多時，用跟生成履歷時一樣的方式放大排版、撐開段落間距（enlargeToFill），
+ * 只量 PDF、不呼叫 AI。只回傳排版設定，畫布套上後跟手動調排版一樣存檔。
+ */
+export async function autoFillLayoutAction(
+  language: string,
+  resume: GeneratedResume["resume"],
+  contact: ResumeContact,
+): Promise<{ error?: string; layout?: ResumeLayoutSettings; spareLines?: number }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "請先登入" };
+
+  try {
+    const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
+    const labels = readCustomSectionLabels(profile?.data)[language === "zh" ? "zh" : "en"];
+    const measure = (r: GeneratedResume["resume"]) => measureResumePdf({ contact, resume: r, language, labels });
+    // 從沒有微調過的排版開始算，不然上一次撐開的間距會被當成起點。
+    const start = { ...resume, layout: withoutAutoFill(readLayoutSettings(resume.layout, language)) };
+    const fit = await measure(start);
+    if (fit.pages > 1) return { error: "內容已經超出一頁，沒有空白可以填" };
+    const filled = await enlargeToFill(start, language, fit.fillRatio, measure);
+    const after = await measure(filled);
+    return { layout: readLayoutSettings(filled.layout, language), spareLines: after.spareLines };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "自動填滿失敗" };
+  }
+}
+
 export async function finalizeResumeAction(
   applicationId: string,
 ): Promise<{ error?: string; success?: boolean }> {
@@ -424,47 +469,9 @@ export async function finalizeResumeAction(
   const labelBase =
     (application.company_name || "app") + "-" + (application.job_title || applicationId.slice(0, 8));
 
-  // 上一次定案的版本（回到編輯後再定案才會有）。拿來比對這次改了哪幾條，
-  // 只寫回新增或改過的，改掉或刪掉的舊寫法從資料庫拿掉，不會越定案越多重複的寫法。
+  // 上一次定案的版本（回到編輯後再定案才會有）。拿來找出這次改掉或刪掉的舊寫法，
+  // 從資料庫拿掉，不會越定案越多重複的寫法。要在下面覆蓋 resume_snapshot 之前讀。
   const previous = (application.resume_snapshot ?? null) as ResumeMap | null;
-
-  // 中英文的 AI 判斷同時跑（以前一個語言等完一次 AI 才換下一個，第一次定案要等很久），
-  // 寫進資料庫再一個語言一個語言來：兩邊都會更新個人資料，同時寫會互相蓋掉。
-  const plans = await Promise.all(
-    languages.map(async (lang) => {
-      const resume = draft[lang];
-      if (!resume) return null;
-      const sourceLabel = `${labelBase}_${lang}_定案`;
-      const before = previous?.[lang];
-
-      if (before) {
-        const nowBullets = new Set(allBullets(resume));
-        // 資料庫裡存的是拿掉美金換算的寫法，比對要刪的舊寫法時也要拿掉。
-        const staleBullets = allBullets(before)
-          .filter((b) => !nowBullets.has(b))
-          .map(withoutUsdNote);
-        if (staleBullets.length > 0) {
-          await removeVariantsFromSource({ supabase, userId: user.id, sourceLabel, texts: staleBullets });
-        }
-      }
-
-      const toWrite = before ? onlyNewBullets(resume, before) : resume;
-      const rawContent = serializeResumeSections(toWrite);
-      if (!rawContent.trim()) return null;
-
-      const plan = await planExperienceMerge({
-        supabase,
-        userId: user.id,
-        sourceLabel,
-        rawContent,
-        language: lang === "zh" || lang === "en" ? lang : undefined,
-      });
-      return { sourceLabel, plan };
-    }),
-  );
-  for (const p of plans) {
-    if (p) await applyExperienceMerge({ supabase, userId: user.id, sourceLabel: p.sourceLabel, plan: p.plan });
-  }
 
   const { error: updateError } = await supabase
     .from("applications")
@@ -478,11 +485,82 @@ export async function finalizeResumeAction(
 
   if (updateError) return { error: updateError.message };
 
+  // 寫回經歷資料庫要等 AI 判斷（每個語言 30–90 秒），改成回應送出後在背景跑，
+  // 使用者按下定案就能直接進到求職信（2026-11-04 Z 回報定案跑太久）。
+  const userId = user.id;
+  after(() =>
+    queueWriteBack(userId, () => writeBackFinalizedResume({ userId, labelBase, draft, previous, languages })),
+  );
+
   revalidatePath(`/applications/${applicationId}`);
 
   revalidatePath(`/applications/${applicationId}/cover-letter`);
   revalidatePath("/");
   return { success: true };
+}
+
+// 同一個使用者的背景寫回一次只跑一個：連續定案兩份應徵，或定案後馬上回到編輯再定案，
+// 兩次寫回同時讀改同一筆經歷會互相蓋掉。只在同一個 server 程序內有效，本機跟自架都是單一程序。
+const writeBackQueues = new Map<string, Promise<void>>();
+
+function queueWriteBack(userId: string, task: () => Promise<void>): Promise<void> {
+  const next = (writeBackQueues.get(userId) ?? Promise.resolve())
+    .then(task)
+    .catch((err) => {
+      // 失敗只留在 server log，使用者已經離開這個畫面。沒寫進去的內容不會自動補，
+      // 要等使用者回到編輯、改過那條 bullet 再定案才會再送（沒改的會被當成上次判斷過）。
+      console.error("[finalize] 背景寫回經歷資料庫失敗", err);
+    });
+  writeBackQueues.set(userId, next);
+  void next.then(() => {
+    if (writeBackQueues.get(userId) === next) writeBackQueues.delete(userId);
+  });
+  return next;
+}
+
+async function writeBackFinalizedResume(params: {
+  userId: string;
+  labelBase: string;
+  draft: ResumeMap;
+  previous: ResumeMap | null;
+  languages: string[];
+}) {
+  const { userId, labelBase, draft, previous, languages } = params;
+  // 回應已經送出，使用者的 cookie 不一定還能用；這裡每個查詢都有限定 user_id。
+  const supabase = createServiceClient();
+
+  // 中英文的 AI 判斷同時跑（以前一個語言等完一次 AI 才換下一個，第一次定案要等很久），
+  // 寫進資料庫再一個語言一個語言來：兩邊都會更新個人資料，同時寫會互相蓋掉。
+  const plans = await Promise.all(
+    languages.map(async (lang) => {
+      const resume = draft[lang];
+      if (!resume) return null;
+      const sourceLabel = `${labelBase}_${lang}_定案`;
+      const language = lang === "zh" || lang === "en" ? lang : undefined;
+      const before = previous?.[lang];
+
+      if (before) {
+        const nowBullets = new Set(allBullets(resume));
+        // 資料庫裡存的是拿掉美金換算的寫法，比對要刪的舊寫法時也要拿掉。
+        const staleBullets = allBullets(before)
+          .filter((b) => !nowBullets.has(b))
+          .map(withoutUsdNote);
+        if (staleBullets.length > 0) {
+          await removeVariantsFromSource({ supabase, userId, sourceLabel, texts: staleBullets });
+        }
+      }
+
+      const known = await loadKnownTexts({ supabase, userId, language });
+      const rawContent = serializeResumeSections(withoutKnownBullets(resume, known, before));
+      if (!rawContent.trim()) return null;
+
+      const plan = await planExperienceMerge({ supabase, userId, sourceLabel, rawContent, language });
+      return { sourceLabel, plan };
+    }),
+  );
+  for (const p of plans) {
+    if (p) await applyExperienceMerge({ supabase, userId, sourceLabel: p.sourceLabel, plan: p.plan });
+  }
 }
 
 type CoverLetterGenerateResult = {
@@ -830,7 +908,7 @@ export async function deleteApplicationAction(
 }
 
 // 定案後想再修改：狀態退回草稿，畫布恢復可編輯。已經寫回經歷資料庫的內容先不動，
-// 重新定案時會跟上一次定案的版本比對：改掉或刪掉的舊寫法移除、只寫回新的，不會重複新增。
+// 重新定案時會跟上一次定案的版本比對，改掉或刪掉的舊寫法移除；資料庫已經有的寫法不會再寫一次。
 export async function reopenResumeAction(
   applicationId: string,
 ): Promise<{ error?: string; success?: boolean }> {

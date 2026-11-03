@@ -379,6 +379,27 @@ async function loadExistingSummary(
 }
 
 /**
+ * 定案寫回前先用程式過濾：資料庫裡已經有一模一樣寫法的 bullet、職稱，就不用再送給 AI 判斷。
+ * 生成履歷時很多 bullet 是原封不動從資料庫挑的，以前全部送 AI，定案一次要等 30–90 秒，
+ * 資料庫越大越慢（2026-11-04 Z 回報定案跑太久）。比對方式跟 removeVariantsFromSource 一樣，
+ * 忽略空白、標點、大小寫。
+ */
+export async function loadKnownTexts(params: {
+  supabase: SupabaseClient;
+  userId: string;
+  language?: TextLanguage;
+}): Promise<{ hasBullet: (text: string) => boolean; hasRole: (role: string) => boolean }> {
+  const { supabase, userId, language } = params;
+  const entries = (await loadExistingSummary(supabase, userId)).filter((e) => !language || e.language === language);
+  const bullets = new Set(entries.flatMap((e) => e.achievements.flatMap((a) => a.variantTexts)).map(normalizeForDedupe));
+  const roles = new Set(entries.flatMap((e) => e.roles).map(normalizeForDedupe));
+  return {
+    hasBullet: (text) => bullets.has(normalizeForDedupe(text)),
+    hasRole: (role) => roles.has(normalizeForDedupe(role)),
+  };
+}
+
+/**
  * 重新定案時用：把「某次定案寫進來、這次已經改掉或刪掉」的寫法從資料庫移除。
  * 只動 source 完全等於這個來源標籤的寫法，別的來源（上傳的履歷、其他應徵、AI 潤飾）一律不碰。
  * 一個成就的寫法被刪光了，就把那個成就也拿掉。

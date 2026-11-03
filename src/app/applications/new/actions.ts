@@ -4,6 +4,7 @@ import { normalizeJobUrl } from "@/lib/jobs/jobUrl";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { tidyJobPage } from "@/lib/jobs/tidyJobPage";
+import { textLanguage } from "@/lib/text/detectLanguage";
 
 type CreateResult = { error?: string };
 
@@ -37,8 +38,10 @@ export async function createApplication(formData: FormData): Promise<CreateResul
   const companyName = (formData.get("companyName") as string)?.trim();
   const jobTitle = (formData.get("jobTitle") as string)?.trim();
   const jobDescription = (formData.get("jobDescription") as string)?.trim();
-  // 主版本排第一個（中英文都勾時使用者選的），生成時以它為主、另一個照它改寫；履歷頁也先打開它。
-  const primaryLanguage = formData.get("primaryLanguage") as string | null;
+  // 主版本排第一個，生成時以它為主、另一個照它改寫；履歷頁也先打開它。
+  // 中英文都勾時跟 JD 同一個語言的當主版本：以前讓使用者選，但之後的修改兩個語言會互相同步，
+  // 主版本只影響第一次生成，不用多問一題（2026-11-04 Z 提出）。
+  const primaryLanguage = textLanguage(jobDescription ?? "") ?? "zh";
   const languages = (formData.getAll("language") as string[]).sort((a, b) =>
     a === primaryLanguage ? -1 : b === primaryLanguage ? 1 : 0,
   );

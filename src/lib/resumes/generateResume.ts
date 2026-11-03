@@ -22,8 +22,10 @@ import { resolveMetrics } from "./typography";
 import {
   BODY_PT_MAX,
   BODY_PT_STEP,
+  GAP_SCALE_MAX,
   readLayoutDefaults,
   readLayoutSettings,
+  withoutAutoFill,
   type ResumeLayoutSettings,
 } from "./typography";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
@@ -970,7 +972,8 @@ async function fitOnePage(params: {
     fit = after;
     askLines = spareLinesOf(fit.fillRatio);
   }
-  if (fit.fillRatio >= TARGET_FILL_RATIO) return current;
+  // 內容夠了（92% 以上），剩下不到幾行的空白撐開段落間距補滿；字級跟間距檔位不動。
+  if (fit.fillRatio >= TARGET_FILL_RATIO) return stretchGaps(current, params.lang, fit.fillRatio, measure);
 
   // 經歷資料庫的內容都用完了還是不滿一頁：一步步放寬間距、放大字級，挑還在一頁內、最滿的那個。
   return enlargeToFill(current, params.lang, fit.fillRatio, measure);
@@ -1295,15 +1298,16 @@ function dbExhausted(resume: Resume, entries: ExperienceEntryRow[]): boolean {
 
 /**
  * 試每一種「間距（目前的／寬鬆）× 內文字級（目前的到上限，每次 +0.5pt）」，量 PDF，
- * 挑還在一頁內、填得最滿的那一個。量 PDF 是本機排版、不呼叫 AI，全部試一遍也只要幾秒。
+ * 挑還在一頁內、填得最滿的那一個；剩下不到一級字的空白，再撐開段落間距補滿（stretchGaps）。
+ * 量 PDF 是本機排版、不呼叫 AI，全部試一遍也只要幾秒。履歷頁的「自動填滿」也用這個。
  */
-async function enlargeToFill(
+export async function enlargeToFill(
   resume: Resume,
   lang: string,
   fillRatio: number,
   measure: (r: Resume) => Promise<{ pages: number; fillRatio: number }>,
 ): Promise<Resume> {
-  const layout = readLayoutSettings(resume.layout, lang);
+  const layout = withoutAutoFill(readLayoutSettings(resume.layout, lang));
   const spacings: ResumeLayoutSettings["spacing"][] = layout.spacing === "loose" ? ["loose"] : [layout.spacing, "loose"];
   let best = resume;
   let bestFill = fillRatio;
@@ -1319,6 +1323,38 @@ async function enlargeToFill(
         bestFill = fit.fillRatio;
       }
     }
+  }
+  return stretchGaps(best, lang, bestFill, measure);
+}
+
+/** 段落間距撐到這個範圍就停。不撐到 100%：Word 跟 PDF 排版有一點點誤差，剛好塞滿的話 Word 可能擠到第二頁。 */
+const GAP_FILL_TARGET = 0.975;
+const GAP_FILL_MAX = 0.99;
+
+/** 二分搜尋段落間距倍數（1 到 GAP_SCALE_MAX），找不超過 GAP_FILL_MAX、最接近填滿的那一個。 */
+async function stretchGaps(
+  resume: Resume,
+  lang: string,
+  fillRatio: number,
+  measure: (r: Resume) => Promise<{ pages: number; fillRatio: number }>,
+): Promise<Resume> {
+  if (fillRatio >= GAP_FILL_TARGET) return resume;
+  const layout = readLayoutSettings(resume.layout, lang);
+  let best = resume;
+  let low = 1;
+  let high = GAP_SCALE_MAX;
+  for (let i = 0; i < 8; i++) {
+    const gapScale = Math.round(((low + high) / 2) * 100) / 100;
+    const trial = { ...resume, layout: { ...layout, gapScale } };
+    const fit = await measure(trial).catch(() => null);
+    if (!fit) break;
+    if (fit.pages > 1 || fit.fillRatio > GAP_FILL_MAX) {
+      high = gapScale;
+      continue;
+    }
+    best = trial;
+    low = gapScale;
+    if (fit.fillRatio >= GAP_FILL_TARGET) break;
   }
   return best;
 }

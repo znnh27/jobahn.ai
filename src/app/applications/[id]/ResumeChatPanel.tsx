@@ -33,7 +33,8 @@ export function ResumeChatPanel({
   applicationId: string;
   language: string;
   resume: Resume;
-  onApply: (next: Resume) => void;
+  /** base：送出時的內容，AI 是照它改的；畫面要拿它跟使用者等待期間的修改合併。 */
+  onApply: (base: Resume, next: Resume) => void;
   /** 套用背景檢查的改寫，回傳實際換掉幾條（畫面上那條已經不是原文就不換）。 */
   onApplyRewrites: (rewrites: ChatRewrite[]) => number;
   /** 背景檢查開始、全部跑完時通知畫布。 */
@@ -59,7 +60,7 @@ export function ResumeChatPanel({
         const result = await reviseResumeAction(applicationId, language, before, history, instruction);
         if (result.error || !result.resume) return { error: result.error ?? "修改失敗，請再試一次" };
         const revised = result.resume;
-        onApply(revised);
+        onApply(before, revised);
         const carried = unchecked.current;
         if (!result.needsCheck && carried.texts.length === 0) return { reply: result.reply };
 

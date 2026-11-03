@@ -13,6 +13,7 @@ import {
   CONTACT_PT_MIN,
   SPACING_OPTIONS,
   resolveMetrics,
+  withoutAutoFill,
   type PdfFit,
   type ResumeLayoutSettings,
 } from "@/lib/resumes/typography";
@@ -51,12 +52,14 @@ export function LayoutMenu({
     };
   }, [open]);
 
+  // 自己調字級、間距時，自動填滿的段落間距微調就不算了，回到三種固定間距。
+  const change = (next: ResumeLayoutSettings) => onChange(withoutAutoFill(next));
   const stepBodyPt = (delta: number) =>
-    onChange({ ...layout, bodyPt: Math.min(BODY_PT_MAX, Math.max(BODY_PT_MIN, layout.bodyPt + delta)) });
+    change({ ...layout, bodyPt: Math.min(BODY_PT_MAX, Math.max(BODY_PT_MIN, layout.bodyPt + delta)) });
   // 沒單獨調過抬頭字級時，顯示目前跟著內文縮放的值，從這個值開始加減。
   const contactPt = resolveMetrics(language, layout).contact;
   const stepContactPt = (delta: number) =>
-    onChange({
+    change({
       ...layout,
       contactPt: Math.min(CONTACT_PT_MAX, Math.max(CONTACT_PT_MIN, Math.round((contactPt + delta) * 2) / 2)),
     });
@@ -85,7 +88,7 @@ export function LayoutMenu({
               ariaLabel="上下間距"
               options={SPACING_OPTIONS}
               value={layout.spacing}
-              onChange={(spacing) => onChange({ ...layout, spacing })}
+              onChange={(spacing) => change({ ...layout, spacing })}
             />
           </div>
 

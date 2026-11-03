@@ -7,14 +7,33 @@ import { AlertIcon, CheckCircleIcon, CloseIcon } from "@/app/icons";
  * 下一個動作的訊息會直接取代（2026-10-27 Z 要求）。
  * 樣式用中性色：一般訊息白底灰框、灰色勾勾，不用綠色（會跟右欄「已寫到」的綠色勾勾撞在一起）；
  * 「錯誤：」開頭或講到失敗的才用紅色。
+ * action：訊息後面接一個動作按鈕，例如同步沒改到時的「還是同步過去」。
  */
-export function StatusMessage({ message, onClose }: { message: string | null; onClose: () => void }) {
+export function StatusMessage({
+  message,
+  onClose,
+  action,
+}: {
+  message: string | null;
+  onClose: () => void;
+  action?: { label: string; onClick: () => void; disabled?: boolean } | null;
+}) {
   if (!message) return null;
   const isError = message.startsWith("錯誤") || message.includes("失敗");
   return (
     <div className={`status-message ${isError ? "status-message--error" : ""}`} role={isError ? "alert" : "status"}>
       <span className="status-message-icon">{isError ? <AlertIcon /> : <CheckCircleIcon />}</span>
       <p className="status-message-text">{message}</p>
+      {action && (
+        <button
+          type="button"
+          className="btn btn-secondary btn--sm status-message-action"
+          onClick={action.onClick}
+          disabled={action.disabled}
+        >
+          {action.label}
+        </button>
+      )}
       <button type="button" className="icon-btn" aria-label="關掉這則訊息" onClick={onClose}>
         <CloseIcon />
       </button>

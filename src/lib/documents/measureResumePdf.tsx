@@ -58,8 +58,11 @@ export async function measureResumePdf(input: ResumeDocInput): Promise<PdfFit> {
   if (pages.length <= 1) {
     // 第一頁用了多高：最下面那一行的底部，扣掉上方留白，除以內容區高度。
     const bottom = Math.max(PAGE_PADDING_PT, ...(pages[0] ?? []).map((p) => p.bottom));
-    const fillRatio = (bottom - PAGE_PADDING_PT) / (PAGE_HEIGHT_PT - PAGE_PADDING_PT * 2);
-    return { pages: pages.length, overflowPt: 0, breakAt: null, fillRatio: Math.min(1, Math.max(0, fillRatio)) };
+    const contentHeight = PAGE_HEIGHT_PT - PAGE_PADDING_PT * 2;
+    const fillRatio = Math.min(1, Math.max(0, (bottom - PAGE_PADDING_PT) / contentHeight));
+    const line = resolveMetrics(input.language, input.resume.layout).line;
+    const spareLines = Math.floor(((1 - fillRatio) * contentHeight) / line);
+    return { pages: pages.length, overflowPt: 0, breakAt: null, fillRatio, spareLines };
   }
 
   const overflowPt = pages
@@ -77,5 +80,5 @@ export async function measureResumePdf(input: ResumeDocInput): Promise<PdfFit> {
       linesBefore: onFirstPage ? Math.round((onFirstPage.bottom - onFirstPage.top) / line) : 0,
     };
   }
-  return { pages: pages.length, overflowPt: Math.round(overflowPt), breakAt, fillRatio: 1 };
+  return { pages: pages.length, overflowPt: Math.round(overflowPt), breakAt, fillRatio: 1, spareLines: 0 };
 }

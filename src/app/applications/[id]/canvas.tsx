@@ -12,6 +12,7 @@ import {
   finalizeResumeAction,
   reopenResumeAction,
   suggestTrimAction,
+  autoFillLayoutAction,
   measureResumesAction,
   saveLayoutAction,
   proofreadResumeAction,
@@ -58,6 +59,7 @@ import { StatusMessage } from "@/app/StatusMessage";
 import { InfoTip } from "@/app/InfoTip";
 import { ResumeChatPanel } from "./ResumeChatPanel";
 import { splitList } from "@/lib/resumes/background";
+import { mergeResumeEdits } from "@/lib/resumes/mergeResume";
 import {
   CoverLetterOptionsFields,
   choiceInvalid,
@@ -109,7 +111,18 @@ function sameContent(a?: Resume, b?: Resume): boolean {
   return key(a) === key(b);
 }
 
-type Busy = "generate" | "rescore" | "condition" | "finalize" | "reopen" | "trim" | "proofread";
+/** 只差在標點、空白、大小寫、全半形：另一個語言不用跟著改，不用問 AI（以前交給 AI 判斷，AI 會把有實質修改的也當成這種）。 */
+function sameWording(a?: Resume, b?: Resume): boolean {
+  const key = (r?: Resume) =>
+    r
+      ? JSON.stringify({ ...r, layout: undefined }, (_, v) =>
+          typeof v === "string" ? v.normalize("NFKC").toLowerCase().replace(/[\s\p{P}]/gu, "") : v,
+        )
+      : "";
+  return key(a) === key(b);
+}
+
+type Busy = "generate" | "rescore" | "condition" | "finalize" | "reopen" | "trim" | "proofread" | "fill";
 
 const LANG_LABEL: Record<string, string> = { en: "英文", zh: "中文" };
 
@@ -208,6 +221,8 @@ export function Canvas({
   const activeLangRef = useRef(activeLang);
   activeLangRef.current = activeLang;
   const [message, setMessage] = useState<string | null>(null);
+  // 訊息後面的動作按鈕，只在顯示的還是那則訊息時出現：其他動作換了訊息，按鈕就跟著消失。
+  const [messageAction, setMessageAction] = useState<{ message: string; label: string; onClick: () => void } | null>(null);
   // 重新檢查評分這種簡短確認不進訊息列，按鈕本身變「✓ 已重新評分」2 秒（見 useFlash）。
   const { flashed, flash } = useFlash();
   // 記錄是哪個動作在跑，進度條的說明文字跟位置才對得上。
@@ -231,6 +246,11 @@ export function Canvas({
   // 使用者按掉超出一頁的警告時，記下當時超出多少；之後又變得更長才再跳出來。
   const [dismissedOverflowPt, setDismissedOverflowPt] = useState<number | null>(null);
   const showOverflowAlert = overflowPt > 0 && (dismissedOverflowPt === null || overflowPt > dismissedOverflowPt);
+  // 一頁下面空太多（2 行以上）時提醒可以自動填滿；按掉或填不滿時記下當時空幾行，之後空得更多才再出現。
+  const spareLines = fit && !measuring ? fit.spareLines : 0;
+  const [dismissedSpareLines, setDismissedSpareLines] = useState<number | null>(null);
+  const showSpareAlert =
+    !showOverflowAlert && spareLines >= 2 && (dismissedSpareLines === null || spareLines > dismissedSpareLines);
   const layoutSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [trimPlan, setTrimPlan] = useState<TrimPlan | null>(null);
   const [pendingDownload, setPendingDownload] = useState<string | null>(null);
@@ -261,7 +281,7 @@ export function Canvas({
   const rescoreProgress = useEstimatedProgress(busy === "rescore", 20000 * langCount);
   // 補摘要（每個語言一次）＋重新評分。
   const conditionProgress = useEstimatedProgress(busy === "condition", 35000 * langCount);
-  const finalizeProgress = useEstimatedProgress(busy === "finalize", 20000);
+  const finalizeProgress = useEstimatedProgress(busy === "finalize", 2000);
   const trimProgress = useEstimatedProgress(busy === "trim", 20000);
   const proofreadProgress = useEstimatedProgress(busy === "proofread", 40000);
 
@@ -344,6 +364,29 @@ export function Canvas({
     });
   }
 
+  /** 「自動填滿」：放大字級、撐開段落間距補滿一頁（不呼叫 AI），跟手動調排版一樣存檔。 */
+  function handleAutoFill() {
+    if (!activeResume) return;
+    const lang = activeLang;
+    const resume = activeResume;
+    setMessage(null);
+    void run("fill", async () => {
+      const result = await autoFillLayoutAction(lang, resume, contact);
+      if (result.error || !result.layout) {
+        setMessage(`錯誤：${result.error ?? "自動填滿失敗"}`);
+        return;
+      }
+      changeLayout(result.layout);
+      const left = result.spareLines ?? 0;
+      if (left >= 2) {
+        setDismissedSpareLines(left);
+        setMessage(`字級、間距已經調到上限，下面還空大約 ${left} 行，可以跟 AI 聊補一些內容`);
+      } else {
+        setMessage("已調整字級、間距填滿一頁；不滿意可以用「排版」調回來");
+      }
+    });
+  }
+
   function handleApplyTrim(picked: TrimSuggestion[]) {
     updateResume(activeLang, (r) => applyTrimSuggestions(r, picked));
     setCanvasVersion((v) => v + 1);
@@ -386,7 +429,12 @@ export function Canvas({
   const prevDraft = useRef<ResumeMap | null>(initialDraft);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncChain = useRef<Promise<void>>(Promise.resolve());
+  // 兩個語言一起換掉、但其中有使用者還沒同步的修改時（補摘要時順便合併了等待期間的修改），
+  // 用這份當基準，不直接拿換上去的內容當基準，那些修改才會同步到另一個語言。
+  const pendingSyncBase = useRef<ResumeMap | null>(null);
   const [syncStatus, setSyncStatus] = useState<{ lang: string; state: "syncing" | "done" } | null>(null);
+  // AI 判斷另一個語言不用改時，訊息列顯示的那句（附「還是同步過去」）。下一次同步開始時拿掉，那次會一起同步。
+  const syncNote = useRef<string | null>(null);
 
   function scheduleSync() {
     if (syncTimer.current) clearTimeout(syncTimer.current);
@@ -411,7 +459,12 @@ export function Canvas({
     return queueSyncs();
   }
 
-  async function runSync(lang: string) {
+  /** 「還是同步過去」：AI 判斷不用改、使用者覺得要改時按。 */
+  function forceSync(lang: string) {
+    syncChain.current = syncChain.current.then(() => runSync(lang, true));
+  }
+
+  async function runSync(lang: string, force = false) {
     const other = pairLangs?.find((l) => l !== lang);
     const base = syncBase.current;
     const current = draftRef.current;
@@ -420,13 +473,22 @@ export function Canvas({
     const after = current[lang];
     const target = current[other];
     if (sameContent(before, after)) return;
+    if (sameWording(before, after)) {
+      syncBase.current = { ...base, [lang]: after };
+      return;
+    }
     // 正在打字、或跟 AI 聊的寫法檢查還沒跑完（它還會再改內容）：晚點再同步。
     if (liveEdit.current || chatCheckingRef.current) {
       scheduleSync();
       return;
     }
+    if (syncNote.current) {
+      const note = syncNote.current;
+      syncNote.current = null;
+      setMessage((m) => (m === note ? null : m));
+    }
     setSyncStatus({ lang: other, state: "syncing" });
-    const result = await syncResumeLanguageAction(lang, before, after, target).catch((e: unknown) => ({
+    const result = await syncResumeLanguageAction(lang, before, after, target, force).catch((e: unknown) => ({
       error: e instanceof Error ? e.message : "同步失敗",
       resume: undefined,
     }));
@@ -447,6 +509,17 @@ export function Canvas({
       scheduleSync();
       return;
     }
+    // AI 一個修改都沒給（skipped 是那幾處的名稱）。AI 有給修改、改完剛好跟現在一樣的，代表本來就一致，照一般的同步完成處理。
+    if (result.skipped?.length) {
+      // 基準不往前移：使用者按「還是同步過去」，或下次修改時，這次的修改會一起再同步一次。
+      setSyncStatus(null);
+      const places = result.skipped.map((p) => `「${p}」`).join("");
+      const note = `你在${LANG_LABEL[lang] ?? lang}版改的${places}，${LANG_LABEL[other] ?? other}版沒有跟著改`;
+      syncNote.current = note;
+      setMessage(note);
+      setMessageAction({ message: note, label: "還是同步過去", onClick: () => forceSync(lang) });
+      return;
+    }
     const next = { ...latest, [other]: { ...result.resume, layout: latest[other].layout } };
     // 另一個語言自己也有還沒同步的修改時，它的基準不動，之後照常同步回來。
     const otherInSync = sameContent(baseNow[other], target);
@@ -464,11 +537,14 @@ export function Canvas({
     if (!pairLangs || !draft || finalized) return;
     const changed = pairLangs.filter((l) => !sameContent(prev?.[l], draft[l]));
     if (changed.length === 0) return;
+    const base = pendingSyncBase.current;
+    pendingSyncBase.current = null;
     if (changed.length === 2 || !syncBase.current) {
-      syncBase.current = draft;
+      syncBase.current = base ?? draft;
       if (syncTimer.current) clearTimeout(syncTimer.current);
       syncTimer.current = null;
       setSyncStatus(null);
+      if (base && pairLangs.some((l) => !sameContent(base[l], draft[l]))) scheduleSync();
       return;
     }
     // 同步回來的那一份（跟基準一樣）不用再同步回去。
@@ -562,6 +638,35 @@ export function Canvas({
 
   // 畫布上正在打字（還沒失焦）時是 true，見 ResumePageCanvas 的 LiveContext。
   const liveEdit = useRef(false);
+  // 打字當下的內容只排程存檔、不進 draft（見 updateResume），失焦才進。
+  // AI 結果在這時候回來，要拿這份跟它合併，不然正在打的字會被蓋掉。
+  const typedDraft = useRef<ResumeMap | null>(null);
+
+  /** 使用者現在的內容，含正在打、還沒失焦的那一格。 */
+  function currentDraft(): ResumeMap | null {
+    return typedDraft.current ?? draftRef.current;
+  }
+
+  /** AI 照 base 改好的 theirs，跟使用者這段時間的修改合併（見 mergeResumeEdits）。 */
+  function mergeWithLatest(lang: string, base: Resume, theirs: Resume) {
+    const latest = currentDraft();
+    const ours = latest?.[lang] ?? base;
+    const { resume, conflicts } = mergeResumeEdits(base, ours, theirs);
+    return { resume: { ...resume, layout: ours.layout ?? theirs.layout }, conflicts };
+  }
+
+  /** 一次換掉內容（AI 結果、上一步）後：打字的暫存作廢，畫布重新掛載才看得到新內容。 */
+  function replaceDraft(next: ResumeMap) {
+    typedDraft.current = null;
+    draftRef.current = next;
+    setDraft(next);
+    setCanvasVersion((v) => v + 1);
+    autoSave(next);
+  }
+
+  function keptNote(conflicts: number) {
+    return conflicts > 0 ? `（有 ${conflicts} 處你剛手動改過，保留你的版本）` : "";
+  }
 
   function updateResume(lang: string, updater: (r: Resume) => Resume) {
     if (!draft) return;
@@ -570,30 +675,32 @@ export function Canvas({
     if (JSON.stringify(next[lang]) === JSON.stringify(draft[lang])) return;
     // 打字當下：只排程存檔，畫面狀態跟上一步等失焦再更新（重新渲染會讓游標跑掉）。
     if (liveEdit.current) {
+      typedDraft.current = next;
       autosave.schedule(next);
       return;
     }
+    typedDraft.current = null;
     remember(draft);
     setDraft(next);
     autosave.schedule(next);
   }
 
-  // 「跟 AI 聊」改好的整份履歷換進草稿並自動存檔：記進上一步、畫布重新掛載才看得到新內容。字級間距維持現在的設定。
-  function applyChatRevision(lang: string, next: Resume) {
-    if (!draft) return;
-    const nextDraft = { ...draft, [lang]: { ...next, layout: draft[lang]?.layout ?? next.layout } };
-    remember(draft);
-    setDraft(nextDraft);
-    setCanvasVersion((v) => v + 1);
-    autoSave(nextDraft);
-    setMessage("AI 改好了；不滿意可以按「上一步」");
+  // 「跟 AI 聊」改好的履歷換進草稿並自動存檔，記進上一步。AI 是照送出當下的 base 改的，
+  // 只套 AI 改到的地方，等待期間使用者改的其他地方留著。字級間距維持現在的設定。
+  function applyChatRevision(lang: string, base: Resume, next: Resume) {
+    const latest = currentDraft();
+    if (!latest) return;
+    const { resume, conflicts } = mergeWithLatest(lang, base, next);
+    remember(latest);
+    replaceDraft({ ...latest, [lang]: resume });
+    setMessage(`AI 改好了；不滿意可以按「上一步」${keptNote(conflicts)}`);
   }
 
   // 「跟 AI 聊」背景檢查回來的改寫：晚幾秒才到，要用最新的草稿（draftRef），不能用送出當下的。
   // 只換文字還是原文的那條；使用者這段時間手動改過，或正在畫布上打字，就不換。
   function applyChatRewrites(lang: string, rewrites: ChatRewrite[]): number {
     const current = draftRef.current;
-    if (!current?.[lang] || liveEdit.current) return 0;
+    if (!current?.[lang] || liveEdit.current || typedDraft.current) return 0;
     const map = new Map(rewrites.map((r) => [r.from, r.to]));
     let applied = 0;
     const swap = (entries: Resume["work_experience"]) =>
@@ -725,10 +832,25 @@ export function Canvas({
       setAtsScore(result.data.ats_score);
       setGaps(result.data.ats_gaps);
       if (willing) {
-        remember(previous);
-        setDraft(result.data.resume_draft);
-        setCanvasVersion((v) => v + 1);
-        setMessage("摘要補上了這個條件，也重新評分了；不滿意可以按「上一步」");
+        // AI 照送出當下的內容改的，兩個語言都只套 AI 改到的地方，等待期間使用者改的留著。
+        const theirs = result.data.resume_draft;
+        const latest = currentDraft() ?? previous;
+        let conflicts = 0;
+        const next: ResumeMap = { ...latest };
+        for (const lang of Object.keys(theirs)) {
+          if (!previous[lang]) {
+            next[lang] = theirs[lang];
+            continue;
+          }
+          const merged = mergeWithLatest(lang, previous[lang], theirs[lang]);
+          next[lang] = merged.resume;
+          conflicts += merged.conflicts;
+        }
+        // 兩個語言的 AI 結果本來就一致，拿它當同步基準：使用者等待期間改的，之後照常同步到另一個語言。
+        pendingSyncBase.current = theirs;
+        remember(latest);
+        replaceDraft(next);
+        setMessage(`摘要補上了這個條件，也重新評分了；不滿意可以按「上一步」${keptNote(conflicts)}`);
       } else {
         setMessage("記下來了，這項不會寫進履歷");
       }
@@ -773,7 +895,7 @@ export function Canvas({
       setFinalized(true);
       setPast([]);
       setFuture([]);
-      setMessage("已定案，可以進到求職信步驟了");
+      setMessage("已定案，可以進到求職信步驟了。這次用到的內容會在背景寫回經歷資料庫，大約 1 分鐘");
       // 讓步驟列更新到「寫求職信」。
       router.refresh();
     });
@@ -955,7 +1077,15 @@ export function Canvas({
             )}
           </div>
         </div>
-        <StatusMessage message={message} onClose={() => setMessage(null)} />
+        <StatusMessage
+          message={message}
+          onClose={() => setMessage(null)}
+          action={
+            messageAction && messageAction.message === message
+              ? { label: messageAction.label, onClick: messageAction.onClick, disabled: isPending }
+              : null
+          }
+        />
 
         {generateProgress !== null && (
           <ProgressBar value={generateProgress} label="AI 正在依 JD 重新挑選經歷、產生履歷…" />
@@ -967,7 +1097,7 @@ export function Canvas({
           <ProgressBar value={conditionProgress} label="把這個條件寫進摘要、重新計算符合度…" />
         )}
         {finalizeProgress !== null && (
-          <ProgressBar value={finalizeProgress} label="定案中，把這次用到的內容寫回經歷資料庫…" />
+          <ProgressBar value={finalizeProgress} label="定案中…" />
         )}
         {proofreadProgress !== null && (
           <ProgressBar value={proofreadProgress} label="校稿中：檢查錯字、文法，跟經歷資料庫對事實…" />
@@ -1002,12 +1132,38 @@ export function Canvas({
           </div>
         )}
 
+        {showSpareAlert && (
+          <div className="overflow-alert overflow-alert--info" role="status">
+            <span
+              className="overflow-alert-text"
+              title="下載的 PDF 下面還有空白。自動填滿會放大字級、撐開段落間距，不會改內容。"
+            >
+              PDF 下面還空大約 {spareLines} 行，可以自動調整排版填滿
+            </span>
+            <div className="overflow-alert-actions">
+              <button type="button" className="btn btn-secondary" onClick={handleAutoFill} disabled={isPending}>
+                {busy === "fill" && <Spinner />}
+                自動填滿
+              </button>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="關掉這個提醒"
+                title="關掉這個提醒（保留現在的空白）"
+                onClick={() => setDismissedSpareLines(spareLines)}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+        )}
+
         <ResumePageCanvas
           key={`${activeLang}-${canvasVersion}`}
           resume={resume}
           language={activeLang}
           contact={contact}
-          editable={!finalized}
+          editable={!finalized && busy !== "generate"}
           pageBreak={overflowPt > 0 ? (fit?.breakAt ?? null) : null}
           marks={marks}
           liveEdit={liveEdit}
@@ -1136,7 +1292,7 @@ export function Canvas({
           applicationId={applicationId}
           language={activeLang}
           resume={activeResume}
-          onApply={(next) => applyChatRevision(activeLang, next)}
+          onApply={(base, next) => applyChatRevision(activeLang, base, next)}
           onApplyRewrites={(rewrites) => applyChatRewrites(activeLang, rewrites)}
           onCheckingChange={setChatChecking}
           onClose={() => setChatOpen(false)}
