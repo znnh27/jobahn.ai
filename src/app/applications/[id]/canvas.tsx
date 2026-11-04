@@ -55,7 +55,7 @@ import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
 import type { ChatRewrite, GeneratedResume } from "@/lib/resumes/generateResume";
 import { hasRequiredContact, type ResumeContact } from "@/lib/resumes/contact";
 import { ContactDialog } from "@/app/ContactForm";
-import { CheckIcon, CloseIcon, RedoIcon, UndoIcon } from "@/app/icons";
+import { CheckIcon, LinkIcon, UnlinkIcon, CloseIcon, RedoIcon, UndoIcon } from "@/app/icons";
 import { useFlash } from "@/app/useFlash";
 import { useAutoSave } from "@/app/useAutoSave";
 import { SaveStatus } from "@/app/SaveStatus";
@@ -1078,25 +1078,6 @@ export function Canvas({
               </div>
             )}
             {!finalized && <SaveStatus state={autosave.state} error={autosave.error} onRetry={() => void autosave.retry()} />}
-            {!finalized && pairLangs && (
-              <label className="sync-toggle">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={syncEnabled}
-                  onChange={(e) => toggleSync(e.target.checked)}
-                />
-                中英同步
-                <InfoTip label="中英同步的說明">
-                  <ul>
-                    <li>開著：改一個語言，停 3 秒會把同樣的修改套到另一個語言</li>
-                    <li>關掉：只改眼前這個語言，例如中文版滿意、只想縮英文版</li>
-                    <li>再打開時，關掉期間的修改不會補同步，之後的修改才會</li>
-                  </ul>
-                </InfoTip>
-              </label>
-            )}
-            {!finalized && pairLangs && !syncEnabled && <span className="save-status">中英文內容可能不一致</span>}
             {!finalized && syncEnabled && syncStatus && (
               <span className="save-status">
                 {syncStatus.state === "syncing"
@@ -1140,6 +1121,23 @@ export function Canvas({
               </>
             ) : (
               <>
+                {/* 中英同步開關：灰色圖示按鈕，開著是連結、關掉是斷開的連結，說明在滑鼠移上去的提示裡（2026-11-04 Z 選的）。 */}
+                {pairLangs && (
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    aria-pressed={syncEnabled}
+                    aria-label={syncEnabled ? "中英同步：開著" : "中英同步：關掉了"}
+                    title={
+                      syncEnabled
+                        ? "中英同步開著：改一個語言，停 3 秒會把同樣的修改套到另一個語言。按一下關掉，只改眼前這個語言"
+                        : "中英同步關掉了：只改眼前這個語言。按一下打開，之後的修改才會同步，關掉期間的不會補"
+                    }
+                    onClick={() => toggleSync(!syncEnabled)}
+                  >
+                    {syncEnabled ? <LinkIcon /> : <UnlinkIcon />}
+                  </button>
+                )}
                 {/* 兩頁一樣四顆：跟 AI 聊、重新產生、校稿、主要按鈕「定案」在最右邊（2026-10-28 Z 同意）。
                     存檔改成自動（狀態在左邊），重新檢查評分移到右欄 JD 符合度卡片上。 */}
                 <button
