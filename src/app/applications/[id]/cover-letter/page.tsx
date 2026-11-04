@@ -6,6 +6,7 @@ import { reachedStepFromStatus } from "../../../steps";
 import { ApplicationTitle } from "../ApplicationTitle";
 import { CoverLetter, type AutoGenerate } from "./CoverLetter";
 import { isValidWordLimit } from "@/lib/text/letterLength";
+import { buildContactLine, readContact } from "@/lib/resumes/contact";
 import { isCompanyResearchAvailable } from "@/lib/jobs/researchCompany";
 
 // 求職信頁（流程第 3 步）：履歷定案後才進得來，版面跟履歷頁一樣。
@@ -53,6 +54,10 @@ export default async function CoverLetterPage(props: PageProps<"/applications/[i
       ? { languages: autoGenerateLangs, wordLimits, research: researchAvailable && searchParams.research === "1" }
       : null;
   const reached = reachedStepFromStatus(application.status);
+  // 署名下面的聯絡方式那一行：字數不算它，也可以複製不含它的版本（求職網站本身有聯絡資料欄位）。
+  const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", user.id).maybeSingle();
+  const contact = readContact(profile?.data);
+  const contactLines = { zh: buildContactLine(contact, "zh"), en: buildContactLine(contact, "en") };
 
   return (
     <div className="page page--with-nav">
@@ -77,6 +82,7 @@ export default async function CoverLetterPage(props: PageProps<"/applications/[i
           initialCompleted={application.status === "completed"}
           autoGenerate={autoGenerate}
           researchAvailable={researchAvailable}
+          contactLines={contactLines}
           stepBar={
             <StepBar
               key="step-bar"

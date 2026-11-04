@@ -570,6 +570,7 @@ type CoverLetterGenerateResult = {
     cover_letter_draft: Record<string, string>;
     researchSources: string[] | null;
     companyMismatch: string | null;
+    overLimit: Record<string, { length: number; limit: number }>;
   };
 };
 
@@ -614,6 +615,7 @@ export async function generateCoverLetterAction(
         cover_letter_draft: data?.cover_letter_draft ?? {},
         researchSources: info.researchSources,
         companyMismatch: info.companyMismatch,
+        overLimit: info.overLimit,
       },
     };
   } catch (e) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { WORD_LIMIT_MAX, isValidWordLimit, letterLengthUnit, wordLimitMin } from "@/lib/text/letterLength";
+import { LETTER_LENGTH_UNIT, WORD_LIMIT_MAX, isValidWordLimit, wordLimitMin } from "@/lib/text/letterLength";
 import { InfoTip } from "@/app/InfoTip";
 
 // 生成求職信前要選的東西：語言、各語言的字數上限（選填）、要不要先上網研究這間公司。
@@ -34,8 +34,8 @@ function limitError(lang: string, raw: string | undefined): string | null {
   if (!raw?.trim()) return null;
   const n = Number(raw);
   if (isValidWordLimit(lang, n)) return null;
-  if (Number.isFinite(n) && n > WORD_LIMIT_MAX) return `最多 ${WORD_LIMIT_MAX} ${letterLengthUnit(lang)}`;
-  return `太短寫不出完整的求職信，至少 ${wordLimitMin(lang)} ${letterLengthUnit(lang)}`;
+  if (Number.isFinite(n) && n > WORD_LIMIT_MAX) return `最多 ${WORD_LIMIT_MAX} ${LETTER_LENGTH_UNIT}`;
+  return `太短寫不出完整的求職信，至少 ${wordLimitMin(lang)} ${LETTER_LENGTH_UNIT}`;
 }
 
 /** 選項有問題（沒選語言、字數上限不合理）就不能按生成。 */
@@ -80,7 +80,15 @@ export function CoverLetterOptionsFields({
 
       {value.languages.map((lang) => (
         <label key={lang} className="cover-options-limit">
-          <span>{LANG_LABEL[lang]}字數上限</span>
+          <span>
+            {LANG_LABEL[lang]}字數上限
+            <InfoTip label="字數怎麼算">
+              <ul>
+                <li>跟求職網站一樣，空格、標點、換行都算</li>
+                <li>署名下面的聯絡方式那一行不算</li>
+              </ul>
+            </InfoTip>
+          </span>
           <input
             type="number"
             inputMode="numeric"
@@ -92,7 +100,7 @@ export function CoverLetterOptionsFields({
             value={value.wordLimits[lang] ?? ""}
             onChange={(e) => onChange({ ...value, wordLimits: { ...value.wordLimits, [lang]: e.target.value } })}
           />
-          <span className="text-muted">{letterLengthUnit(lang)}以內（選填）</span>
+          <span className="text-muted">{LETTER_LENGTH_UNIT}以內（選填）</span>
           {limitError(lang, value.wordLimits[lang]) && (
             <span className="text-error cover-options-limit-error">{limitError(lang, value.wordLimits[lang])}</span>
           )}

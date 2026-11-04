@@ -9,7 +9,14 @@ import { coveredByResume } from "./atsScore";
 import { buildContactLine, pickName, readContact } from "./contact";
 import { isCompanyResearchAvailable, researchCompany } from "@/lib/jobs/researchCompany";
 import { companyMentionedInJd, searchableCompanyName } from "@/lib/jobs/companyInJd";
-import { letterLength, letterLengthUnit } from "@/lib/text/letterLength";
+import {
+  WORD_LIMIT_MAX,
+  approxWords,
+  letterLength,
+  promptLimit,
+  shortenUntilFits,
+  withoutContactLine,
+} from "@/lib/text/letterLength";
 import { toFullWidthPunctuation } from "@/lib/text/fullWidthPunctuation";
 import { toTraditional } from "@/lib/text/toTraditional";
 import { addCjkSpacing } from "@/lib/text/cjkSpacing";
@@ -107,7 +114,7 @@ function looksChinese(text: string): boolean {
 }
 
 export interface CoverLetterOptions {
-  /** 每個語言的字數上限（中文算字、英文算 words），沒有就不限。 */
+  /** 每個語言的字數上限（跟求職網站一樣算字元，空格、標點、換行都算，不算聯絡方式那一行），沒有就不限。 */
   wordLimits: Record<string, number>;
   /** 先上網研究這間公司（需要 FIRECRAWL_API_KEY）。 */
   research: boolean;
@@ -118,6 +125,8 @@ export interface CoverLetterGenerateInfo {
   researchSources: string[] | null;
   /** JD 裡沒寫填的公司名稱時，回傳實際拿去搜尋的名稱，畫面上提醒使用者確認信裡的公司是對的。 */
   companyMismatch: string | null;
+  /** 重寫 2 次還是超過字數上限的語言：實際字數跟上限，畫面上提醒使用者自己刪減。 */
+  overLimit: Record<string, { length: number; limit: number }>;
 }
 
 export async function generateCoverLetterForApplication(
@@ -192,6 +201,7 @@ export async function generateCoverLetterForApplication(
       : `===== 公司研究 =====\n查不到這間公司夠具體的公開資料。第二段（應徵動機）以這個職位的工作內容為主，不要編造公司特色。`;
 
   const draft: Record<string, string> = {};
+  const overLimit: CoverLetterGenerateInfo["overLimit"] = {};
 
   for (const lang of languages) {
     // 求職信語言不一定等於履歷語言，找不到完全對應時就用第一個有的履歷版本當內容依據
@@ -199,15 +209,17 @@ export async function generateCoverLetterForApplication(
     const { layout: _layout, ...resume } = resumeSnapshot[resumeLang]; // eslint-disable-line @typescript-eslint/no-unused-vars
     const checklistForResume = checklist[resumeLang] ?? [];
     const name = pickName(contact, lang);
+    const contactLine = buildContactLine(contact, lang);
     // 署名＝名字＋聯絡方式（結尾段要附聯絡方式，由程式放，不讓 AI 自己寫，AI 會亂編）。
-    const signature = [name, buildContactLine(contact, lang)].filter(Boolean).join("\n");
+    const signature = [name, contactLine].filter(Boolean).join("\n");
 
-    // 字數上限扣掉署名的長度，AI 寫的本文才是剩下能用的字數。
+    // 字數上限不算聯絡方式那一行，但要扣掉署名名字（加上前面的換行），AI 寫的本文才是剩下能用的字數；再打 9 折留緩衝。
     const limit = options.wordLimits[lang];
-    const bodyLimit = limit ? Math.max(50, limit - letterLength(signature, lang)) : null;
-    const unit = letterLengthUnit(lang);
+    const bodyLimit = limit ? Math.max(50, promptLimit(limit - (name ? letterLength(name) + 1 : 0))) : null;
+    // AI 自己數字元很不準，英文另外附大約幾個 words 讓它抓篇幅；實際長度由程式檢查。
+    const sizeHint = lang === "zh" ? "" : `（大約 ${approxWords(bodyLimit ?? 0)} words）`;
     const limitInstruction = bodyLimit
-      ? `字數上限：信的本文（不含 {{SIGNATURE}}）一定要在 ${bodyLimit} ${unit}以內，${lang === "zh" ? "中文算字數，不含空白" : "count words"}。篇幅縮短時保留四段結構，優先減少第三段的案例數量（留最有力的 1 到 2 個）。`
+      ? `字數上限：信的本文（不含 {{SIGNATURE}}）一定要在 ${bodyLimit} 個字元以內${sizeHint}，空格、標點、換行都算。篇幅縮短時保留四段結構，優先減少第三段的案例數量（留最有力的 1 到 2 個）。`
       : null;
 
     const userPrompt = [
@@ -253,18 +265,27 @@ export async function generateCoverLetterForApplication(
         )
       ).text.trim();
     }
-    // 超過字數上限：告訴 AI 實際寫了多少，請它縮短重寫一次。
-    const bodyLength = letterLength(text.replace(SIGNATURE_MARK, ""), lang);
-    if (bodyLimit && bodyLength > bodyLimit) {
-      text = (
-        await ask(
-          `${userPrompt}\n\n===== 上一版（太長）=====\n${text}\n\n上一版本文有 ${bodyLength} ${unit}，超過上限 ${bodyLimit} ${unit}。請在保留四段結構、事實不變的前提下縮短到 ${bodyLimit} ${unit}以內，只輸出縮短後的完整求職信。`,
-        )
-      ).text.trim();
+    // 中文會再轉繁體、全形標點、中英文中間加空格，長度要算整理後放好署名的整封信（加的空格網站也會算），跟畫面上顯示的字數一樣。
+    const polish = (t: string) => (lang === "zh" ? addCjkSpacing(toFullWidthPunctuation(toTraditional(t))) : t);
+    const finish = (t: string) => placeSignature(polish(t), signature);
+    if (limit && bodyLimit) {
+      // 超過字數上限：告訴 AI 實際寫了多少，請它縮短重寫，最多 2 次。
+      const fit = await shortenUntilFits(
+        text,
+        limit,
+        (t) => letterLength(withoutContactLine(finish(t), contactLine)),
+        async (previous, length) =>
+          (
+            await ask(
+              `${userPrompt}\n\n===== 上一版（太長）=====\n${previous}\n\n上一版整封信（含署名名字）有 ${length} 個字元，超過上限 ${limit} 個字元。請在保留四段結構、事實不變的前提下，把本文縮短到 ${bodyLimit} 個字元以內${sizeHint}，只輸出縮短後的完整求職信。`,
+            )
+          ).text.trim(),
+      );
+      text = fit.result;
+      if (fit.over) overLimit[lang] = { length: fit.length, limit };
     }
 
-    if (lang === "zh") text = addCjkSpacing(toFullWidthPunctuation(toTraditional(text)));
-    draft[lang] = placeSignature(text, signature);
+    draft[lang] = finish(text);
   }
 
   const { error: updateError } = await supabase
@@ -276,7 +297,7 @@ export async function generateCoverLetterForApplication(
 
   if (updateError) throw new Error(`儲存求職信失敗：${updateError.message}`);
 
-  return { researchSources: options.research ? (research?.sources ?? []) : null, companyMismatch };
+  return { researchSources: options.research ? (research?.sources ?? []) : null, companyMismatch, overLimit };
 }
 
 /**
@@ -455,7 +476,7 @@ ${COVER_LETTER_RULES}
 1. 沒被要求的地方原則上不要動；被要求改一段，就只改那一段。
 2. 只能用履歷、經歷資料庫、JD 裡有的事實，加上使用者在這次或之前的對話裡親口告訴你的事（例如補了一個數字、一個作品集連結），使用者親口講的可以直接寫進信。要問使用者事實或數字之前，先去經歷資料庫找，找到就直接用，在 reply 說「從經歷資料庫找到：…」，不要再問；不要說你看不到或查不到經歷資料庫。都沒有才不要編，在 reply 說明缺什麼，請使用者直接在對話裡告訴你。
 3. 信裡的 {{SIGNATURE}} 記號一字不改留在原位，系統會換成使用者的名字跟聯絡方式。
-4. 使用者要求縮短或加長時，reply 裡說明大概改成多少字。
+4. 字數跟求職網站一樣算字元，空格、標點、換行都算，聯絡方式那一行不算。你自己數字元不準，以「字數」段落給的數字為準；reply 裡不要寫字數，系統會附上程式算的實際字數。
 5. ${CHAT_REPLY_FORMAT}
 6. 「要保留的內容」列的 JD 條件，信裡目前有句子在回應它（多半是使用者按「補充」加進來的）。除非使用者這次明確要求刪改那一項，改信時這些句子都要留著：可以調整措辭、位置，但不能刪掉，也不能改到不再明確回應那項條件。
 7. ${REMEMBER_RULE}
@@ -486,7 +507,27 @@ export async function reviseCoverLetterWithChat(params: {
   if (!application) throw new Error("找不到這筆應徵紀錄");
 
   const { data: profile } = await supabase.from("profile_data").select("data").eq("user_id", userId).maybeSingle();
-  const { body, restore } = maskSignature(letter, readContact(profile?.data), language);
+  const contact = readContact(profile?.data);
+  const { body, restore } = maskSignature(letter, contact, language);
+  const contactLine = buildContactLine(contact, language);
+  const name = pickName(contact, language);
+  const polish = (t: string) => (language === "zh" ? addCjkSpacing(toFullWidthPunctuation(toTraditional(t))) : t);
+  // 字數用程式算，跟畫面上顯示的一樣（2026-11-04：以前全靠 AI 目測，叫它縮到 2000 字常常沒縮到）。
+  const measure = (t: string) => letterLength(withoutContactLine(restore(polish(t)), contactLine));
+  const currentLength = letterLength(withoutContactLine(letter, contactLine));
+  // 使用者這次講了「N 字」就當作整封信的上限；本文能用的字數扣掉署名名字，再打 9 折留緩衝。
+  const limit = parseLengthLimit(instruction);
+  const bodyLimit = limit ? Math.max(50, promptLimit(limit - (name ? letterLength(name) + 1 : 0))) : null;
+  const sizeHint = language === "zh" || !bodyLimit ? "" : `（大約 ${approxWords(bodyLimit)} words）`;
+  const lengthSection = [
+    `===== 字數 =====`,
+    `目前的信共 ${currentLength} 字（跟求職網站一樣算字元，空格、標點、換行都算；聯絡方式那一行不算，{{SIGNATURE}} 只算名字）。`,
+    limit && bodyLimit
+      ? `使用者要求整封信在 ${limit} 字以內：本文（不含 {{SIGNATURE}}）要縮到 ${bodyLimit} 個字元以內${sizeHint}。篇幅縮短時保留四段結構，優先減少第三段的案例數量。`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const snapshot: Record<string, Resume> = application.resume_snapshot ?? {};
   const resumeLang = snapshot[language] ? language : Object.keys(snapshot)[0];
@@ -524,6 +565,7 @@ export async function reviseCoverLetterWithChat(params: {
       history.length > 0
         ? `===== 之前的對話 =====\n${history.map((t) => `${t.role === "user" ? "使用者" : "AI"}：${t.text}`).join("\n")}`
         : "",
+      lengthSection,
       `===== 使用者這次的要求 =====`,
       instruction,
     ]
@@ -533,17 +575,60 @@ export async function reviseCoverLetterWithChat(params: {
     supabase,
   };
 
-  let parsed: { reply?: string; letter?: string; remember?: string[] };
-  try {
-    ({ data: parsed } = await askClaudeForJson<typeof parsed>(request));
-  } catch {
-    throw new Error("AI 回傳的內容不是有效的 JSON，請再試一次");
+  type Parsed = { reply?: string; letter?: string; remember?: string[] };
+  const askOnce = async (userPrompt: string): Promise<Parsed> => {
+    let parsed: Parsed;
+    try {
+      ({ data: parsed } = await askClaudeForJson<Parsed>({ ...request, userPrompt }));
+    } catch {
+      throw new Error("AI 回傳的內容不是有效的 JSON，請再試一次");
+    }
+    if (!(parsed.letter ?? "").trim()) throw new Error("AI 沒有回傳修改後的信，請再試一次");
+    return parsed;
+  };
+
+  const first = await askOnce(request.userPrompt);
+  const remember = [...(first.remember ?? [])];
+  let parsed = first;
+  let lengthNote = "";
+  if (limit && bodyLimit) {
+    // 超過使用者要的字數：告訴 AI 實際字數，請它再縮，最多 2 次；還是超過就在回覆裡講。
+    const fit = await shortenUntilFits(
+      first,
+      limit,
+      (p) => measure((p.letter ?? "").trim()),
+      async (previous, length) => {
+        const next = await askOnce(
+          `${request.userPrompt}\n\n===== 上一版（太長）=====\n${(previous.letter ?? "").trim()}\n\n上一版整封信有 ${length} 字，超過上限 ${limit} 字。請在事實不變的前提下，把本文縮短到 ${bodyLimit} 個字元以內${sizeHint}。`,
+        );
+        remember.push(...(next.remember ?? []));
+        return next;
+      },
+    );
+    parsed = fit.result;
+    lengthNote = fit.over
+      ? `改完共 ${fit.length} 字，還是超過上限 ${limit} 字（AI 縮了 2 次），可以再叫我縮，或自己刪一些。`
+      : `改完共 ${fit.length} 字，在 ${limit} 字以內。`;
+  } else if (LENGTH_REQUEST.test(instruction)) {
+    lengthNote = `改完共 ${measure((parsed.letter ?? "").trim())} 字（原本 ${currentLength} 字）。`;
   }
-  let revised = (parsed.letter ?? "").trim();
-  if (!revised) throw new Error("AI 沒有回傳修改後的信，請再試一次");
-  if (language === "zh") revised = addCjkSpacing(toFullWidthPunctuation(toTraditional(revised)));
-  await rememberNotes(supabase, userId, (parsed.remember ?? []).map((t) => toTraditional(t)));
-  return { reply: toTraditional(parsed.reply ?? "改好了。"), letter: restore(revised) };
+
+  const revised = polish((parsed.letter ?? "").trim());
+  await rememberNotes(supabase, userId, remember.map((t) => toTraditional(t)));
+  const reply = toTraditional(parsed.reply ?? "改好了。");
+  return { reply: lengthNote ? `${reply}\n\n${lengthNote}` : reply, letter: restore(revised) };
+}
+
+/** 使用者在「跟 AI 聊」講到篇幅（沒給數字）時，回覆也附上程式算的字數。 */
+// 「長」單獨不算，不然「成長」也會對到。
+const LENGTH_REQUEST = /縮|短|加長|太長|精簡|刪減|字數|篇幅|shorten|shorter|longer|trim/i;
+
+/** 從使用者的話找「2000 字」「2,000 字元」「2000 characters」這類字數上限；找不到或數字不合理是 null。words 不算（單位不同）。 */
+export function parseLengthLimit(instruction: string): number | null {
+  const match = instruction.match(/(\d[\d,]*)\s*(?:個)?\s*(?:字元|字|characters?|chars?)/i);
+  if (!match) return null;
+  const n = Number(match[1].replace(/,/g, ""));
+  return Number.isInteger(n) && n >= 50 && n <= WORD_LIMIT_MAX ? n : null;
 }
 
 /**

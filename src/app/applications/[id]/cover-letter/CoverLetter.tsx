@@ -35,7 +35,7 @@ import { CheckIcon, RedoIcon, UndoIcon } from "@/app/icons";
 import { useAutoSave } from "@/app/useAutoSave";
 import { SaveStatus } from "@/app/SaveStatus";
 import { CoverLetterChatPanel } from "./CoverLetterChatPanel";
-import { letterLength, letterLengthUnit } from "@/lib/text/letterLength";
+import { LETTER_LENGTH_UNIT, letterLength, withoutContactLine } from "@/lib/text/letterLength";
 import { LetterEditor } from "./LetterEditor";
 import {
   CoverLetterOptionsFields,
@@ -63,6 +63,8 @@ interface CoverLetterProps {
   autoGenerate: AutoGenerate | null;
   /** 有設 FIRECRAWL_API_KEY 才能在寫求職信前先研究公司。 */
   researchAvailable: boolean;
+  /** 署名下面的聯絡方式那一行（key 是語言）：字數不算它，「複製（不含聯絡方式）」會拿掉它。 */
+  contactLines: Record<string, string>;
   /** 流程步驟列，放在左欄最上面，跟信紙同寬。 */
   stepBar: ReactNode;
 }
@@ -86,6 +88,7 @@ export function CoverLetter({
   initialCompleted,
   autoGenerate,
   researchAvailable,
+  contactLines,
   stepBar,
 }: CoverLetterProps) {
   const router = useRouter();
@@ -201,7 +204,14 @@ export function CoverLetter({
         return;
       }
       setLetterChecklist(recheck.data.cover_letter_checklist);
-      const notes = [previous ? "已重新產生，不滿意可以按「上一步」" : "", noResearch, companyNote.replace(/^。/, "")].filter(Boolean);
+      // AI 縮了 2 次還是超過字數上限：講清楚超過多少，讓使用者自己刪或叫 AI 再縮。
+      const overNote = Object.entries(result.data.overLimit)
+        .map(
+          ([lang, { length, limit }]) =>
+            `${LANG_LABEL[lang] ?? lang}版共 ${length} 字，超過上限 ${limit} 字 ${length - limit} 字，可以自己刪減或用「跟 AI 聊」再縮`,
+        )
+        .join("。");
+      const notes = [overNote, previous ? "已重新產生，不滿意可以按「上一步」" : "", noResearch, companyNote.replace(/^。/, "")].filter(Boolean);
       if (notes.length > 0) setMessage(notes.join("。"));
     });
   }
@@ -449,9 +459,9 @@ export function CoverLetter({
     });
   }
 
-  function handleCopy(text: string) {
+  function handleCopy(text: string, key = "copy") {
     navigator.clipboard.writeText(text).then(
-      () => flash("copy"),
+      () => flash(key),
       () => setMessage("錯誤：複製失敗，請直接選取信的內容複製"),
     );
   }
@@ -460,7 +470,11 @@ export function CoverLetter({
   // 校稿：右欄換成建議清單，信紙標出被點選的那張卡要改哪裡。
   const showProofread = proofread !== null && proofread.lang === activeLang && !completed && draft !== null;
   const letterText = draft?.[activeLang] ?? "";
-  const lengthLabel = `${activeLang === "zh" ? "共 " : ""}${letterLength(letterText, activeLang)} ${letterLengthUnit(activeLang)}`;
+  // 字數不算聯絡方式那一行（2026-11-04 Z：貼到 104 這類網站會拿掉它，算進去就跟網站對不上）。
+  const contactLine = contactLines[activeLang] ?? "";
+  const letterWithoutContact = withoutContactLine(letterText, contactLine);
+  const hasContactLine = letterWithoutContact !== letterText;
+  const lengthLabel = `共 ${letterLength(letterWithoutContact)} ${LETTER_LENGTH_UNIT}${hasContactLine ? "（不含聯絡方式）" : ""}`;
   const checklistLang = resumeLanguages.includes(activeLang) ? activeLang : resumeLanguages[0];
   // 這封信比對過就用比對結果；還沒比對過，先顯示履歷本身寫到的。
   const checklistItems =
@@ -556,6 +570,18 @@ export function CoverLetter({
                   <Link href="/" className="btn btn-secondary">
                     回首頁
                   </Link>
+                  {/* 貼到求職網站用：網站本身有聯絡資料欄位，不用再附聯絡方式那一行。 */}
+                  {hasContactLine && (
+                    <button type="button" onClick={() => handleCopy(letterWithoutContact, "copy-plain")} className="btn btn-secondary">
+                      {flashed === "copy-plain" ? (
+                        <>
+                          <CheckIcon /> 已複製
+                        </>
+                      ) : (
+                        "複製（不含聯絡方式）"
+                      )}
+                    </button>
+                  )}
                   <button type="button" onClick={() => handleCopy(draft[activeLang] ?? "")} className="btn btn-primary">
                     {flashed === "copy" ? (
                       <>
