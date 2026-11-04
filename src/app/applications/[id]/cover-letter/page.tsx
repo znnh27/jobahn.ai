@@ -83,6 +83,7 @@ export default async function CoverLetterPage(props: PageProps<"/applications/[i
           autoGenerate={autoGenerate}
           researchAvailable={researchAvailable}
           contactLines={contactLines}
+          initialWordLimits={application.cover_letter_word_limits ?? {}}
           stepBar={
             <StepBar
               key="step-bar"

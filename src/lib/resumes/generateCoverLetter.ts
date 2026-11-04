@@ -127,6 +127,34 @@ export interface CoverLetterGenerateInfo {
   companyMismatch: string | null;
   /** 重寫 2 次還是超過字數上限的語言：實際字數跟上限，畫面上提醒使用者自己刪減。 */
   overLimit: Record<string, { length: number; limit: number }>;
+  /** 生成後記下來的字數上限（每個語言），畫面上顯示成「共 N／上限 字」。 */
+  wordLimits: Record<string, number>;
+}
+
+/** 記下來的字數上限（migration 0013）。沒跑 migration 讀不到時當作沒設，不影響寫信。 */
+async function readWordLimits(supabase: SupabaseClient, userId: string, applicationId: string): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from("applications")
+    .select("cover_letter_word_limits")
+    .eq("id", applicationId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) return {};
+  return (data?.cover_letter_word_limits as Record<string, number> | null) ?? {};
+}
+
+/** 存字數上限；沒跑 migration 0013 存不了就算了，只是上限不會記住。 */
+async function saveWordLimits(
+  supabase: SupabaseClient,
+  userId: string,
+  applicationId: string,
+  limits: Record<string, number>,
+): Promise<void> {
+  await supabase
+    .from("applications")
+    .update({ cover_letter_word_limits: limits })
+    .eq("id", applicationId)
+    .eq("user_id", userId);
 }
 
 export async function generateCoverLetterForApplication(
@@ -297,7 +325,15 @@ export async function generateCoverLetterForApplication(
 
   if (updateError) throw new Error(`儲存求職信失敗：${updateError.message}`);
 
-  return { researchSources: options.research ? (research?.sources ?? []) : null, companyMismatch, overLimit };
+  // 這次生成的語言照這次填的上限記下來（沒填就是不限），其他語言的上限不動。
+  const wordLimits = await readWordLimits(supabase, userId, applicationId);
+  for (const lang of languages) {
+    if (options.wordLimits[lang]) wordLimits[lang] = options.wordLimits[lang];
+    else delete wordLimits[lang];
+  }
+  await saveWordLimits(supabase, userId, applicationId, wordLimits);
+
+  return { researchSources: options.research ? (research?.sources ?? []) : null, companyMismatch, overLimit, wordLimits };
 }
 
 /**
@@ -495,7 +531,7 @@ export async function reviseCoverLetterWithChat(params: {
   letter: string;
   history: { role: "user" | "assistant"; text: string }[];
   instruction: string;
-}): Promise<{ reply: string; letter: string }> {
+}): Promise<{ reply: string; letter: string; wordLimit: number | null }> {
   const { supabase, userId, applicationId, language, letter, history, instruction } = params;
 
   const { data: application } = await supabase
@@ -515,8 +551,13 @@ export async function reviseCoverLetterWithChat(params: {
   // 字數用程式算，跟畫面上顯示的一樣（2026-11-04：以前全靠 AI 目測，叫它縮到 2000 字常常沒縮到）。
   const measure = (t: string) => letterLength(withoutContactLine(restore(polish(t)), contactLine));
   const currentLength = letterLength(withoutContactLine(letter, contactLine));
-  // 使用者這次講了「N 字」就當作整封信的上限；本文能用的字數扣掉署名名字，再打 9 折留緩衝。
-  const limit = parseLengthLimit(instruction);
+  // 字數上限：這次講了「N 字」就用它（並記下來當這封信的上限）；沒講數字但要縮短，就照記下來的上限縮。
+  // 跟篇幅無關的修改不會為了上限去縮別的段落，超過的話在回覆裡提醒。
+  const wordLimits = await readWordLimits(supabase, userId, applicationId);
+  const explicitLimit = parseLengthLimit(instruction);
+  const storedLimit = wordLimits[language] ?? null;
+  const lengthRequest = LENGTH_REQUEST.test(instruction);
+  const limit = explicitLimit ?? (lengthRequest ? storedLimit : null);
   const bodyLimit = limit ? Math.max(50, promptLimit(limit - (name ? letterLength(name) + 1 : 0))) : null;
   const sizeHint = language === "zh" || !bodyLimit ? "" : `（大約 ${approxWords(bodyLimit)} words）`;
   const lengthSection = [
@@ -524,7 +565,9 @@ export async function reviseCoverLetterWithChat(params: {
     `目前的信共 ${currentLength} 字（跟求職網站一樣算字元，空格、標點、換行都算；聯絡方式那一行不算，{{SIGNATURE}} 只算名字）。`,
     limit && bodyLimit
       ? `使用者要求整封信在 ${limit} 字以內：本文（不含 {{SIGNATURE}}）要縮到 ${bodyLimit} 個字元以內${sizeHint}。篇幅縮短時保留四段結構，優先減少第三段的案例數量。`
-      : null,
+      : storedLimit
+        ? `這封信的字數上限是 ${storedLimit} 字，修改時盡量不要超過。`
+        : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -609,14 +652,28 @@ export async function reviseCoverLetterWithChat(params: {
     lengthNote = fit.over
       ? `改完共 ${fit.length} 字，還是超過上限 ${limit} 字（AI 縮了 2 次），可以再叫我縮，或自己刪一些。`
       : `改完共 ${fit.length} 字，在 ${limit} 字以內。`;
-  } else if (LENGTH_REQUEST.test(instruction)) {
-    lengthNote = `改完共 ${measure((parsed.letter ?? "").trim())} 字（原本 ${currentLength} 字）。`;
+  } else {
+    const length = measure((parsed.letter ?? "").trim());
+    if (storedLimit && length > storedLimit) {
+      lengthNote = `改完共 ${length} 字，超過上限 ${storedLimit} 字；要縮的話跟我說「再短一點」。`;
+    } else if (lengthRequest) {
+      lengthNote = `改完共 ${length} 字（原本 ${currentLength} 字）。`;
+    }
+  }
+
+  // 這次講的數字記下來，之後「再短一點」、補充、字數顯示都照它。
+  if (explicitLimit && explicitLimit !== storedLimit) {
+    await saveWordLimits(supabase, userId, applicationId, { ...wordLimits, [language]: explicitLimit });
   }
 
   const revised = polish((parsed.letter ?? "").trim());
   await rememberNotes(supabase, userId, remember.map((t) => toTraditional(t)));
   const reply = toTraditional(parsed.reply ?? "改好了。");
-  return { reply: lengthNote ? `${reply}\n\n${lengthNote}` : reply, letter: restore(revised) };
+  return {
+    reply: lengthNote ? `${reply}\n\n${lengthNote}` : reply,
+    letter: restore(revised),
+    wordLimit: explicitLimit ?? storedLimit,
+  };
 }
 
 /** 使用者在「跟 AI 聊」講到篇幅（沒給數字）時，回覆也附上程式算的字數。 */

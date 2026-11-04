@@ -3813,6 +3813,12 @@ button.step-bar-link:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+/* 超過字數上限：字變警告色，提醒自己刪或叫 AI 縮。 */
+.letter-length--over {
+  color: var(--color-warning-text);
+  font-weight: 600;
+}
+
 /* JD 適配度：分數大一點，下面用小字說明怎麼算的。 */
 /* 下面接的 JD 條件區塊（.ats-block）自己有頂線，這裡不再畫底線，不然會變兩條。 */
 .jd-fit {

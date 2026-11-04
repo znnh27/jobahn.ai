@@ -571,6 +571,7 @@ type CoverLetterGenerateResult = {
     researchSources: string[] | null;
     companyMismatch: string | null;
     overLimit: Record<string, { length: number; limit: number }>;
+    wordLimits: Record<string, number>;
   };
 };
 
@@ -616,6 +617,7 @@ export async function generateCoverLetterAction(
         researchSources: info.researchSources,
         companyMismatch: info.companyMismatch,
         overLimit: info.overLimit,
+        wordLimits: info.wordLimits,
       },
     };
   } catch (e) {
@@ -662,7 +664,7 @@ export async function reviseCoverLetterAction(
   letter: string,
   history: ResumeChatTurn[],
   instruction: string,
-): Promise<{ error?: string; reply?: string; letter?: string }> {
+): Promise<{ error?: string; reply?: string; letter?: string; wordLimit?: number | null }> {
   if (!instruction.trim()) return { error: "請輸入想怎麼改" };
   const supabase = await createClient();
   const {

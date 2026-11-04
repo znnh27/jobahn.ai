@@ -65,6 +65,8 @@ interface CoverLetterProps {
   researchAvailable: boolean;
   /** 署名下面的聯絡方式那一行（key 是語言）：字數不算它，「複製（不含聯絡方式）」會拿掉它。 */
   contactLines: Record<string, string>;
+  /** 記下來的字數上限（key 是語言，migration 0013）：生成時填的、或跟 AI 聊講的數字。 */
+  initialWordLimits: Record<string, number>;
   /** 流程步驟列，放在左欄最上面，跟信紙同寬。 */
   stepBar: ReactNode;
 }
@@ -89,6 +91,7 @@ export function CoverLetter({
   autoGenerate,
   researchAvailable,
   contactLines,
+  initialWordLimits,
   stepBar,
 }: CoverLetterProps) {
   const router = useRouter();
@@ -106,6 +109,7 @@ export function CoverLetter({
   );
   const selectedLangs = choice.languages;
   const [draft, setDraft] = useState<Record<string, string> | null>(initialDraft);
+  const [wordLimits, setWordLimits] = useState<Record<string, number>>(initialWordLimits);
   const [letterChecklist, setLetterChecklist] = useState<ChecklistMap>(initialLetterChecklist);
   const [completed, setCompleted] = useState(initialCompleted);
   const [activeLang, setActiveLang] = useState(
@@ -183,6 +187,7 @@ export function CoverLetter({
         return;
       }
       setDraft(result.data.cover_letter_draft);
+      setWordLimits(result.data.wordLimits);
       setUndo(previous);
       // 信換了，上一封信的比對結果不適用。
       setLetterChecklist({});
@@ -231,8 +236,12 @@ export function CoverLetter({
   }
 
   // 「跟 AI 聊」改好的信換進草稿並自動存檔，改到的字標綠底，記下改之前的那一版，可以按「上一步」拿回來。
-  function applyChatRevision(lang: string, next: string) {
+  function applyChatRevision(lang: string, next: string, wordLimit: number | null) {
     if (!draft) return;
+    setWordLimits((prev) => {
+      const { [lang]: _old, ...rest } = prev; // eslint-disable-line @typescript-eslint/no-unused-vars
+      return wordLimit ? { ...rest, [lang]: wordLimit } : rest;
+    });
     const nextDraft = { ...draft, [lang]: next };
     startAction();
     // AI 改到的字也標綠底，一樣下一個動作就清掉。
@@ -414,6 +423,9 @@ export function CoverLetter({
       setLetterChecklist(nextChecklist);
       const saved = await autoSave(nextDraft, nextChecklist, result.checklist ? [lang] : []);
       const noExample = result.noExample?.length ?? 0;
+      // 補充不會為了字數去縮別的段落（補充只動要補的句子），超過上限就提醒。
+      const addedLength = letterLength(withoutContactLine(result.letter, contactLines[lang] ?? ""));
+      const limit = wordLimits[lang];
       setMessage(
         [
           added.length > 0 ? `已補進 ${added.length} 項並通過比對${saved}` : `信改了，但補的項目都沒通過比對${saved}`,
@@ -421,6 +433,7 @@ export function CoverLetter({
           failed.length > 0 &&
             `${failed.map((f) => `「${f.item}」`).join("、")}補了兩次還是沒通過比對（${failed.map((f) => f.reason).filter(Boolean).join("；")}）`,
           `新加的字標成綠底，不滿意可以按「上一步」`,
+          limit && addedLength > limit && `補完共 ${addedLength} 字，超過上限 ${limit} 字，可以用「跟 AI 聊」說「再短一點」`,
         ]
           .filter(Boolean)
           .join("，"),
@@ -474,7 +487,10 @@ export function CoverLetter({
   const contactLine = contactLines[activeLang] ?? "";
   const letterWithoutContact = withoutContactLine(letterText, contactLine);
   const hasContactLine = letterWithoutContact !== letterText;
-  const lengthLabel = `共 ${letterLength(letterWithoutContact)} ${LETTER_LENGTH_UNIT}${hasContactLine ? "（不含聯絡方式）" : ""}`;
+  const currentLength = letterLength(letterWithoutContact);
+  const currentLimit = wordLimits[activeLang];
+  const overLimit = !!currentLimit && currentLength > currentLimit;
+  const lengthLabel = `共 ${currentLength}${currentLimit ? `／${currentLimit}` : ""} ${LETTER_LENGTH_UNIT}${hasContactLine ? "（不含聯絡方式）" : ""}`;
   const checklistLang = resumeLanguages.includes(activeLang) ? activeLang : resumeLanguages[0];
   // 這封信比對過就用比對結果；還沒比對過，先顯示履歷本身寫到的。
   const checklistItems =
@@ -501,7 +517,12 @@ export function CoverLetter({
                 value={activeLang}
                 onChange={setActiveLang}
               />
-              <span className="letter-length">{lengthLabel}</span>
+              <span
+                className={`letter-length ${overLimit ? "letter-length--over" : ""}`}
+                title={currentLimit ? `字數上限 ${currentLimit} 字${overLimit ? `，超過 ${currentLength - currentLimit} 字` : ""}` : undefined}
+              >
+                {lengthLabel}
+              </span>
               {!completed && (
                 <div className="canvas-history">
                   <button
@@ -741,7 +762,7 @@ export function CoverLetter({
           applicationId={applicationId}
           language={activeLang}
           letter={letterText}
-          onApply={(next) => applyChatRevision(activeLang, next)}
+          onApply={(next, wordLimit) => applyChatRevision(activeLang, next, wordLimit)}
           onClose={() => setChatOpen(false)}
         />
       )}

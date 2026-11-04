@@ -18,7 +18,8 @@ export function CoverLetterChatPanel({
   applicationId: string;
   language: string;
   letter: string;
-  onApply: (next: string) => void;
+  /** wordLimit：這封信現在的字數上限（聊天裡講了新的數字會換掉），沒設是 null。 */
+  onApply: (next: string, wordLimit: number | null) => void;
   onClose: () => void;
 }) {
   return (
@@ -31,7 +32,7 @@ export function CoverLetterChatPanel({
       onSend={async (instruction, history) => {
         const result = await reviseCoverLetterAction(applicationId, language, letter, history, instruction);
         if (result.error || !result.letter) return { error: result.error ?? "修改失敗，請再試一次" };
-        onApply(result.letter);
+        onApply(result.letter, result.wordLimit ?? null);
         return { reply: result.reply };
       }}
     />
