@@ -6,6 +6,7 @@ import Link from "next/link";
 import { FlagRail } from "./FlagRail";
 import { TagRail } from "./TagRail";
 import { InfoTip } from "@/app/InfoTip";
+import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { activeStoredFlag } from "@/lib/experience/storedFlag";
 import { BULLET_RULE_TAGS, stripRuleRefs } from "@/lib/experience/bulletRules";
 import { ElicitationPanel } from "./ElicitationPanel";
@@ -20,6 +21,7 @@ import { SectionLabelsProvider } from "@/app/SectionLabels";
 import type { CustomSectionLabels } from "@/lib/resumes/sectionLabels";
 import {
   applyFlagRewriteAction,
+  applyFlagRewritesAction,
   markVariantsReviewedAction,
   restoreExperienceSnapshotAction,
   saveDefaultLayoutAction,
@@ -165,6 +167,8 @@ export function ExperiencePageClient({
   const [scanError, setScanError] = useState<string | null>(null);
   // 檢查完沒有任何建議時的說明（例如「全部都通過了」），有建議時不顯示。
   const [scanNote, setScanNote] = useState<string | null>(null);
+  // 「全部同意」會一次改掉很多條，先跳確認視窗。
+  const [confirmAcceptAll, setConfirmAcceptAll] = useState(false);
 
   // 檢查結果的說明顯示幾秒就收起來。
   useEffect(() => {
@@ -390,6 +394,42 @@ export function ExperiencePageClient({
     ]);
   }
 
+  // 「全部同意」：右欄看得到的建議裡，有現成改寫的全部套用；沒有改寫的留著，要用「跟 AI 聊」補資訊。
+  // 同一個區塊的合併成一次存檔（見 applyFlagRewritesAction），沒套用成功的卡片放回去。
+  function handleAcceptAll(targets: ScanFlag[]) {
+    setConfirmAcceptAll(false);
+    if (targets.length === 0) return;
+    const keys = new Set(targets.map(flagKey));
+    setFlags((prev) => prev.filter((f) => !keys.has(flagKey(f))));
+    setActiveFlagKey((k) => (k && keys.has(k) ? null : k));
+    void applyFlagRewritesAction(
+      targets.map((f) => ({
+        entryId: f.entryId,
+        achievementId: f.achievementId,
+        variantIndex: f.variantIndex,
+        originalText: f.text,
+        newText: f.rewrite!,
+      })),
+    ).then((result) => {
+      const failedKeys = new Set((result.failed ?? []).map((x) => flagKey(x.item)));
+      const back = result.error ? targets : targets.filter((f) => failedKeys.has(flagKey(f)));
+      if (back.length === 0) return;
+      setScanError(result.error ?? `有 ${back.length} 條沒套用：${result.failed?.[0]?.reason ?? "請再試一次"}`);
+      setFlags((prev) => [...prev, ...back]);
+    });
+  }
+
+  // 「全部忽略」：跟每張按 ✕ 一樣，全部記成「檢查過」，內容沒再改的話之後檢查不會再標。
+  function handleDismissAll(targets: ScanFlag[]) {
+    if (targets.length === 0) return;
+    const keys = new Set(targets.map(flagKey));
+    setFlags((prev) => prev.filter((f) => !keys.has(flagKey(f))));
+    setActiveFlagKey((k) => (k && keys.has(k) ? null : k));
+    void markVariantsReviewedAction(
+      targets.map((f) => ({ entryId: f.entryId, achievementId: f.achievementId, variantIndex: f.variantIndex, text: f.text })),
+    );
+  }
+
   // 「這類不用再提醒」／「恢復提醒」：畫面先改，背景存到帳號。恢復的那一類要重新檢查才會再出現。
   async function setRuleMuted(ruleId: string, muted: boolean) {
     const next = muted ? [...new Set([...mutedRules, ruleId])] : mutedRules.filter((r) => r !== ruleId);
@@ -432,6 +472,7 @@ export function ExperiencePageClient({
   // 右欄只顯示目前語言的建議。
   const langEntryIds = new Set(entries.filter((e) => e.language === activeLanguage).map((e) => e.id));
   const visibleFlags = flags.filter((f) => langEntryIds.has(f.entryId));
+  const acceptableFlags = visibleFlags.filter((f) => f.rewrite);
 
   return (
     <SectionLabelsProvider initial={initialSectionLabels}>
@@ -536,15 +577,32 @@ export function ExperiencePageClient({
         <div className="canvas-sidebar canvas-sidebar--rail">
           {visibleFlags.length > 0 ? (
             <>
-              <p className="flag-rail-summary">
-                還有 {visibleFlags.length} 條建議
-                <InfoTip label="建議的說明">
-                  <ul>
-                    <li>每條按 ✓ 套用改寫、按 ✕ 忽略，或點「跟 AI 聊」補資訊</li>
-                    <li>全部處理完，右欄會換回每條寫法的角度標籤</li>
-                  </ul>
-                </InfoTip>
-              </p>
+              <div className="flag-rail-head">
+                <p className="flag-rail-summary">
+                  還有 {visibleFlags.length} 條建議
+                  <InfoTip label="建議的說明">
+                    <ul>
+                      <li>每條按 ✓ 套用改寫、按 ✕ 忽略，或點「跟 AI 聊」補資訊</li>
+                      <li>「全部同意」只套用有現成改寫的，沒有改寫的會留著</li>
+                      <li>全部處理完，右欄會換回每條寫法的角度標籤</li>
+                    </ul>
+                  </InfoTip>
+                </p>
+                <div className="flag-rail-bulk">
+                  <button type="button" className="btn btn-secondary btn--sm" onClick={() => handleDismissAll(visibleFlags)}>
+                    全部忽略
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn--sm"
+                    disabled={acceptableFlags.length === 0}
+                    title={acceptableFlags.length === 0 ? "剩下的建議沒有現成改寫，點卡片上的「跟 AI 聊」補資訊" : undefined}
+                    onClick={() => setConfirmAcceptAll(true)}
+                  >
+                    全部同意
+                  </button>
+                </div>
+              </div>
               <FlagRail
                 flags={visibleFlags}
                 entries={entries}
@@ -561,6 +619,21 @@ export function ExperiencePageClient({
           )}
         </div>
       </div>
+
+      {confirmAcceptAll && (
+        <ConfirmDialog
+          title="全部同意"
+          message={`要把 ${acceptableFlags.length} 條換成建議的改寫嗎？${
+            visibleFlags.length > acceptableFlags.length
+              ? `另外 ${visibleFlags.length - acceptableFlags.length} 條沒有現成改寫，會留著。`
+              : ""
+          }套用後一樣會同步到另一個語言。`}
+          confirmLabel="全部套用"
+          tone="primary"
+          onConfirm={() => handleAcceptAll(acceptableFlags)}
+          onCancel={() => setConfirmAcceptAll(false)}
+        />
+      )}
 
       {panel && (
         <ElicitationPanel

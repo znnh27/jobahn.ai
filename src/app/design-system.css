@@ -4153,6 +4153,19 @@ button.step-bar-link:focus-visible {
   gap: var(--space-2);
 }
 
+.flag-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.flag-rail-bulk {
+  display: flex;
+  gap: var(--space-2);
+}
+
 .flag-rail-summary {
   margin: 0;
   font-size: var(--font-sm);

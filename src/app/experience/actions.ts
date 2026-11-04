@@ -822,64 +822,111 @@ export async function markVariantsReviewedAction(items: ReviewedVariant[]): Prom
   return {};
 }
 
-/** 註解卡片按 ✓：用 AI 檢查時給的改寫版本取代原本那條，並同步到另一個語言。 */
-export async function applyFlagRewriteAction(params: {
+export interface FlagRewrite {
   entryId: string;
   achievementId: string;
   variantIndex: number;
   originalText: string;
   newText: string;
-}): Promise<{ error?: string }> {
+}
+
+/** 註解卡片按 ✓：用 AI 檢查時給的改寫版本取代原本那條，並同步到另一個語言。 */
+export async function applyFlagRewriteAction(params: FlagRewrite): Promise<{ error?: string }> {
+  const result = await applyFlagRewritesAction([params]);
+  return { error: result.error ?? result.failed?.[0]?.reason };
+}
+
+/**
+ * 「全部同意」：一次套用多條改寫。同一個經歷區塊的合併成一次存檔，
+ * 不然每條各自「讀出整個區塊、改一條、存回去」同時跑，後存的會蓋掉先存的。
+ * 雙語同步也在背景一條一條排隊跑，避免同時改到另一個語言的同一個區塊。
+ * failed 是沒套用的（例如檢查之後被改過），其他照樣套用。
+ */
+export async function applyFlagRewritesAction(
+  items: FlagRewrite[],
+): Promise<{ error?: string; failed?: { item: FlagRewrite; reason: string }[] }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "請先登入" };
+  if (items.length === 0) return { failed: [] };
 
-  const { data: row } = await supabase
-    .from("experience_entries")
-    .select("org_name, location, language, entry_type, role_variants, period_variants, achievements")
-    .eq("id", params.entryId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!row) return { error: "找不到這個經歷區塊" };
+  const byEntry = new Map<string, FlagRewrite[]>();
+  for (const item of items) byEntry.set(item.entryId, [...(byEntry.get(item.entryId) ?? []), item]);
 
-  const achievements = Array.isArray(row.achievements) ? row.achievements : [];
-  const ach = achievements.find((a: { id: string }) => a.id === params.achievementId);
-  const v: StoredVariant | undefined = ach?.variants?.[params.variantIndex];
-  if (!v) return { error: "找不到這一條" };
-  if (v.text !== params.originalText) return { error: "這條在檢查之後被改過了，請重新檢查一次" };
+  const failed: { item: FlagRewrite; reason: string }[] = [];
+  type SyncParams = Parameters<typeof import("@/lib/experience/syncLanguage").syncToOtherLanguage>[0];
+  const syncs: Omit<SyncParams, "supabase" | "userId" | "sourceLabel">[] = [];
 
-  v.text = params.newText;
-  v.reviewedText = params.newText;
+  for (const [entryId, list] of byEntry) {
+    const { data: row } = await supabase
+      .from("experience_entries")
+      .select("org_name, location, language, entry_type, role_variants, period_variants, achievements")
+      .eq("id", entryId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!row) {
+      failed.push(...list.map((item) => ({ item, reason: "找不到這個經歷區塊" })));
+      continue;
+    }
 
-  const { error } = await supabase
-    .from("experience_entries")
-    .update({ achievements, updated_at: new Date().toISOString() })
-    .eq("id", params.entryId)
-    .eq("user_id", user.id);
-  if (error) return { error: error.message };
+    const achievements = Array.isArray(row.achievements) ? row.achievements : [];
+    const applied: FlagRewrite[] = [];
+    for (const item of list) {
+      const ach = achievements.find((a: { id: string }) => a.id === item.achievementId);
+      const v: StoredVariant | undefined = ach?.variants?.[item.variantIndex];
+      if (!v) {
+        failed.push({ item, reason: "找不到這一條" });
+        continue;
+      }
+      if (v.text !== item.originalText) {
+        failed.push({ item, reason: "這條在檢查之後被改過了，請重新檢查一次" });
+        continue;
+      }
+      v.text = item.newText;
+      v.reviewedText = item.newText;
+      applied.push(item);
+    }
+    if (applied.length === 0) continue;
+
+    const { error } = await supabase
+      .from("experience_entries")
+      .update({ achievements, updated_at: new Date().toISOString() })
+      .eq("id", entryId)
+      .eq("user_id", user.id);
+    if (error) {
+      failed.push(...applied.map((item) => ({ item, reason: error.message })));
+      continue;
+    }
+    syncs.push(
+      ...applied.map((item) => ({
+        sourceLanguage: row.language,
+        orgName: row.org_name,
+        role: row.role_variants?.[0]?.role ?? "",
+        location: row.location ?? null,
+        period: row.period_variants?.[0]?.period ?? "",
+        entryType: row.entry_type,
+        text: item.newText,
+      })),
+    );
+  }
 
   // 雙語同步要問 AI（幾十秒），放到回應之後跑（2026-11-01 Z 回報：按 ✓ 後過很久畫面才改）。
-  const { after } = await import("next/server");
-  after(async () => {
-    const { syncToOtherLanguage } = await import("@/lib/experience/syncLanguage");
-    await syncToOtherLanguage({
-      supabase,
-      userId: user.id,
-      sourceLanguage: row.language,
-      orgName: row.org_name,
-      role: row.role_variants?.[0]?.role ?? "",
-      location: row.location ?? null,
-      period: row.period_variants?.[0]?.period ?? "",
-      entryType: row.entry_type,
-      text: params.newText,
-      sourceLabel: "檢查建議（雙語同步）",
-    }).catch(() => null);
-  });
+  if (syncs.length > 0) {
+    const { after } = await import("next/server");
+    after(async () => {
+      const { syncToOtherLanguage } = await import("@/lib/experience/syncLanguage");
+      for (const sync of syncs) {
+        await syncToOtherLanguage({ supabase, userId: user.id, ...sync, sourceLabel: "檢查建議（雙語同步）" }).catch(
+          () => null,
+        );
+      }
+    });
+  }
 
   revalidatePath("/experience");
-  return {};
+  return { failed };
 }
 
 /** JD 缺口挖掘用：從應徵履歷草稿裡的公司名稱，找出對應的經歷資料庫 entry id，
