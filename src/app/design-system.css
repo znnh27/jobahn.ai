@@ -488,6 +488,22 @@
   text-decoration: underline;
 }
 
+/* 履歷頁工具列的「中英同步」開關：跟存檔狀態一樣是小字灰色，不搶主要按鈕。 */
+.sync-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-sm);
+  color: var(--chrome-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sync-toggle input {
+  accent-color: var(--chrome-accent);
+  cursor: pointer;
+}
+
 .btn-toggle {
   border-radius: var(--radius-md);
   padding: var(--space-2) var(--space-3);

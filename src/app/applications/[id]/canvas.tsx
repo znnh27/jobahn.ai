@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -104,6 +113,36 @@ const UNDO_LIMIT = 30;
 const TRIM_MAX_ROUNDS = 3;
 // 一個語言停止修改幾毫秒後，同步到另一個語言。
 const SYNC_DELAY_MS = 3000;
+
+// 「中英同步」開關記在這台瀏覽器（每份應徵各一個 key）。localStorage 不能用時記在記憶體，重新整理就回到預設開著。
+// 用 useSyncExternalStore 讀：伺服器端一律當作開著，瀏覽器接手後才換成記下來的值，不會跟伺服器畫的對不上。
+const SYNC_PREF_EVENT = "jobahn:resume-sync-pref";
+const memorySyncOff = new Map<string, boolean>();
+function readSyncOff(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === "1";
+  } catch {
+    return memorySyncOff.get(key) ?? false;
+  }
+}
+function writeSyncOff(key: string, off: boolean) {
+  memorySyncOff.set(key, off);
+  try {
+    if (off) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
+  } catch {
+    // 存不了就只在這次開著的頁面有效。
+  }
+  window.dispatchEvent(new Event(SYNC_PREF_EVENT));
+}
+function subscribeSyncPref(onChange: () => void) {
+  window.addEventListener(SYNC_PREF_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(SYNC_PREF_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
 
 /** 只比內容，不比字級、間距（排版兩個語言各自調，不用同步）。 */
 function sameContent(a?: Resume, b?: Resume): boolean {
@@ -437,6 +476,35 @@ export function Canvas({
   // AI 判斷另一個語言不用改時，訊息列顯示的那句（附「還是同步過去」）。下一次同步開始時拿掉，那次會一起同步。
   const syncNote = useRef<string | null>(null);
 
+  // 「中英同步」開關（2026-11-04 Z：中文版滿意、英文版太長，只想縮英文）。關掉時各改各的；
+  // 再打開不回頭補關掉期間的修改，從那一刻的內容當基準。每份應徵各自記在這台瀏覽器。
+  const syncPrefKey = `jobahn:resume-sync-off:${applicationId}`;
+  const syncEnabled = !useSyncExternalStore(
+    subscribeSyncPref,
+    () => readSyncOff(syncPrefKey),
+    () => false,
+  );
+  const syncEnabledRef = useRef(syncEnabled);
+  useLayoutEffect(() => {
+    syncEnabledRef.current = syncEnabled;
+  }, [syncEnabled]);
+
+  function toggleSync(on: boolean) {
+    syncEnabledRef.current = on;
+    writeSyncOff(syncPrefKey, !on);
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = null;
+    pendingSyncBase.current = null;
+    setSyncStatus(null);
+    if (syncNote.current) {
+      const note = syncNote.current;
+      syncNote.current = null;
+      setMessage((m) => (m === note ? null : m));
+    }
+    // 打開：現在兩個語言的內容就是新的基準，關掉期間各自改的不會被同步過去。
+    if (on) syncBase.current = draftRef.current;
+  }
+
   function scheduleSync() {
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
@@ -466,6 +534,7 @@ export function Canvas({
   }
 
   async function runSync(lang: string, force = false) {
+    if (!syncEnabledRef.current) return;
     const other = pairLangs?.find((l) => l !== lang);
     const base = syncBase.current;
     const current = draftRef.current;
@@ -495,7 +564,8 @@ export function Canvas({
     }));
     const latest = draftRef.current;
     const baseNow = syncBase.current;
-    if (finalizedRef.current || !latest?.[other] || !baseNow) {
+    // 等 AI 的時候把同步關掉了：這次的結果不用。
+    if (finalizedRef.current || !syncEnabledRef.current || !latest?.[other] || !baseNow) {
       setSyncStatus(null);
       return;
     }
@@ -535,7 +605,7 @@ export function Canvas({
   useEffect(() => {
     const prev = prevDraft.current;
     prevDraft.current = draft;
-    if (!pairLangs || !draft || finalized) return;
+    if (!pairLangs || !draft || finalized || !syncEnabledRef.current) return;
     const changed = pairLangs.filter((l) => !sameContent(prev?.[l], draft[l]));
     if (changed.length === 0) return;
     const base = pendingSyncBase.current;
@@ -1008,7 +1078,26 @@ export function Canvas({
               </div>
             )}
             {!finalized && <SaveStatus state={autosave.state} error={autosave.error} onRetry={() => void autosave.retry()} />}
-            {!finalized && syncStatus && (
+            {!finalized && pairLangs && (
+              <label className="sync-toggle">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={syncEnabled}
+                  onChange={(e) => toggleSync(e.target.checked)}
+                />
+                中英同步
+                <InfoTip label="中英同步的說明">
+                  <ul>
+                    <li>開著：改一個語言，停 3 秒會把同樣的修改套到另一個語言</li>
+                    <li>關掉：只改眼前這個語言，例如中文版滿意、只想縮英文版</li>
+                    <li>再打開時，關掉期間的修改不會補同步，之後的修改才會</li>
+                  </ul>
+                </InfoTip>
+              </label>
+            )}
+            {!finalized && pairLangs && !syncEnabled && <span className="save-status">中英文內容可能不一致</span>}
+            {!finalized && syncEnabled && syncStatus && (
               <span className="save-status">
                 {syncStatus.state === "syncing"
                   ? `正在同步到${LANG_LABEL[syncStatus.lang] ?? syncStatus.lang}版…`
