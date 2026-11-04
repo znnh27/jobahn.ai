@@ -29,10 +29,14 @@ export function ResumeChatPanel({
   onApplyRewrites,
   onCheckingChange,
   onClose,
+  title,
+  hidden,
 }: {
   applicationId: string;
   language: string;
   resume: Resume;
+  title?: string;
+  hidden?: boolean;
   /** base：送出時的內容，AI 是照它改的；畫面要拿它跟使用者等待期間的修改合併。 */
   onApply: (base: Resume, next: Resume) => void;
   /** 套用背景檢查的改寫，回傳實際換掉幾條（畫面上那條已經不是原文就不換）。 */
@@ -50,6 +54,8 @@ export function ResumeChatPanel({
   return (
     <AiChatPanel
       ariaLabel="跟 AI 聊，修改履歷"
+      title={title}
+      hidden={hidden}
       intro="想怎麼改這份履歷？我只會用經歷資料庫裡的事實，改完可以按「上一步」退回。"
       examples={EXAMPLES}
       placeholder="例如：Northwind 那段多加兩條跟數據分析有關的"

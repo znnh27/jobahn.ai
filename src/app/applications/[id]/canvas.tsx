@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -204,22 +204,29 @@ export function Canvas({
   const [draft, setDraft] = useState<ResumeMap | null>(initialDraft);
   /** 非同步回來的結果（例如聊天的背景檢查）要讀最新的草稿，不能用當時閉包裡的 draft。 */
   const draftRef = useRef(draft);
-  draftRef.current = draft;
   /** 「跟 AI 聊」改完的寫法檢查還在背景跑：定案、校稿、重新產生要等它跑完（不然會定案到還沒檢查的內容）。 */
-  const [chatChecking, setChatChecking] = useState(false);
+  // 每個語言一段對話，各自有背景檢查：任何一個還在跑就算在檢查。
+  const [checkingLangs, setCheckingLangs] = useState<Record<string, boolean>>({});
+  const chatChecking = Object.values(checkingLangs).some(Boolean);
   const chatCheckingRef = useRef(chatChecking);
-  chatCheckingRef.current = chatChecking;
   const chatCheckingHint = chatChecking ? "正在檢查跟 AI 聊改過的條目，幾秒後就能按" : undefined;
   const [checklist, setChecklist] = useState<ChecklistMap>(initialChecklist);
   const [atsScore, setAtsScore] = useState<number | null>(initialAtsScore);
   const [gaps, setGaps] = useState<GapsMap>(initialGaps);
   const [finalized, setFinalized] = useState(initialFinalized);
   const finalizedRef = useRef(finalized);
-  finalizedRef.current = finalized;
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [activeLang, setActiveLang] = useState(languages[0]);
   const activeLangRef = useRef(activeLang);
-  activeLangRef.current = activeLang;
+  // 這幾個 ref 給非同步回來的結果讀最新的值。畫面更新完馬上同步（不能在 render 裡直接改 ref，React 會報錯）。
+  useLayoutEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  useLayoutEffect(() => {
+    chatCheckingRef.current = chatChecking;
+    finalizedRef.current = finalized;
+    activeLangRef.current = activeLang;
+  }, [chatChecking, finalized, activeLang]);
   const [message, setMessage] = useState<string | null>(null);
   // 訊息後面的動作按鈕，只在顯示的還是那則訊息時出現：其他動作換了訊息，按鈕就跟著消失。
   const [messageAction, setMessageAction] = useState<{ message: string; label: string; onClick: () => void } | null>(null);
@@ -591,15 +598,6 @@ export function Canvas({
   // 第一次生成履歷前，沒有姓名跟 Email 就先跳視窗請使用者填，填完才開始生成。
   // 從新增應徵過來（?generate=1）：一進來就開始生成，把網址上的參數拿掉，重新整理才不會再生成一次。
   // 還沒填履歷抬頭的話，requestGenerate 會先跳出抬頭表單，填完就接著生成。
-  const autoStarted = useRef(false);
-  useEffect(() => {
-    if (autoStarted.current || !autoGenerate) return;
-    autoStarted.current = true;
-    // 用瀏覽器原生的 replaceState：router.replace 碰上馬上開始的生成請求會沒生效，網址留著參數，重新整理就會再生成一次。
-    window.history.replaceState(null, "", pathname);
-    requestGenerate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function requestGenerate() {
     if (!hasRequiredContact(contact)) {
@@ -629,6 +627,16 @@ export function Canvas({
       if (previous) setMessage("已重新產生；想回到上一版可以按「上一步」");
     });
   }
+
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || !autoGenerate) return;
+    autoStarted.current = true;
+    // 用瀏覽器原生的 replaceState：router.replace 碰上馬上開始的生成請求會沒生效，網址留著參數，重新整理就會再生成一次。
+    window.history.replaceState(null, "", pathname);
+    requestGenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 畫布上正在打字（還沒失焦）時是 true，見 ResumePageCanvas 的 LiveContext。
   const liveEdit = useRef(false);
@@ -687,6 +695,8 @@ export function Canvas({
     const { resume, conflicts } = mergeWithLatest(lang, base, next);
     remember(latest);
     replaceDraft({ ...latest, [lang]: resume });
+    // 這個語言的校稿建議是照改之前的內容給的，改完就不準了。
+    setProofread((p) => (p && p.lang === lang ? null : p));
     setMessage(`AI 改好了；不滿意可以按「上一步」${keptNote(conflicts)}`);
   }
 
@@ -722,7 +732,7 @@ export function Canvas({
     if (!draft) return;
     const lang = activeLang;
     setMessage(null);
-    setChatOpen(false);
+    // 「跟 AI 聊」不跟著關，只有使用者按 × 才關（2026-11-04 Z）。
     setProofread(null);
     void run("proofread", async () => {
       const result = await proofreadResumeAction(applicationId, lang, draft[lang]);
@@ -1263,18 +1273,27 @@ export function Canvas({
         )}
       </div>
 
-      {chatOpen && !finalized && activeResume && (
-        <ResumeChatPanel
-          key={activeLang}
-          applicationId={applicationId}
-          language={activeLang}
-          resume={activeResume}
-          onApply={(base, next) => applyChatRevision(activeLang, base, next)}
-          onApplyRewrites={(rewrites) => applyChatRewrites(activeLang, rewrites)}
-          onCheckingChange={setChatChecking}
-          onClose={() => setChatOpen(false)}
-        />
-      )}
+      {/* 一個語言一段對話：每個語言各掛一個面板，切換語言只是藏起來，對話不會不見（2026-11-04 Z）。 */}
+      {chatOpen &&
+        !finalized &&
+        languages.map((lang) => {
+          const resume = draft?.[lang];
+          if (!resume) return null;
+          return (
+            <ResumeChatPanel
+              key={lang}
+              applicationId={applicationId}
+              language={lang}
+              resume={resume}
+              title={languages.length > 1 ? `跟 AI 聊（${LANG_LABEL[lang] ?? lang}版）` : undefined}
+              hidden={lang !== activeLang}
+              onApply={(base, next) => applyChatRevision(lang, base, next)}
+              onApplyRewrites={(rewrites) => applyChatRewrites(lang, rewrites)}
+              onCheckingChange={(checking) => setCheckingLangs((prev) => ({ ...prev, [lang]: checking }))}
+              onClose={() => setChatOpen(false)}
+            />
+          );
+        })}
 
       {confirmRegenerate && (
         <ConfirmDialog

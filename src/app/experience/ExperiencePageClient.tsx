@@ -42,7 +42,8 @@ const SCAN_BATCH_SIZE = 20;
 const SCAN_BATCH_EXPECTED_MS = 12000;
 
 // 新增經歷改到 /experience/add（跟首次設定同一套兩張卡片），這頁的 AI 面板只剩潤飾用。
-type PanelState = { mode: "refine"; seed: RefineSeed } | null;
+// language：面板是在哪個語言打開的。切換語言時面板留著（只有按 × 才關，2026-11-04 Z），也繼續用那個語言的經歷。
+type PanelState = { mode: "refine"; seed: RefineSeed; language: "zh" | "en" } | null;
 
 type LayoutMap = Partial<Record<"zh" | "en", ResumeLayoutSettings>>;
 
@@ -446,7 +447,7 @@ export function ExperiencePageClient({
       variantIndex: seed.variantIndex,
       color: "editing",
     });
-    setPanel({ mode: "refine", seed });
+    setPanel({ mode: "refine", seed, language: activeLanguage });
   }
 
   function handleCommitted(info: { entryId: string; achievementId: string; variantIndex: number }) {
@@ -637,9 +638,9 @@ export function ExperiencePageClient({
 
       {panel && (
         <ElicitationPanel
-          entries={entries.filter((e) => e.language === activeLanguage)}
+          entries={entries.filter((e) => e.language === panel.language)}
           refineSeed={panel.mode === "refine" ? panel.seed : undefined}
-          defaultLanguage={activeLanguage}
+          defaultLanguage={panel.language}
           onClose={() => setPanel(null)}
           onCommitted={handleCommitted}
         />

@@ -14,10 +14,14 @@ export function CoverLetterChatPanel({
   letter,
   onApply,
   onClose,
+  title,
+  hidden,
 }: {
   applicationId: string;
   language: string;
   letter: string;
+  title?: string;
+  hidden?: boolean;
   /** wordLimit：這封信現在的字數上限（聊天裡講了新的數字會換掉），沒設是 null。 */
   onApply: (next: string, wordLimit: number | null) => void;
   onClose: () => void;
@@ -25,6 +29,8 @@ export function CoverLetterChatPanel({
   return (
     <AiChatPanel
       ariaLabel="跟 AI 聊，修改求職信"
+      title={title}
+      hidden={hidden}
       intro="想怎麼改這封求職信？我只會用履歷裡的事實，改完可以按「復原上一版」退回。"
       examples={EXAMPLES}
       placeholder="例如：開頭那段改得自然一點"

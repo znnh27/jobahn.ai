@@ -3,7 +3,7 @@
 import { LangSwitch } from "@/app/LangSwitch";
 import { ConfirmDialog } from "@/app/ConfirmDialog";
 import { ProgressBar, Spinner, useEstimatedProgress } from "@/app/ProgressBar";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -110,7 +110,16 @@ export function CoverLetter({
   const selectedLangs = choice.languages;
   const [draft, setDraft] = useState<Record<string, string> | null>(initialDraft);
   const [wordLimits, setWordLimits] = useState<Record<string, number>>(initialWordLimits);
+  /** AI 回覆晚到時要讀最新的草稿：等的時候可能切到另一個語言改了信，不能用送出當下閉包裡的 draft 蓋掉。 */
+  const draftRef = useRef(draft);
+  useLayoutEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
   const [letterChecklist, setLetterChecklist] = useState<ChecklistMap>(initialLetterChecklist);
+  const checklistRef = useRef(letterChecklist);
+  useLayoutEffect(() => {
+    checklistRef.current = letterChecklist;
+  }, [letterChecklist]);
   const [completed, setCompleted] = useState(initialCompleted);
   const [activeLang, setActiveLang] = useState(
     initialDraft ? (Object.keys(initialDraft)[0] ?? selectedLangs[0]) : selectedLangs[0],
@@ -237,6 +246,8 @@ export function CoverLetter({
 
   // 「跟 AI 聊」改好的信換進草稿並自動存檔，改到的字標綠底，記下改之前的那一版，可以按「上一步」拿回來。
   function applyChatRevision(lang: string, next: string, wordLimit: number | null) {
+    const draft = draftRef.current;
+    const letterChecklist = checklistRef.current;
     if (!draft) return;
     setWordLimits((prev) => {
       const { [lang]: _old, ...rest } = prev; // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -248,6 +259,8 @@ export function CoverLetter({
     setAddedBase({ [lang]: draft[lang] ?? "" });
     setUndo({ draft, checklist: letterChecklist });
     setDraft(nextDraft);
+    // 這個語言的校稿建議是照改之前的信給的，改完就不準了。
+    setProofread((p) => (p && p.lang === lang ? null : p));
     void run("save", async () => {
       const saved = await autoSave(nextDraft);
       setMessage(`AI 改好了${saved}；不滿意可以按「上一步」`);
@@ -295,7 +308,7 @@ export function CoverLetter({
     if (!draft) return;
     const lang = activeLang;
     startAction();
-    setChatOpen(false);
+    // 「跟 AI 聊」不跟著關，只有使用者按 × 才關（2026-11-04 Z）。
     setProofread(null);
     void run("proofread", async () => {
       const result = await proofreadLetterAction(applicationId, lang, draft[lang] ?? "");
@@ -480,6 +493,7 @@ export function CoverLetter({
   }
 
   const draftLangs = draft ? selectedLangs.filter((l) => l in draft) : [];
+  const chatLangs = draft ? (draftLangs.length > 0 ? draftLangs : Object.keys(draft)) : [];
   // 校稿：右欄換成建議清單，信紙標出被點選的那張卡要改哪裡。
   const showProofread = proofread !== null && proofread.lang === activeLang && !completed && draft !== null;
   const letterText = draft?.[activeLang] ?? "";
@@ -756,16 +770,22 @@ export function CoverLetter({
         </ConfirmDialog>
       )}
 
-      {chatOpen && !completed && draft && (
-        <CoverLetterChatPanel
-          key={activeLang}
-          applicationId={applicationId}
-          language={activeLang}
-          letter={letterText}
-          onApply={(next, wordLimit) => applyChatRevision(activeLang, next, wordLimit)}
-          onClose={() => setChatOpen(false)}
-        />
-      )}
+      {/* 一個語言一段對話：每個語言各掛一個面板，切換語言只是藏起來，對話不會不見（2026-11-04 Z）。 */}
+      {chatOpen &&
+        !completed &&
+        draft &&
+        chatLangs.map((lang) => (
+          <CoverLetterChatPanel
+            key={lang}
+            applicationId={applicationId}
+            language={lang}
+            letter={draft[lang] ?? ""}
+            title={chatLangs.length > 1 ? `跟 AI 聊（${LANG_LABEL[lang] ?? lang}版）` : undefined}
+            hidden={lang !== activeLang}
+            onApply={(next, wordLimit) => applyChatRevision(lang, next, wordLimit)}
+            onClose={() => setChatOpen(false)}
+          />
+        ))}
     </div>
   );
 }

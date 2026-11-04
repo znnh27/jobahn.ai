@@ -6,6 +6,8 @@ import { TypingIndicator } from "@/app/experience/TypingIndicator";
 
 // 「跟 AI 聊」面板（履歷頁、求職信頁共用）：浮在右下角、不擋住內容，邊聊邊看左邊的變化。
 // 這裡只管對話畫面；實際怎麼改、改完換到哪裡，由 onSend 決定（見 ResumeChatPanel、CoverLetterChatPanel）。
+// 一個語言一段對話（2026-11-04 Z）：頁面上每個語言各掛一個面板，切換語言只是把其他語言的藏起來（hidden），
+// 對話跟還在等的回覆都留著，只有使用者按 × 才關。
 // AI 的回覆照 CHAT_REPLY_FORMAT（lib/ai/chatReply.ts）分段：「- 」開頭顯示成圓點條列、空一行是分段（2026-10-27 Z 要求，整段擠在一起很難讀）。
 
 export interface ChatTurn {
@@ -15,6 +17,8 @@ export interface ChatTurn {
 
 export function AiChatPanel({
   ariaLabel,
+  title = "跟 AI 聊",
+  hidden = false,
   intro,
   examples,
   placeholder,
@@ -22,6 +26,10 @@ export function AiChatPanel({
   onClose,
 }: {
   ariaLabel: string;
+  /** 標題，有兩個語言時帶上是哪個語言的版本。 */
+  title?: string;
+  /** 切到別的語言時藏起來（不卸載，對話才不會不見）。 */
+  hidden?: boolean;
   /** 面板一打開的第一句話。 */
   intro: string;
   /** 點了直接送出的範例要求。 */
@@ -76,9 +84,9 @@ export function AiChatPanel({
   }
 
   return (
-    <div className="resume-chat" role="dialog" aria-label={ariaLabel}>
+    <div className={`resume-chat ${hidden ? "resume-chat--hidden" : ""}`} role="dialog" aria-label={ariaLabel} aria-hidden={hidden}>
       <div className="resume-chat-header">
-        <h2 className="heading-card">跟 AI 聊</h2>
+        <h2 className="heading-card">{title}</h2>
         <button type="button" className="elicitation-close" onClick={onClose} aria-label="關閉">
           ×
         </button>

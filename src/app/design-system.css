@@ -2169,6 +2169,11 @@
 }
 
 /* 履歷頁「跟 AI 聊」：浮在右下角，不擋住履歷。 */
+/* 切到別的語言時藏起來，對話留著（見 AiChatPanel）。 */
+.resume-chat.resume-chat--hidden {
+  display: none;
+}
+
 .resume-chat {
   position: fixed;
   right: var(--space-6);
